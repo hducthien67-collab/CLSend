@@ -1,0 +1,8 @@
+{
+  "name": "CLSend",
+  "description": "CLSend - Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị phong cách tối giản, an toàn và bảo mật cao.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

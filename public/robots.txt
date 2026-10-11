@@ -1,0 +1,9 @@
+# Robots.txt for CloudSend
+User-agent: *
+Allow: /
+Disallow: /?page=datastore
+Disallow: /?page=dev-cloud
+Disallow: /datastore
+Disallow: /dev-cloud
+
+Sitemap: https://cloudsend-bw7z.onrender.com/sitemap.xml

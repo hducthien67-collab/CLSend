@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Accounts for custom email and password authentication
+    match /accounts/{docId} {
+      allow read, write: if true;
+    }
+
+    // User profiles
+    match /users/{docId} {
+      allow read, write: if true;
+    }
+
+    // Presence table for online LocalSend peer discovery over internet
+    match /presence/{docId} {
+      allow read, write: if true;
+    }
+
+    // Chat Rooms and subcollections (messages, audit_messages)
+    match /rooms/{roomId} {
+      allow read, write: if true;
+      match /{allChildren=**} {
+        allow read, write: if true;
+      }
+    }
+
+    // Allow collection group query on messages for Datastore view
+    match /{path=**}/messages/{messageId} {
+      allow read, write: if true;
+    }
+
+    // Allow collection group query on audit_messages for Dev Datastore
+    match /{path=**}/audit_messages/{messageId} {
+      allow read, write: if true;
+    }
+
+    // Direct LocalSend-style peer-to-peer transfers over internet
+    match /transfers/{transferId} {
+      allow read, write: if true;
+    }
+
+    // Notifications (such as room deletion farewell notices sent to members' Receive view)
+    match /notifications/{notificationId} {
+      allow read, write: if true;
+    }
+
+    // Sanctions, Warnings, and Email Bans enforced by Dev
+    match /sanctions/{docId} {
+      allow read, write: if true;
+    }
+
+    // Reports submitted by users on rule-breaking or evasive messages
+    match /reports/{reportId} {
+      allow read, write: if true;
+    }
+
+    // Device login sessions
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    // Email OTP 6-digit Verifications with 15-minute lifespan
+    match /email_verifications/{verificationId} {
+      allow read, write: if true;
+    }
+
+    // Personal Cloud Drive storage for each user
+    match /cloud_files/{fileId} {
+      allow read, write: if true;
+    }
+  }
+}
+

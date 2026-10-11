@@ -1351,26 +1351,7 @@ export const SendView: React.FC = () => {
                       <span className="text-[10px] text-slate-400 hidden sm:block">Bộ nhớ tạm</span>
                     </div>
                   </button>
-                  {/* 5. URL / Liên kết */}
-                  <button
-                    id="pick-url-btn"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsUrlModalOpen(true);
-                    }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-indigo-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:outline-none col-span-2 sm:col-span-1"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-indigo-500/20 flex items-center justify-center text-slate-200 group-hover:text-indigo-400 transition-colors shrink-0">
-                      <LinkIcon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-200 group-hover:text-white block leading-tight">
-                        URL / Liên kết
-                      </span>
-                      <span className="text-[10px] text-slate-400 hidden sm:block">Dán link web</span>
-                    </div>
-                  </button>
+                  
                 </div>
 
                 {/* Dropzone subtle helper */}
@@ -1823,22 +1804,7 @@ export const SendView: React.FC = () => {
                   Dán
                 </span>
               </button>
-              {/* 5. URL */}
-              <button
-                type="button"
-                onClick={() => {
-                  setShowQuickChoiceModal(false);
-                  setIsUrlModalOpen(true);
-                }}
-                className="p-3 rounded-xl bg-slate-800/90 hover:bg-slate-750 border border-slate-700/80 hover:border-indigo-500/50 flex flex-col items-center justify-center gap-1.5 text-center transition-all active:scale-95 group shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-400 focus:outline-none col-span-2"
-              >
-                <div className="w-7 h-7 rounded-lg bg-slate-700/50 group-hover:bg-indigo-500/20 flex items-center justify-center text-slate-200 group-hover:text-indigo-400 transition-colors">
-                  <LinkIcon className="w-4 h-4" />
-                </div>
-                <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  URL / Liên kết web
-                </span>
-              </button>
+              
             </div>
             <div className="pt-1.5 border-t border-slate-800">
               <button

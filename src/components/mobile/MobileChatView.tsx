@@ -1,3 +1,4 @@
+import { UserProfileModal } from '../UserProfileModal';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
@@ -110,6 +111,7 @@ export const MobileChatView: React.FC = () => {
   const previousScrollTopRef = useRef<number>(0);
 
   const [reportTarget, setReportTarget] = useState<ChatMessage | null>(null);
+  const [selectedProfileUser, setSelectedProfileUser] = useState<any | null>(null);
   const [viewingZoomImage, setViewingZoomImage] = useState<{ url: string; name?: string; size?: number } | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const [memberNamesMap, setMemberNamesMap] = useState<Record<string, string>>({});
@@ -1288,7 +1290,18 @@ export const MobileChatView: React.FC = () => {
                         return (
                           <div className={`flex items-center gap-1.5 mb-1 px-1 text-[10px] text-slate-400 flex-wrap ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                             {/* Avatar on top of chat frame */}
-                            <div className="relative shrink-0 select-none">
+                            <div 
+                              className="relative shrink-0 select-none cursor-pointer active:scale-95 transition-transform"
+                              onClick={() => {
+                                setSelectedProfileUser({
+                                  uid: msg.senderId,
+                                  displayName: senderLiveName,
+                                  photoURL: effectiveAvatarUrl,
+                                  avatarColor: effectiveAvatarColor,
+                                  deviceName: msg.senderDevice,
+                                });
+                              }}
+                            >
                               {effectiveAvatarUrl ? (
                                 <img
                                   src={effectiveAvatarUrl}

@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
+  signInWithPopup,
+  signInWithRedirect, 
   signOut,
   sendSignInLinkToEmail
 } from 'firebase/auth';
@@ -468,6 +469,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
         console.info('Google Sign-In popup was closed by user.');
         throw error;
+      }
+      if (error?.code === 'auth/popup-blocked') {
+        console.warn('Popup blocked, falling back to signInWithRedirect...');
+        await signInWithRedirect(auth, googleProvider);
+        return;
       }
       console.warn('Google Sign-In notice:', error?.message || error);
       throw error;

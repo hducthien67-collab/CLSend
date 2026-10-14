@@ -80,6 +80,12 @@ export async function downloadFileSafely(
 
   try {
     let resolvedSource = source;
+
+    // Telegram URLs: route through backend proxy to avoid iframe CORS restrictions
+    if (resolvedSource.includes('api.telegram.org/file/bot')) {
+      resolvedSource = `/api/telegram/download?url=${encodeURIComponent(resolvedSource)}&name=${encodeURIComponent(safeFileName)}`;
+    }
+
     // Resolve relative path against current window origin
     if (resolvedSource.startsWith('/')) {
       resolvedSource = `${window.location.origin}${resolvedSource}`;

@@ -409,6 +409,40 @@ async function startServer() {
     }
   });
 
+  // Telegram Cloud Storage Download Proxy (Bypasses browser CORS & sandboxed iframe restrictions)
+  app.get('/api/telegram/download', async (req, res) => {
+    try {
+      const fileUrl = req.query.url as string;
+      const originalName = sanitizeServerFilename((req.query.name as string) || 'telegram-file');
+
+      if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
+        return res.status(400).send('URL Telegram không hợp lệ');
+      }
+
+      const upstreamRes = await fetch(fileUrl);
+      if (!upstreamRes.ok) {
+        return res.status(upstreamRes.status).send('Không thể lấy tệp từ máy chủ Telegram.');
+      }
+
+      const mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
+      const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+      );
+
+      const arrayBuffer = await upstreamRes.arrayBuffer();
+      return res.send(Buffer.from(arrayBuffer));
+    } catch (err: any) {
+      console.error('Telegram proxy download error:', err);
+      return res.status(500).send('Lỗi khi tải tệp từ Telegram.');
+    }
+  });
+
   // File Inline View Endpoint (For image/video preview in browser, with sandbox CSP for safety)
   app.get('/api/files/view/:id', async (req, res) => {
     try {
@@ -572,7 +606,7 @@ Return strictly valid JSON:
             },
           });
 
-          if (response.text) {
+          if (response?.text) {
             const result = JSON.parse(response.text);
             if (typeof result.safe === 'boolean') {
               if (isMobileCameraPhoto && result.safe === false && result.category !== 'nsfw_sex' && result.category !== 'extreme_gore') {
@@ -680,7 +714,7 @@ Trả về kết quả ở định dạng JSON chuẩn:
         }
       });
 
-      if (response.text) {
+      if (response?.text) {
         const data = JSON.parse(response.text);
         return res.json({ success: true, ...data });
       }
@@ -819,7 +853,7 @@ Quy định trả về JSON:
             }
           }
 
-          if (geminiResp.text) {
+          if (geminiResp?.text) {
             const parsed = JSON.parse(geminiResp.text);
             if (parsed.isFlagged) {
               return res.json({

@@ -35,15 +35,18 @@ import {
   AlertCircle,
   Copy,
   Edit2,
-  Filter,
   X,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Zap
 } from 'lucide-react';
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../utils/fileUpload';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { downloadFileSafely } from '../utils/fileDownload';
+import { StorageEnginesModal } from './StorageEnginesModal';
+import { getTelegramConfig, uploadToTelegram } from '../utils/telegramStorage';
+import { cacheFileInCommunitySwarm, getFileFromCommunitySwarm } from '../utils/p2pCommunitySwarm';
 
-const MAX_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB (1024 MB) personal storage quota
+const MAX_QUOTA_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB personal storage quota
 
 export const CloudDriveView: React.FC = () => {
   const { currentUser, settings } = useAuth();
@@ -63,6 +66,7 @@ export const CloudDriveView: React.FC = () => {
   // Cloud URL Modal states
   const [isCloudUrlModalOpen, setIsCloudUrlModalOpen] = useState(false);
   const [cloudUrlModalValue, setCloudUrlModalValue] = useState('');
+  const [isStorageModalOpen, setIsStorageModalOpen] = useState(false);
 
   const handleCloudUrlAdded = async () => {
     const finalUrl = cloudUrlModalValue.trim();
@@ -241,7 +245,7 @@ export const CloudDriveView: React.FC = () => {
         if (totalSizeBytes + file.size > MAX_QUOTA_BYTES) {
           setStatusMessage({
             type: 'error',
-            text: `Kho lưu trữ không đủ dung lượng để chứa "${file.name}" (Giới hạn: 1 GB).`
+            text: `Kho lưu trữ không đủ dung lượng để chứa "${file.name}" (Giới hạn: 100 GB).`
           });
           break;
         }
@@ -257,28 +261,42 @@ export const CloudDriveView: React.FC = () => {
           }
         }
 
-        // Upload using robust uploadFileToServer with smooth percentage tracking and resilient fallback
+        // 1. Check if Telegram Cloud Storage is enabled
+        const tgConfig = getTelegramConfig();
         let fileUrl = '';
         let fileViewUrl = '';
         let fileThumbnail = clientThumb || null;
 
-        try {
-          const uploadedFile = await uploadFileToServer(file, (pct) => {
-            const fileShare = 100 / totalFiles;
-            const overall = Math.min(99, Math.round(i * fileShare + (pct / 100) * fileShare));
-            setUploadProgress(overall);
-          });
-          fileUrl = uploadedFile.url;
-          fileViewUrl = uploadedFile.viewUrl || uploadedFile.url;
-          if (uploadedFile.thumbnail) {
-            fileThumbnail = uploadedFile.thumbnail;
+        if (tgConfig.enabled && tgConfig.botToken && tgConfig.chatId) {
+          try {
+            const tgRes = await uploadToTelegram(file, tgConfig);
+            fileUrl = tgRes.downloadUrl;
+            fileViewUrl = tgRes.downloadUrl;
+          } catch (tgErr: any) {
+            console.warn(`Telegram upload error for "${file.name}", falling back to standard upload:`, tgErr);
           }
-        } catch (uploadErr: any) {
-          console.warn(`Server upload notice for "${file.name}", activating instant resilient direct storage:`, uploadErr);
-          const fallback = await createClientFallbackFileInfo(file);
-          fileUrl = fallback.url || '';
-          fileViewUrl = fallback.viewUrl || '';
-          fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
+        }
+
+        // 2. Standard server/fallback upload if not uploaded to Telegram
+        if (!fileUrl) {
+          try {
+            const uploadedFile = await uploadFileToServer(file, (pct) => {
+              const fileShare = 100 / totalFiles;
+              const overall = Math.min(99, Math.round(i * fileShare + (pct / 100) * fileShare));
+              setUploadProgress(overall);
+            });
+            fileUrl = uploadedFile.url;
+            fileViewUrl = uploadedFile.viewUrl || uploadedFile.url;
+            if (uploadedFile.thumbnail) {
+              fileThumbnail = uploadedFile.thumbnail;
+            }
+          } catch (uploadErr: any) {
+            console.warn(`Server upload notice for "${file.name}", activating instant resilient direct storage:`, uploadErr);
+            const fallback = await createClientFallbackFileInfo(file);
+            fileUrl = fallback.url || '';
+            fileViewUrl = fallback.viewUrl || '';
+            fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
+          }
         }
 
         const category = getFileCategory(file.type, file.name);
@@ -305,6 +323,9 @@ export const CloudDriveView: React.FC = () => {
           isFavorite: false,
           createdAt: new Date().toISOString()
         });
+
+        // Cache file in local P2P Community Swarm for instant peer acceleration
+        cacheFileInCommunitySwarm(docId, file, file.name).catch(() => {});
 
         setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
       }
@@ -532,14 +553,25 @@ export const CloudDriveView: React.FC = () => {
 
         {/* Quota Progress Bar */}
         <div className="mt-6 pt-5 border-t border-slate-800/80">
-          <div className="flex items-center justify-between text-xs text-slate-400 mb-2 font-medium">
+          <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 mb-2 font-medium gap-2">
             <div className="flex items-center gap-2">
               <HardDrive className="w-4 h-4 text-emerald-400" />
               <span>Dung lượng đã sử dụng:</span>
               <span className="text-white font-semibold">{formatFileSize(totalSizeBytes)}</span>
-              <span>/ 1 GB</span>
+              <span>/ 100 GB</span>
             </div>
-            <span className="font-mono text-emerald-400">{quotaUsedPercent}%</span>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsStorageModalOpen(true)}
+                className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-sky-500/20 hover:from-emerald-500/30 hover:to-sky-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                title="Mở cấu hình Kho Vô Hạn Telegram & Nút Chia Sẻ P2P Swarm"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                <span>⚡ Nâng cấp Lưu trữ & Nút P2P</span>
+              </button>
+              <span className="font-mono text-emerald-400 font-bold">{quotaUsedPercent}%</span>
+            </div>
           </div>
           <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
             <div
@@ -1227,6 +1259,12 @@ export const CloudDriveView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Telegram Unlimited Cloud & P2P Swarm Node Modal */}
+      <StorageEnginesModal
+        isOpen={isStorageModalOpen}
+        onClose={() => setIsStorageModalOpen(false)}
+      />
     </>
   );
 };

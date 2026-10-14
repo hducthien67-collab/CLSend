@@ -30,6 +30,7 @@ interface NavbarProps {
   onToggleViewMode?: () => void;
   incomingCount?: number;
   unreadMessagesCount?: number;
+  onOpenDesignStudio?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -42,6 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleViewMode,
   incomingCount = 0,
   unreadMessagesCount = 0,
+  onOpenDesignStudio,
 }) => {
   const { currentUser, settings, userProfile } = useAuth();
   const isDev = isDevUser(currentUser?.email);
@@ -208,6 +210,20 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
+                    {/* Design Studio / Khung Thiết Kế Button */}
+          {onOpenDesignStudio && (
+            <button
+              id="open-design-studio-btn"
+              type="button"
+              onClick={onOpenDesignStudio}
+              title="Khung Thiết Kế - Tùy chỉnh avatar, khung viền, nhãn dán & giao diện 🥳"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600/30 to-purple-600/30 hover:from-indigo-600/50 hover:to-purple-600/50 text-indigo-200 hover:text-white border border-indigo-500/40 hover:border-indigo-400 text-xs font-semibold transition-all shadow-sm group cursor-pointer"
+            >
+              <Palette className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-12 transition-transform" />
+              <span className="hidden sm:inline">Khung Thiết Kế</span>
+              <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+            </button>
+          )}
           {/* Rules / Nội quy Button */}
           {onOpenRules && (
             <button

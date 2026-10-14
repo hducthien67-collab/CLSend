@@ -171,6 +171,7 @@ export interface AppSettings {
   cardStyle?: 'glass' | 'glow' | 'minimal' | 'solid';
   customHexColor?: string;
   customAvatarUrl?: string;
+  bannerUrl?: string;
   customDesignData?: string;
 }
 

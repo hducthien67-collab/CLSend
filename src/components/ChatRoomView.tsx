@@ -1,3 +1,4 @@
+import { UserProfileModal } from './UserProfileModal';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase/config';
@@ -110,6 +111,8 @@ export const ChatRoomView: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [memberNamesMap, setMemberNamesMap] = useState<Record<string, string>>({});
   const [memberMetaMap, setMemberMetaMap] = useState<Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }>>({});
+  const [selectedProfileUser, setSelectedProfileUser] = useState<any>(null);
+  const [profileAnchor, setProfileAnchor] = useState<{ top: number; left: number; isRightHalf: boolean } | null>(null);
 
   // Helper to extract a reliable numeric timestamp from a message (prioritizes true atomic server time)
   const getMessageTime = (msg: Partial<ChatMessage>): number => {
@@ -1542,7 +1545,30 @@ export const ChatRoomView: React.FC = () => {
                     return (
                       <div className={`flex items-center gap-2 mb-1 px-1 text-[11px] text-slate-400 flex-wrap ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                         {/* Avatar on top of chat frame */}
-                        <div className="relative shrink-0 select-none group/avatar">
+                        <div 
+                          className="relative shrink-0 select-none group/avatar cursor-pointer hover:scale-105 transition-transform"
+                          onClick={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const isRightHalf = rect.left > window.innerWidth / 2;
+                            setProfileAnchor({
+                              top: rect.bottom,
+                              left: isRightHalf ? rect.right : rect.left,
+                              isRightHalf
+                            });
+                            setSelectedProfileUser({
+                              uid: msg.senderId || msg.senderDevice,
+                              displayName: senderDisplayName,
+                              email: isMe ? currentUser?.email : senderMeta?.email,
+                              avatarUrl: effectiveAvatarUrl,
+                              avatarColor: effectiveAvatarColor,
+                              isDev: isDevMsg,
+                              deviceName: isMe ? settings.deviceName : senderMeta?.deviceName,
+                              deviceType: isMe ? settings.deviceType : senderMeta?.deviceType,
+                              createdAt: senderMeta?.createdAt
+                            });
+                          }}
+                          title="Xem hồ sơ cá nhân"
+                        >
                           {effectiveAvatarUrl ? (
                             <img
                               src={effectiveAvatarUrl}
@@ -2282,6 +2308,15 @@ export const ChatRoomView: React.FC = () => {
           imageUrl={viewingZoomImage.url}
           imageName={viewingZoomImage.name || 'Hình ảnh'}
           fileSize={viewingZoomImage.size}
+        />
+      )}
+
+      {/* Discord-style User Profile Modal */}
+      {selectedProfileUser && (
+        <UserProfileModal 
+          user={selectedProfileUser} 
+          anchorPosition={profileAnchor}
+          onClose={() => { setSelectedProfileUser(null); setProfileAnchor(null); }} 
         />
       )}
 

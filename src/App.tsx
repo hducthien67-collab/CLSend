@@ -772,10 +772,14 @@ function MainApp() {
   );
 }
 
+import { AppHealthCheck } from './components/AppHealthCheck';
+
 export default function App() {
   return (
-    <AuthProvider>
-      <MainApp />
-    </AuthProvider>
+    <AppHealthCheck>
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
+    </AppHealthCheck>
   );
 }

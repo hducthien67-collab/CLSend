@@ -119,6 +119,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [cardStyle, setCardStyle] = useState<'glass' | 'glow' | 'minimal' | 'solid'>(settings.cardStyle || 'glow');
   const [customHexColor, setCustomHexColor] = useState<string>(settings.customHexColor || settings.avatarColor || '#10B981');
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | undefined>(settings.customAvatarUrl);
+  const [customBannerUrl, setCustomBannerUrl] = useState<string | undefined>(settings.bannerUrl);
+  const bannerFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [customDesignData, setCustomDesignData] = useState<string | undefined>(settings.customDesignData);
   const [isFullscreenStudioOpen, setIsFullscreenStudioOpen] = useState(false);
   const [devToastMessage, setDevToastMessage] = useState<string | null>(null);
@@ -130,6 +132,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => {
       setDevToastMessage(null);
     }, 3800);
+  };
+
+  
+  const handleBannerFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const result = uploadEvent.target?.result as string;
+      if (result) {
+        setCustomBannerUrl(result);
+        updateSettings({ bannerUrl: result });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -951,137 +973,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* ------------------------------------------------------------ */}
           {/* TAB 3: KHUNG TỰ THIẾT KẾ (DESIGN STUDIO & CANVAS PLAYGROUND) */}
           {/* ------------------------------------------------------------ */}
-          {activeTab === 'custom_design' && (
-            <div className="space-y-3 sm:space-y-3.5 animate-in fade-in duration-200">
-              
-              {/* STUDIO LAUNCH BANNER - TẠM KHÓA ĐANG PHÁT TRIỂN */}
-              <div 
-                onClick={() => showUnderDevelopmentToast()}
-                className="p-3 sm:p-3.5 rounded-xl bg-gradient-to-r from-purple-950/60 via-slate-900 to-indigo-950/60 border border-purple-500/30 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:border-amber-500/40 transition-all"
-              >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="p-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                    {activeTab === 'custom_design' && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              {/* Header banner info */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-950/60 via-slate-900 to-teal-950/60 border border-emerald-500/30 shadow-md flex items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <UserCheck className="w-4 h-4 text-emerald-400" />
                     </span>
-                    <h3 className="text-xs sm:text-sm font-bold text-white tracking-tight">
-                      Studio Tự Thiết Kế Toàn Màn Hình
+                    <h3 className="text-sm font-bold text-white tracking-tight">
+                      Tùy Biến Hồ Sơ & Giao Diện (User Profile)
                     </h3>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 inline-flex items-center gap-1 shrink-0">
-                      <Lock className="w-2.5 h-2.5 text-amber-400" />
-                      <span>ĐANG PHÁT TRIỂN</span>
-                    </span>
                   </div>
-                  <p className="text-[10.5px] text-slate-400 leading-snug">
-                    Tính năng đang được hoàn thiện và sẽ sớm ra mắt trong bản cập nhật tới.
+                  <p className="text-xs text-slate-400">
+                    Cá nhân hóa ảnh đại diện, ảnh bìa, tiểu sử và huy hiệu hiển thị của bạn trong phòng chat và danh sách thành viên.
                   </p>
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      showUnderDevelopmentToast();
-                    }}
-                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold shadow-sm border border-amber-500/30 transition-all active:scale-95"
-                  >
-                    <Lock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Mở Studio (Đang phát triển)</span>
-                  </button>
                 </div>
               </div>
 
-              {/* Giao diện 2 cột: Cột trái tùy chỉnh, Cột phải Khung Xem Trước Thời Gian Thực */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-3.5">
-                
-                {/* CỘT TRÁI (7 CỘT): CÁC CÔNG CỤ TÙY BIẾN */}
-                <div className="lg:col-span-7 space-y-3">
-                  
-                  {/* 1. Chọn Theme Preset */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                {/* CỘT TRÁI (7 CỘT): CÁC TRƯỜNG CHỈNH SỬA PROFILE */}
+                <div className="lg:col-span-7 space-y-4">
+                  {/* 1. Ảnh Đại Diện (Avatar) */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                        <Palette className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Chủ đề phong cách (Theme Presets)</span>
+                      <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <Flame className="w-4 h-4 text-emerald-400" />
+                        <span>Hình Ảnh Đại Diện (Avatar)</span>
                       </label>
-                      <button
-                        type="button"
-                        onClick={() => showUnderDevelopmentToast()}
-                        className="text-[10px] text-slate-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
-                      >
-                        <Lock className="w-2.5 h-2.5 text-amber-400" />
-                        <span>Thư viện mẫu</span>
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {THEME_PRESETS.map((p) => {
-                        const isSelected = themeStyle === p.id;
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => {
-                              setThemeStyle(p.id);
-                              setAvatarColor(p.color);
-                              setCustomHexColor(p.color);
-                            }}
-                            className={`p-2 rounded-lg border text-left transition-all ${
-                              isSelected
-                                ? 'bg-slate-900 border-purple-400 ring-1 ring-purple-500/30 text-white font-bold shadow-sm'
-                                : 'bg-slate-950/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-3 h-3 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: p.color }} />
-                              <span className="text-[11px] truncate">{p.name}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* 2. Chọn Kiểu Khung Thẻ (Card Style) */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2">
-                    <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Kiểu Khung Thẻ (Card Style)</span>
-                    </label>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                      {[
-                        { id: 'glow', label: 'Neon', desc: 'Viền sáng tỏa' },
-                        { id: 'glass', label: 'Glass', desc: 'Hiệu ứng mờ' },
-                        { id: 'solid', label: 'OLED', desc: 'Đen sâu' },
-                        { id: 'minimal', label: 'Tối giản', desc: 'Gọn gàng' },
-                      ].map((style) => (
-                        <button
-                          key={style.id}
-                          type="button"
-                          onClick={() => setCardStyle(style.id as any)}
-                          className={`p-2 rounded-lg border text-left transition-all ${
-                            cardStyle === style.id
-                              ? 'bg-purple-500/20 border-purple-500 text-purple-200 font-bold ring-1 ring-purple-500/40'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          <div className="text-[11px] font-bold">{style.label}</div>
-                          <div className="text-[9.5px] text-slate-400 mt-0.2">{style.desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 3. Màu sắc Avatar & Đổi ảnh đại diện */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between flex-wrap gap-1.5">
-                      <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                        <Flame className="w-3.5 h-3.5 text-purple-400" />
-                        <span>Màu sắc & Ảnh đại diện</span>
-                      </label>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <input 
                           type="file" 
                           ref={avatarFileInputRef} 
@@ -1092,10 +1013,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <button
                           type="button"
                           onClick={() => avatarFileInputRef.current?.click()}
-                          className="text-[10.5px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer"
+                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer"
                         >
-                          <Camera className="w-3 h-3" />
-                          <span>Đổi / Tải ảnh</span>
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Tải ảnh lên</span>
                         </button>
                         {customAvatarUrl && (
                           <button
@@ -1104,16 +1025,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               setCustomAvatarUrl(undefined);
                               updateSettings({ customAvatarUrl: undefined });
                             }}
-                            className="text-[9.5px] text-rose-400 hover:text-rose-300 font-semibold px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
-                            title="Xóa ảnh đại diện tùy chỉnh"
+                            className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
                           >
                             Xóa ảnh
                           </button>
                         )}
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                    {/* Màu sắc avatar fallback */}
+                    <div className="flex items-center gap-2 flex-wrap pt-1">
+                      <span className="text-[11px] text-slate-400">Hoặc chọn màu mặc định:</span>
                       {AVATAR_COLORS.map((col) => (
                         <button
                           key={col}
@@ -1122,163 +1043,185 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             setAvatarColor(col);
                             setCustomHexColor(col);
                           }}
-                          className={`w-6 h-6 rounded-lg transition-all flex items-center justify-center ${
-                            avatarColor === col ? 'ring-2 ring-white scale-110 shadow-sm' : 'opacity-70 hover:opacity-100'
+                          className={`w-7 h-7 rounded-lg transition-all flex items-center justify-center ${
+                            avatarColor === col ? 'ring-2 ring-white scale-110 shadow-md' : 'opacity-70 hover:opacity-100'
                           }`}
                           style={{ backgroundColor: col }}
                         >
-                          {avatarColor === col && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                          {avatarColor === col && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
                         </button>
                       ))}
-
-                      {/* Tùy chỉnh màu HEX tự do */}
-                      <div className="flex items-center gap-1 pl-1.5 border-l border-slate-800">
-                        <input
-                          type="color"
-                          value={customHexColor}
-                          onChange={(e) => {
-                            setCustomHexColor(e.target.value);
-                            setAvatarColor(e.target.value);
-                          }}
-                          className="w-6 h-6 rounded-lg cursor-pointer bg-transparent border-0"
-                          title="Chọn màu tự do bất kỳ"
-                        />
-                        <span className="text-[10px] text-slate-400 font-mono">Tự do</span>
-                      </div>
                     </div>
                   </div>
 
-                  {/* 4. Huy hiệu & Danh xưng cá nhân */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 space-y-2">
+                  {/* 2. Ảnh Bìa (Banner / Cover Image) */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                        <Palette className="w-4 h-4 text-emerald-400" />
+                        <span>Ảnh Bìa / Banner (Profile Cover)</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="file" 
+                          ref={bannerFileInputRef} 
+                          onChange={handleBannerFileUpload} 
+                          accept="image/*" 
+                          className="hidden" 
+                        />
+                        <button
+                          type="button"
+                          onClick={() => bannerFileInputRef.current?.click()}
+                          className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Đổi ảnh bìa</span>
+                        </button>
+                        {customBannerUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCustomBannerUrl(undefined);
+                              updateSettings({ bannerUrl: undefined });
+                            }}
+                            className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
+                          >
+                            Xóa ảnh bìa
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Ảnh bìa sẽ hiển thị ở phần trên cùng trong thẻ thông tin cá nhân (Profile Card) chuẩn Discord của bạn.
+                    </p>
+                  </div>
+
+                  {/* 3. Tiểu Sử & Huy Hiệu */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-200 mb-0.5">
+                      <label className="block text-xs font-bold text-slate-200 mb-1">
                         Huy hiệu hiển thị (Custom Badge)
                       </label>
                       <input
                         type="text"
-                        maxLength={25}
+                        maxLength={30}
                         value={customBadgeText}
                         onChange={(e) => setCustomBadgeText(e.target.value)}
-                        placeholder="Ví dụ: VIP Relay, Chuyên Gia Tốc Độ..."
-                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                        placeholder="Ví dụ: Thành viên CloudSend, DEV Chính Chủ..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                       />
                     </div>
-
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-200 mb-0.5">
+                      <label className="block text-xs font-bold text-slate-200 mb-1">
                         Tiểu sử / Lời chào (Bio Status)
                       </label>
-                      <input
-                        type="text"
-                        maxLength={60}
+                      <textarea
+                        rows={2}
+                        maxLength={120}
                         value={customBio}
                         onChange={(e) => setCustomBio(e.target.value)}
-                        placeholder="Ví dụ: Đang online, sẵn sàng nhận file..."
-                        className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                        placeholder="Viết vài dòng giới thiệu về bản thân bạn..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
                       />
                     </div>
                   </div>
+
+                  {/* 4. Các tính năng sắp ra mắt (Placeholders) */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5 opacity-80">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Tính năng mở rộng (Sắp ra mắt)</span>
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Đang phát triển
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Nơi đây sẽ chứa thêm các tùy chọn nâng cao như: hiệu ứng khung viền avatar động, huy hiệu đặc quyền, và chủ đề trang cá nhân.
+                    </p>
+                  </div>
                 </div>
 
-                {/* CỘT PHẢI (5 CỘT): KHUNG XEM TRƯỚC TRỰC TIẾP (LIVE PREVIEW CANVAS) */}
+                {/* CỘT PHẢI (5 CỘT): KHUNG XEM TRƯỚC HỒ SƠ (LIVE PROFILE PREVIEW) */}
                 <div className="lg:col-span-5 flex flex-col">
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 sm:p-3.5 flex-1 flex flex-col justify-between space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-1.5 border-b border-slate-800/80 gap-1.5">
-                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-                        <Eye className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                        <span>Khung Xem Trước Trực Tiếp</span>
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 flex-1 flex flex-col justify-between space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                        <Eye className="w-4 h-4 text-emerald-400" />
+                        <span>Xem Trước Thẻ Profile (Discord Style)</span>
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => showUnderDevelopmentToast()}
-                        className="text-[9.5px] text-amber-300 font-mono flex items-center gap-1 bg-amber-500/15 px-2 py-0.2 rounded-full border border-amber-500/30 cursor-pointer hover:bg-amber-500/25 transition-all whitespace-nowrap shrink-0 w-fit"
-                      >
-                        <Lock className="w-2.5 h-2.5 text-amber-400" />
-                        <span>Studio (Đang phát triển)</span>
-                      </button>
                     </div>
 
-                    {/* KHUNG THẺ THỰC TẾ (THE DESIGN CANVAS) */}
+                    {/* LIVE PREVIEW CARD */}
                     <div className="my-auto py-2">
-                      <div 
-                        className={`rounded-xl p-3 sm:p-3.5 border transition-all duration-300 relative overflow-hidden group shadow-lg ${
-                          cardStyle === 'glow' ? `bg-gradient-to-br ${currentThemeObj.gradient} ${currentThemeObj.border} ${currentThemeObj.glow}` :
-                          cardStyle === 'glass' ? 'bg-slate-900/60 backdrop-blur-xl border-slate-700/80 shadow-slate-900/50' :
-                          cardStyle === 'solid' ? 'bg-black border-slate-800' :
-                          'bg-slate-900 border-slate-800'
-                        }`}
-                      >
-                        {/* Header của thẻ Canvas */}
-                        <div className="flex items-start justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                            <div 
-                              className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm shadow-md relative shrink-0 ring-1 ring-white/20 overflow-hidden"
-                              style={{ backgroundColor: avatarColor }}
-                            >
-                              {(customAvatarUrl || currentUser?.photoURL) ? (
-                                <img 
-                                  src={customAvatarUrl || currentUser?.photoURL || ''} 
-                                  alt="Avatar" 
-                                  className="w-full h-full object-cover" 
-                                  referrerPolicy="no-referrer"
-                                  crossOrigin="anonymous"
-                                />
-                              ) : (
-                                (currentUser?.displayName || currentUser?.email || 'U')[0].toUpperCase()
-                              )}
-                              <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-1 ring-slate-950" />
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-xs font-bold text-white truncate flex items-center gap-1">
-                                <span className="truncate">{currentUser?.displayName || 'Người dùng'}</span>
-                              </div>
-                              <div className="text-[10.5px] text-slate-400 truncate font-mono">
-                                {deviceName || 'Tên thiết bị'}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Huy hiệu tùy chỉnh */}
-                          <span 
-                            className="text-[9.5px] font-bold px-2 py-0.2 rounded-full border shadow-sm shrink-0 whitespace-nowrap"
-                            style={{ 
-                              backgroundColor: `${avatarColor}20`,
-                              borderColor: `${avatarColor}60`,
-                              color: avatarColor 
-                            }}
-                          >
+                      <div className="w-full bg-[#1e1f22] text-slate-100 rounded-2xl shadow-2xl border border-slate-700/80 overflow-hidden select-none relative">
+                        {/* Banner Preview */}
+                        <div 
+                          className="h-28 w-full bg-cover bg-center relative"
+                          style={{ 
+                            background: customBannerUrl 
+                              ? `url(${customBannerUrl}) center/cover no-repeat` 
+                              : 'linear-gradient(to right, #059669, #0d9488, #4f46e5)' 
+                          }}
+                        >
+                          <span className="absolute top-2.5 left-2.5 px-2 py-0.5 bg-black/50 backdrop-blur-xs rounded-full border border-amber-500/40 text-[10px] text-amber-300 font-bold">
                             {customBadgeText || 'CloudSend'}
                           </span>
                         </div>
 
-                        {/* Tiểu sử Status */}
-                        <div className="mt-2.5 pt-2 border-t border-white/10 text-[11px] text-slate-300 italic truncate">
-                          "{customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.'}"
-                        </div>
+                        {/* Body Preview */}
+                        <div className="px-4 pb-4 pt-10 relative bg-[#1e1f22]">
+                          {/* Avatar */}
+                          <div className="absolute -top-8 left-4 z-10">
+                            <div className="relative">
+                              {customAvatarUrl ? (
+                                <img
+                                  src={customAvatarUrl}
+                                  alt="Avatar"
+                                  className="w-16 h-16 rounded-full object-cover ring-4 ring-[#1e1f22] shadow-xl bg-[#2b2d31]"
+                                />
+                              ) : (
+                                <div
+                                  className="w-16 h-16 rounded-full flex items-center justify-center font-bold text-white text-xl ring-4 ring-[#1e1f22] shadow-xl"
+                                  style={{ backgroundColor: avatarColor }}
+                                >
+                                  {(currentUser?.displayName || currentUser?.email || 'U')[0].toUpperCase()}
+                                </div>
+                              )}
+                              <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full ring-3 ring-[#1e1f22]" />
+                            </div>
+                          </div>
 
-                        {/* Thẻ phần cứng */}
-                        <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 bg-slate-950/50 p-1.5 rounded-lg border border-white/5 gap-1.5 flex-wrap">
-                          <span className="flex items-center gap-1 text-slate-300 font-medium truncate">
-                            {renderCurrentDeviceIcon('w-3 h-3 shrink-0')}
-                            <span className="truncate">{deviceInfo.label}</span>
-                          </span>
-                          <span className="text-emerald-400 font-mono font-bold whitespace-nowrap shrink-0">Relay Ready</span>
+                          <h4 className="text-base font-extrabold text-white truncate">
+                            {currentUser?.displayName || 'Người dùng'}
+                          </h4>
+                          <p className="text-[11px] text-slate-400 font-medium">
+                            @{currentUser?.displayName?.toLowerCase().replace(/\s+/g, '') || 'username'}
+                          </p>
+
+                          <div className="my-3 h-px w-full bg-slate-700/60" />
+
+                          <div className="bg-[#2b2d31]/70 p-3 rounded-xl border border-slate-700/40 space-y-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                              Giới thiệu
+                            </span>
+                            <p className="text-xs text-slate-300 italic leading-snug">
+                              "${customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.'}"
+                            </p>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="text-[10px] text-slate-400 text-center italic">
-                      * Tùy biến thời gian thực hiển thị ngay trên mạng
+                    <div className="text-[11px] text-slate-400 text-center italic">
+                      * Thẻ này sẽ hiển thị khi người khác bấm vào ảnh đại diện của bạn trong phòng chat.
                     </div>
                   </div>
                 </div>
               </div>
             </div>
           )}
-
-          {/* ------------------------------------------------------------ */}
-          {/* TAB 4: TÀI KHOẢN & NỘI QUY (VỚI 6 THANH TÍCH HỢP ĐẦY ĐỦ) */}
-          {/* ------------------------------------------------------------ */}
           {activeTab === 'account_rules' && (
             <div className="space-y-3 sm:space-y-3.5 animate-in fade-in duration-200">
               

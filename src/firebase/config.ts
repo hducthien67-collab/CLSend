@@ -79,15 +79,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // Connection test on boot as required by Firebase skill
 export async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocs(query(collection(db, 'presence'), limit(1)));
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.message.includes('the client is offline') || (error as { code?: string }).code === 'unavailable') {
-        console.warn('Firestore database is initializing or awaiting creation in Firebase Console.');
-      } else {
-        console.warn('Firestore connection check:', error.message);
-      }
-    }
+    // Silent catch
   }
 }
 

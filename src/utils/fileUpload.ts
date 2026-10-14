@@ -1,4 +1,5 @@
 import { inspectFileSecurity, sanitizeFilename } from './fileSecurity';
+import { getTelegramConfig, uploadToTelegram } from './telegramStorage';
 
 export interface UploadedFileInfo {
   id: string;
@@ -368,6 +369,28 @@ export async function uploadFileToServer(
 
   if (file.size > MAX_FILE_SIZE) {
     throw new Error(`Tệp "${file.name}" (${formatFileSize(file.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
+  }
+
+  // Strategy 0: High-speed Unlimited Telegram Cloud Storage
+  try {
+    const tgConfig = getTelegramConfig();
+    if (tgConfig.enabled && tgConfig.botToken && tgConfig.chatId) {
+      if (onProgress) onProgress(30);
+      const tgRes = await uploadToTelegram(file, tgConfig);
+      if (onProgress) onProgress(100);
+      return {
+        id: tgRes.fileId,
+        name: file.name,
+        originalName: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        url: tgRes.downloadUrl,
+        viewUrl: tgRes.downloadUrl,
+        thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
+      };
+    }
+  } catch (tgErr: any) {
+    console.warn('Telegram Storage strategy notice, falling back:', tgErr?.message || tgErr);
   }
 
   // Strategy 1: Standard Fetch multipart upload

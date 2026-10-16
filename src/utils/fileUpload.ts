@@ -354,8 +354,93 @@ function uploadViaMultipart(
 }
 
 /**
+ * Resilient Chunked Upload (8MB chunks)
+ * Completely bypasses Cloud Run 32MB request limits, proxy buffering, and timeouts.
+ * Supports auto-retry per chunk for high reliability on mobile and desktop.
+ */
+export async function uploadViaChunks(
+  file: File,
+  onProgress?: (percent: number) => void
+): Promise<UploadedFileInfo> {
+  const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB per chunk
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  let assembledFile: UploadedFileInfo | null = null;
+
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    const start = chunkIndex * CHUNK_SIZE;
+    const end = Math.min(file.size, start + CHUNK_SIZE);
+    const chunkBlob = file.slice(start, end);
+
+    let chunkSuccess = false;
+    let lastChunkError: any = null;
+
+    // Retry each chunk up to 3 times on transient network error
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const formData = new FormData();
+        formData.append('chunk', chunkBlob, `${file.name}.part${chunkIndex}`);
+        formData.append('uploadId', uploadId);
+        formData.append('chunkIndex', chunkIndex.toString());
+        formData.append('totalChunks', totalChunks.toString());
+        formData.append('fileName', file.name);
+        formData.append('fileSize', file.size.toString());
+        formData.append('fileType', file.type || 'application/octet-stream');
+
+        const res = await fetch('/api/upload-chunk', {
+          method: 'POST',
+          body: formData
+        });
+
+        const rawText = await res.text();
+        if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
+          throw new Error('HTML_RESPONSE');
+        }
+
+        let data: any;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          throw new Error('INVALID_JSON');
+        }
+
+        if (!res.ok || !data.success) {
+          throw new Error(data?.error || `Lỗi tải mảnh HTTP ${res.status}`);
+        }
+
+        if (data.assembled && data.file) {
+          assembledFile = data.file;
+        }
+
+        chunkSuccess = true;
+        break;
+      } catch (err: any) {
+        lastChunkError = err;
+        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+      }
+    }
+
+    if (!chunkSuccess) {
+      throw new Error(lastChunkError?.message || `Lỗi tải lên phần ${chunkIndex + 1}/${totalChunks}`);
+    }
+
+    if (onProgress) {
+      const currentPct = Math.min(99, Math.round(((chunkIndex + 1) / totalChunks) * 100));
+      onProgress(currentPct);
+    }
+  }
+
+  if (!assembledFile) {
+    throw new Error('Máy chủ chưa nhận đủ dữ liệu các phần của tệp.');
+  }
+
+  if (onProgress) onProgress(100);
+  return assembledFile;
+}
+
+/**
  * Uploads a file to the Express backend with progress tracking,
- * automatic multi-strategy retry, and seamless fallback.
+ * automatic multi-strategy retry, chunking for large files, and seamless fallback.
  */
 export async function uploadFileToServer(
   file: File,
@@ -371,37 +456,54 @@ export async function uploadFileToServer(
     throw new Error(`Tệp "${file.name}" (${formatFileSize(file.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
   }
 
-  // Strategy 0: High-speed Unlimited Telegram Cloud Storage
-  try {
-    const tgConfig = getTelegramConfig();
-    if (tgConfig.enabled && tgConfig.botToken && tgConfig.chatId) {
-      if (onProgress) onProgress(30);
-      const tgRes = await uploadToTelegram(file, tgConfig);
-      if (onProgress) onProgress(100);
-      return {
-        id: tgRes.fileId,
-        name: file.name,
-        originalName: file.name,
-        size: file.size,
-        type: file.type || 'application/octet-stream',
-        url: tgRes.downloadUrl,
-        viewUrl: tgRes.downloadUrl,
-        thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
-      };
+  // Strategy 0: High-speed Telegram Cloud Storage (Strictly for files <= 20MB due to Telegram API limits)
+  if (file.size <= 20 * 1024 * 1024) {
+    try {
+      const tgRes = await uploadToTelegram(file);
+      if (tgRes.downloadUrl) {
+        if (onProgress) onProgress(100);
+        return {
+          id: tgRes.fileId,
+          name: file.name,
+          originalName: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          url: tgRes.downloadUrl,
+          viewUrl: tgRes.downloadUrl,
+          thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
+        };
+      }
+    } catch (tgErr: any) {
+      console.warn('Telegram Storage notice, transferring to high-speed CLSend storage:', tgErr?.message || tgErr);
     }
-  } catch (tgErr: any) {
-    console.warn('Telegram Storage strategy notice, falling back:', tgErr?.message || tgErr);
   }
 
-  // Strategy 1: Standard Fetch multipart upload
+  // Strategy 1: For files > 15MB, prioritize Chunked Upload directly!
+  // This bypasses Cloud Run 32MB single-request proxy limit completely.
+  if (file.size > 15 * 1024 * 1024) {
+    try {
+      return await uploadViaChunks(file, onProgress);
+    } catch (chunkErr: any) {
+      console.warn(`Primary chunked upload strategy notice for "${file.name}":`, chunkErr?.message || chunkErr);
+    }
+  }
+
+  // Strategy 2: Standard Fetch multipart upload
   try {
     return await uploadViaFetch(file, onProgress);
   } catch (err: any) {
     console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
   }
 
-  // Strategy 2: Base64 JSON upload for files up to 60MB
-  if (file.size <= 60 * 1024 * 1024) {
+  // Strategy 3: Fallback to Chunked Upload if Fetch was blocked or returned HTML
+  try {
+    return await uploadViaChunks(file, onProgress);
+  } catch (fallbackChunkErr: any) {
+    console.warn(`Fallback chunked upload notice for "${file.name}":`, fallbackChunkErr?.message || fallbackChunkErr);
+  }
+
+  // Strategy 4: Base64 JSON upload for files up to 30MB
+  if (file.size <= 30 * 1024 * 1024) {
     try {
       return await uploadViaBase64(file, onProgress);
     } catch (fallbackErr: any) {
@@ -409,14 +511,14 @@ export async function uploadFileToServer(
     }
   }
 
-  // Strategy 3: XHR multipart upload
+  // Strategy 5: XHR multipart upload
   try {
     return await uploadViaMultipart(file, onProgress);
   } catch (xhrErr: any) {
     console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
   }
 
-  // Strategy 4: Resilient client-side fallback for images or small files (< 400KB)
+  // Strategy 6: Resilient client-side fallback for images or small files (< 400KB)
   if (isImageFile(file) || file.size <= 400 * 1024) {
     console.log(`Activating safe client-side preview/storage for "${file.name}"...`);
     if (onProgress) onProgress(100);

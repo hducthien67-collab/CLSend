@@ -42,7 +42,6 @@ import {
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../utils/fileUpload';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { downloadFileSafely } from '../utils/fileDownload';
-import { StorageEnginesModal } from './StorageEnginesModal';
 import { getTelegramConfig, uploadToTelegram } from '../utils/telegramStorage';
 import { cacheFileInCommunitySwarm, getFileFromCommunitySwarm } from '../utils/p2pCommunitySwarm';
 
@@ -66,7 +65,6 @@ export const CloudDriveView: React.FC = () => {
   // Cloud URL Modal states
   const [isCloudUrlModalOpen, setIsCloudUrlModalOpen] = useState(false);
   const [cloudUrlModalValue, setCloudUrlModalValue] = useState('');
-  const [isStorageModalOpen, setIsStorageModalOpen] = useState(false);
 
   const handleCloudUrlAdded = async () => {
     const finalUrl = cloudUrlModalValue.trim();
@@ -261,19 +259,20 @@ export const CloudDriveView: React.FC = () => {
           }
         }
 
-        // 1. Check if Telegram Cloud Storage is enabled
-        const tgConfig = getTelegramConfig();
         let fileUrl = '';
         let fileViewUrl = '';
         let fileThumbnail = clientThumb || null;
 
-        if (tgConfig.enabled && tgConfig.botToken && tgConfig.chatId) {
+        // 1. Check if Telegram Cloud Storage is available (files <= 20MB)
+        if (file.size <= 20 * 1024 * 1024) {
           try {
-            const tgRes = await uploadToTelegram(file, tgConfig);
-            fileUrl = tgRes.downloadUrl;
-            fileViewUrl = tgRes.downloadUrl;
+            const tgRes = await uploadToTelegram(file);
+            if (tgRes.downloadUrl) {
+              fileUrl = tgRes.downloadUrl;
+              fileViewUrl = tgRes.downloadUrl;
+            }
           } catch (tgErr: any) {
-            console.warn(`Telegram upload error for "${file.name}", falling back to standard upload:`, tgErr);
+            console.warn(`Telegram upload notice for "${file.name}", using high-speed CLSend storage:`, tgErr?.message || tgErr);
           }
         }
 
@@ -297,6 +296,13 @@ export const CloudDriveView: React.FC = () => {
             fileViewUrl = fallback.viewUrl || '';
             fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
           }
+        }
+
+        // Critical safety check: Do NOT save broken entries with empty URLs to Firestore
+        if (!fileUrl || !fileUrl.trim()) {
+          console.error(`Không thể lưu trữ tệp "${file.name}" do lỗi kết nối.`);
+          alert(`Không thể tải tệp "${file.name}" lên máy chủ lưu trữ. Vui lòng thử lại.`);
+          continue;
         }
 
         const category = getFileCategory(file.type, file.name);
@@ -561,15 +567,6 @@ export const CloudDriveView: React.FC = () => {
               <span>/ 100 GB</span>
             </div>
             <div className="flex items-center gap-2.5">
-              <button
-                type="button"
-                onClick={() => setIsStorageModalOpen(true)}
-                className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-sky-500/20 hover:from-emerald-500/30 hover:to-sky-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                title="Mở cấu hình Kho Vô Hạn Telegram & Nút Chia Sẻ P2P Swarm"
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                <span>⚡ Nâng cấp Lưu trữ & Nút P2P</span>
-              </button>
               <span className="font-mono text-emerald-400 font-bold">{quotaUsedPercent}%</span>
             </div>
           </div>
@@ -866,7 +863,13 @@ export const CloudDriveView: React.FC = () => {
                 {/* File Meta */}
                 <div className="flex items-center justify-between text-[11px] text-slate-400 mb-3">
                   <span>{formatFileSize(file.size)}</span>
-                  <span>{new Date(file.createdAt).toLocaleDateString('vi-VN')}</span>
+                  {!file.url ? (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      Lỗi tải lên
+                    </span>
+                  ) : (
+                    <span>{new Date(file.createdAt).toLocaleDateString('vi-VN')}</span>
+                  )}
                 </div>
               </div>
 
@@ -879,7 +882,13 @@ export const CloudDriveView: React.FC = () => {
                   {/* Download */}
                   <button
                     type="button"
-                    onClick={() => downloadFileSafely(file.url, file.name)}
+                    onClick={() => {
+                      if (!file.url) {
+                        alert(`Tệp "${file.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                        return;
+                      }
+                      downloadFileSafely(file.url, file.name);
+                    }}
                     title="Tải về máy tính / điện thoại"
                     className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer"
                   >
@@ -947,7 +956,13 @@ export const CloudDriveView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                  onClick={() => {
+                    if (!previewFile.url) {
+                      alert(`Tệp "${previewFile.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                      return;
+                    }
+                    downloadFileSafely(previewFile.url, previewFile.name);
+                  }}
                   className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -1008,7 +1023,13 @@ export const CloudDriveView: React.FC = () => {
                   </p>
                   <button
                     type="button"
-                    onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                    onClick={() => {
+                      if (!previewFile.url) {
+                        alert(`Tệp "${previewFile.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                        return;
+                      }
+                      downloadFileSafely(previewFile.url, previewFile.name);
+                    }}
                     className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-2 shadow-lg hover:shadow-emerald-600/20 transition-all cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
@@ -1260,11 +1281,6 @@ export const CloudDriveView: React.FC = () => {
         </div>
       )}
 
-      {/* Telegram Unlimited Cloud & P2P Swarm Node Modal */}
-      <StorageEnginesModal
-        isOpen={isStorageModalOpen}
-        onClose={() => setIsStorageModalOpen(false)}
-      />
     </>
   );
 };

@@ -1372,13 +1372,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const updatedProfile: UserDevice = {
         uid: currentUsr.uid,
         email: currentUsr.email || '',
-        displayName: currentUsr.displayName || currentUsr.email?.split('@')[0] || 'Người dùng',
+        displayName: newSettings.deviceName || currentUsr.displayName || currentUsr.email?.split('@')[0] || 'Người dùng',
         createdAt: userProfile?.createdAt || new Date().toISOString(),
         ...(userProfile || {}),
         deviceName: newSettings.deviceName ?? settings.deviceName,
         deviceType: effectiveType,
         avatarColor: newSettings.avatarColor ?? settings.avatarColor,
         customAvatarUrl: effectiveAvatar || undefined,
+        bannerUrl: newSettings.bannerUrl !== undefined ? newSettings.bannerUrl : (userProfile?.bannerUrl || settings.bannerUrl),
+        customBio: newSettings.customBio !== undefined ? newSettings.customBio : (userProfile?.customBio || settings.customBio),
+        customBadgeText: newSettings.customBadgeText !== undefined ? newSettings.customBadgeText : (userProfile?.customBadgeText || settings.customBadgeText),
+        customHexColor: newSettings.customHexColor ?? userProfile?.customHexColor ?? settings.customHexColor,
       };
       setUserProfile(updatedProfile);
       try {

@@ -59,9 +59,9 @@ export async function downloadFileSafely(
   fileName: string,
   onProgress?: (status: 'starting' | 'downloading' | 'completed' | 'error') => void
 ): Promise<boolean> {
-  if (!source) {
+  if (!source || !source.trim()) {
     console.warn('downloadFileSafely: source is empty');
-    notifyDownload('Không tìm thấy nguồn tệp tin để tải về', 'error');
+    notifyDownload('Không tìm thấy nguồn dữ liệu tệp để tải về. Tệp này có thể bị gián đoạn trong lần tải lên trước đó.', 'error');
     if (onProgress) onProgress('error');
     return false;
   }

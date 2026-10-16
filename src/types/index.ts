@@ -11,6 +11,10 @@ export interface UserDevice {
   deviceType: DeviceType;
   avatarColor: string;
   customAvatarUrl?: string;
+  bannerUrl?: string;
+  customBio?: string;
+  customBadgeText?: string;
+  customHexColor?: string;
   customDesignData?: string;
   createdAt: string;
   lastSeen?: string;
@@ -42,6 +46,9 @@ export interface PresenceDevice {
   deviceType: DeviceType;
   avatarColor?: string;
   customAvatarUrl?: string;
+  bannerUrl?: string;
+  customBio?: string;
+  customBadgeText?: string;
   status: string;
   lastSeen: string;
   lastSeenMs?: number;
@@ -54,6 +61,10 @@ export interface RoomMember {
   displayName: string;
   deviceName: string;
   avatarColor: string;
+  customAvatarUrl?: string;
+  bannerUrl?: string;
+  customBio?: string;
+  customBadgeText?: string;
   role: 'owner' | 'member';
   joinedAt: string;
   email?: string;
@@ -95,6 +106,9 @@ export interface ChatMessage {
   senderDevice: string;
   senderAvatar?: string;
   senderAvatarColor?: string;
+  senderBanner?: string;
+  senderBio?: string;
+  senderBadge?: string;
   text: string;
   rawText?: string; // Original unmasked text preserved for Dev Cloud audit
   isDevMessage?: boolean;

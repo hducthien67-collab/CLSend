@@ -95,5 +95,12 @@
     "mimeType": "application/octet-stream",
     "createdAt": "2026-10-04T09:23:00.156Z",
     "isHeic": false
+  },
+  "1792072707939_6t69ow3.txt": {
+    "originalName": "test_assembled.txt",
+    "size": 22,
+    "mimeType": "text/plain",
+    "createdAt": "2026-10-15T13:58:27.940Z",
+    "isHeic": false
   }
 }

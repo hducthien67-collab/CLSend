@@ -3,7 +3,11 @@ import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { 
   initializeFirestore,
   doc, 
-  getDocFromServer 
+  getDocFromServer,
+  getDocs,
+  query,
+  collection,
+  limit
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 

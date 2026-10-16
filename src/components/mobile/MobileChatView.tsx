@@ -646,10 +646,8 @@ export const MobileChatView: React.FC = () => {
     e.preventDefault();
     if (!currentUser || !newRoomName.trim()) return;
 
-    const isPrivate = newRoomMode === 'private';
-    const randomCode = isPrivate 
-      ? Math.random().toString(36).substring(2, 8).toUpperCase()
-      : 'PUBLIC';
+    const isPrivate = true;
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const roomId = `room-${Date.now()}`;
 
     const isCreatorDev = isDevUser(currentUser.email);
@@ -996,34 +994,17 @@ export const MobileChatView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Chế độ phòng
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setNewRoomMode('public')}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                        newRoomMode === 'public'
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
-                          : 'bg-slate-950 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      Công cộng
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setNewRoomMode('private')}
-                      className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                        newRoomMode === 'private'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-400'
-                          : 'bg-slate-950 border-slate-800 text-slate-400'
-                      }`}
-                    >
-                      <Lock className="w-3.5 h-3.5" />
-                      Riêng tư (Mã ID)
-                    </button>
+                  <div className="p-3 rounded-2xl bg-purple-950/40 border border-purple-800/60 text-xs text-purple-200 flex items-start gap-2.5">
+                    <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-white flex items-center gap-1.5">
+                        <span>Phòng Riêng Tư Bảo Mật</span>
+                        <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">Mặc định</span>
+                      </p>
+                      <p className="text-[11px] text-purple-300/80 mt-0.5 leading-snug">
+                        Tự động tạo mã truy cập 6 ký tự. Chỉ thành viên có mã mới vào được phòng.
+                      </p>
+                    </div>
                   </div>
                 </div>
 

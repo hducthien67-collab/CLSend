@@ -14,8 +14,11 @@ interface UserProfileModalProps {
     deviceType?: string;
     bannerUrl?: string;
     bio?: string;
+    customBio?: string;
+    customBadgeText?: string;
     createdAt?: string;
   } | null;
+  anchorPosition?: { top: number; left: number; isRightHalf: boolean } | null;
   onClose: () => void;
 }
 
@@ -24,8 +27,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClos
 
   const initialChar = (user.displayName?.trim().charAt(0) || 'U').toUpperCase();
   const bannerGradient = user.bannerUrl 
-    ? `url(${user.bannerUrl})` 
+    ? `url(${user.bannerUrl}) center/cover no-repeat` 
     : 'linear-gradient(to right, #059669, #0d9488, #4f46e5)';
+
+  // Fix bỏ dấu $ ở tiểu sử
+  const rawBio = user.customBio || user.bio || '';
+  const cleanBio = rawBio.replace(/^\$+\s*/, '').replace(/\$/g, '').trim();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
@@ -46,6 +53,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClos
           className="h-28 w-full bg-cover bg-center relative"
           style={{ background: bannerGradient }}
         >
+          {user.customBadgeText && (
+            <div className="absolute top-3 right-12 px-2 py-0.5 bg-black/60 backdrop-blur-xs rounded-full border border-emerald-500/40 text-[10.5px] text-emerald-300 font-bold shadow-md">
+              {user.customBadgeText}
+            </div>
+          )}
           {user.isDev && (
             <div className="absolute top-3 left-3 px-2 py-0.5 bg-black/50 backdrop-blur-xs rounded-full border border-amber-500/40 flex items-center gap-1 text-[11px] text-amber-300 font-bold">
               <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
@@ -105,7 +117,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClos
             </h3>
             
             <p className="text-xs text-slate-300 leading-relaxed italic">
-              {user.bio || 'Thành viên CloudSend đang trực tuyến và sẵn sàng chia sẻ tệp.'}
+              {cleanBio || 'Thành viên CloudSend đang trực tuyến và sẵn sàng chia sẻ tệp.'}
             </p>
 
             <div className="space-y-2 pt-1 text-xs text-slate-300">

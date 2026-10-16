@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
+import { Readable } from 'stream';
 
 dotenv.config();
 
@@ -28,6 +29,43 @@ try {
     console.warn('Could not create /tmp/uploads dir:', tmpErr);
   }
 }
+
+// Temporary chunk storage directory for large file uploads (> 15MB)
+let CHUNKS_DIR = path.join(UPLOADS_DIR, '_chunks');
+try {
+  if (!fs.existsSync(CHUNKS_DIR)) {
+    fs.mkdirSync(CHUNKS_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Could not create chunks dir, falling back to /tmp/chunks:', e);
+  CHUNKS_DIR = path.join('/tmp', 'clsend_chunks');
+  try {
+    if (!fs.existsSync(CHUNKS_DIR)) {
+      fs.mkdirSync(CHUNKS_DIR, { recursive: true });
+    }
+  } catch (tmpErr) {
+    console.warn('Could not create /tmp/clsend_chunks:', tmpErr);
+  }
+}
+
+// Clean stale chunks older than 2 hours periodically
+function cleanStaleChunks() {
+  try {
+    if (!fs.existsSync(CHUNKS_DIR)) return;
+    const now = Date.now();
+    const files = fs.readdirSync(CHUNKS_DIR);
+    for (const f of files) {
+      const p = path.join(CHUNKS_DIR, f);
+      const stat = fs.statSync(p);
+      if (now - stat.mtimeMs > 2 * 60 * 60 * 1000) {
+        fs.unlinkSync(p);
+      }
+    }
+  } catch (e) {
+    console.warn('Error cleaning stale chunks:', e);
+  }
+}
+setInterval(cleanStaleChunks, 30 * 60 * 1000);
 
 // Meta persistence file
 const META_FILE = path.join(UPLOADS_DIR, '_meta.json');
@@ -128,6 +166,23 @@ const upload = multer({
       return cb(new Error(check.reason || 'Tệp thực thi nguy hiểm không được phép tải lên'));
     }
     cb(null, true);
+  }
+});
+
+// Multer storage for chunk uploads (temp part file)
+const chunkStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, CHUNKS_DIR);
+  },
+  filename: (_req, _file, cb) => {
+    cb(null, `tmp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.part`);
+  }
+});
+
+const chunkUpload = multer({
+  storage: chunkStorage,
+  limits: {
+    fileSize: 35 * 1024 * 1024 // 35 MB limit per individual chunk
   }
 });
 
@@ -273,6 +328,159 @@ async function startServer() {
   // Support both /api/upload and /api/upload/
   app.post('/api/upload', handleUploadMiddleware, processUpload);
   app.post('/api/upload/', handleUploadMiddleware, processUpload);
+
+  // Resilient Chunked Upload Endpoint - Bypasses Cloud Run 32MB single-request proxy limit
+  const handleChunkUploadMiddleware = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    (chunkUpload.single('chunk') as any)(req, res, (err: any) => {
+      if (err) {
+        console.error('Multer chunk upload error:', err);
+        return res.status(400).json({ success: false, error: err.message || 'Lỗi khi nhận mảnh tệp tải lên' });
+      }
+      next();
+    });
+  };
+
+  const processChunkUpload = async (req: express.Request, res: express.Response) => {
+    try {
+      const chunkFile = req.file;
+      if (!chunkFile) {
+        return res.status(400).json({ success: false, error: 'Không tìm thấy dữ liệu mảnh tệp' });
+      }
+
+      const uploadId = (req.body.uploadId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+      const chunkIndex = parseInt(req.body.chunkIndex, 10);
+      const totalChunks = parseInt(req.body.totalChunks, 10);
+      const fileName = req.body.fileName || 'file';
+      const fileType = req.body.fileType || 'application/octet-stream';
+
+      if (!uploadId || isNaN(chunkIndex) || isNaN(totalChunks) || totalChunks <= 0) {
+        try { fs.unlinkSync(chunkFile.path); } catch {}
+        return res.status(400).json({ success: false, error: 'Thông tin phân mảnh tệp không hợp lệ' });
+      }
+
+      const safeName = sanitizeServerFilename(fileName);
+      const extCheck = checkDangerousExtension(safeName);
+      if (extCheck.blocked) {
+        try { fs.unlinkSync(chunkFile.path); } catch {}
+        return res.status(400).json({ success: false, error: extCheck.reason || 'Tệp nguy hiểm không được phép tải lên.' });
+      }
+
+      // Rename temp chunk to indexed chunk file
+      const indexedChunkPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${chunkIndex}`);
+      try {
+        if (fs.existsSync(indexedChunkPath)) {
+          fs.unlinkSync(indexedChunkPath);
+        }
+      } catch {}
+      fs.renameSync(chunkFile.path, indexedChunkPath);
+
+      // Check if all chunks from 0 to totalChunks - 1 are present
+      let allChunksPresent = true;
+      for (let i = 0; i < totalChunks; i++) {
+        const checkPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
+        if (!fs.existsSync(checkPath)) {
+          allChunksPresent = false;
+          break;
+        }
+      }
+
+      if (!allChunksPresent) {
+        return res.json({
+          success: true,
+          assembled: false,
+          chunkIndex,
+          totalChunks
+        });
+      }
+
+      // All chunks present -> assemble them in order
+      const ext = path.extname(safeName).toLowerCase();
+      const safeExt = ext.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 10);
+      const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}${safeExt}`;
+      const finalFilePath = path.join(UPLOADS_DIR, uniqueId);
+
+      const writeStream = fs.createWriteStream(finalFilePath);
+      let totalBytesWritten = 0;
+
+      for (let i = 0; i < totalChunks; i++) {
+        const partPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
+        const chunkBuf = fs.readFileSync(partPath);
+        writeStream.write(chunkBuf);
+        totalBytesWritten += chunkBuf.length;
+        try { fs.unlinkSync(partPath); } catch {}
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        writeStream.end(() => resolve());
+        writeStream.on('error', reject);
+      });
+
+      // SVG sanitization
+      const isSvg = ext === '.svg' || fileType === 'image/svg+xml';
+      if (isSvg) {
+        try {
+          const rawBuf = fs.readFileSync(finalFilePath);
+          const cleanBuf = sanitizeSvgBuffer(rawBuf);
+          fs.writeFileSync(finalFilePath, cleanBuf);
+        } catch (svgErr) {
+          console.warn('SVG sanitization error on assembled file:', svgErr);
+        }
+      }
+
+      const isHeic = ext === '.heic' || ext === '.heif' || fileType === 'image/heic' || fileType === 'image/heif';
+      const isImage = fileType.startsWith('image/') || isHeic || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(ext);
+
+      let thumbnailBase64: string | undefined = undefined;
+      if (isImage) {
+        try {
+          const thumbBuffer = await sharp(finalFilePath)
+            .rotate()
+            .resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: 80 })
+            .toBuffer();
+          thumbnailBase64 = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+        } catch (thumbErr) {
+          console.warn('Could not generate server thumbnail for assembled file:', thumbErr);
+        }
+      }
+
+      fileMetaMap[uniqueId] = {
+        originalName: safeName,
+        size: totalBytesWritten,
+        mimeType: isHeic ? 'image/heic' : fileType,
+        createdAt: new Date().toISOString(),
+        isHeic: isHeic,
+        thumbnail: thumbnailBase64
+      };
+      saveMetaFile();
+
+      const downloadUrl = `/api/files/download/${uniqueId}`;
+      const viewUrl = `/api/files/view/${uniqueId}`;
+
+      return res.json({
+        success: true,
+        assembled: true,
+        file: {
+          id: uniqueId,
+          name: safeName,
+          originalName: safeName,
+          size: totalBytesWritten,
+          type: isHeic ? 'image/heic' : fileType,
+          mimeType: isHeic ? 'image/heic' : fileType,
+          url: downloadUrl,
+          viewUrl: viewUrl,
+          thumbnail: thumbnailBase64,
+          isHeic: isHeic
+        }
+      });
+    } catch (err: any) {
+      console.error('Process chunk upload error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Lỗi khi ghép mảnh tệp tải lên' });
+    }
+  };
+
+  app.post('/api/upload-chunk', handleChunkUploadMiddleware, processChunkUpload);
+  app.post('/api/upload-chunk/', handleChunkUploadMiddleware, processChunkUpload);
 
   // Direct Base64 / JSON Upload Endpoint (Fail-safe fallback when multipart is blocked by Cloud Run proxy/IFrame)
   app.post('/api/upload-base64', async (req: express.Request, res: express.Response) => {
@@ -425,15 +633,23 @@ async function startServer() {
       }
 
       const mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
+      const contentLength = upstreamRes.headers.get('content-length');
       const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
 
       res.setHeader('Content-Type', mimeType);
+      if (contentLength) {
+        res.setHeader('Content-Length', contentLength);
+      }
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
       );
+
+      if (upstreamRes.body) {
+        return Readable.fromWeb(upstreamRes.body as any).pipe(res);
+      }
 
       const arrayBuffer = await upstreamRes.arrayBuffer();
       return res.send(Buffer.from(arrayBuffer));

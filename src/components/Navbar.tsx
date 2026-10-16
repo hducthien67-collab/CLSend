@@ -16,7 +16,9 @@ import {
   ExternalLink,
   Database,
   Tv,
-  Scale
+  Scale,
+  Palette,
+  Sparkles
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
 

@@ -110,7 +110,19 @@ export const ChatRoomView: React.FC = () => {
   const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
   const [memberNamesMap, setMemberNamesMap] = useState<Record<string, string>>({});
-  const [memberMetaMap, setMemberMetaMap] = useState<Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }>>({});
+  const [memberMetaMap, setMemberMetaMap] = useState<Record<string, {
+    displayName: string;
+    avatarUrl?: string;
+    avatarColor?: string;
+    isDev?: boolean;
+    email?: string;
+    deviceName?: string;
+    deviceType?: string;
+    bannerUrl?: string;
+    customBio?: string;
+    customBadgeText?: string;
+    createdAt?: string;
+  }>>({});
   const [selectedProfileUser, setSelectedProfileUser] = useState<any>(null);
   const [profileAnchor, setProfileAnchor] = useState<{ top: number; left: number; isRightHalf: boolean } | null>(null);
 
@@ -543,16 +555,47 @@ export const ChatRoomView: React.FC = () => {
     const usersRef = collection(db, 'users');
     const unsubscribeUsers = onSnapshot(usersRef, (snapshot) => {
       const names: Record<string, string> = {};
-      const meta: Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }> = {};
+      const meta: Record<string, {
+        displayName: string;
+        avatarUrl?: string;
+        avatarColor?: string;
+        isDev?: boolean;
+        email?: string;
+        deviceName?: string;
+        deviceType?: string;
+        bannerUrl?: string;
+        customBio?: string;
+        customBadgeText?: string;
+        createdAt?: string;
+      }> = {};
       snapshot.docs.forEach((docSnap) => {
         const data = docSnap.data();
         const displayName = data.displayName || data.deviceName;
         const avatarUrl = data.customAvatarUrl || data.photoURL || undefined;
         const avatarColor = data.avatarColor || '#10b981';
         const isDev = Boolean(data.isDev || isDevUser(data.email));
+        const bannerUrl = data.bannerUrl || undefined;
+        const customBio = (data.customBio || data.bio || '').replace(/^\$+\s*/, '').replace(/\$/g, '').trim();
+        const customBadgeText = data.customBadgeText || undefined;
+        const email = data.email || '';
+        const deviceName = data.deviceName || '';
+        const deviceType = data.deviceType || '';
+        const createdAt = data.createdAt || '';
 
         if (displayName) {
-          const item = { displayName, avatarUrl, avatarColor, isDev };
+          const item = { 
+            displayName, 
+            avatarUrl, 
+            avatarColor, 
+            isDev,
+            bannerUrl,
+            customBio,
+            customBadgeText,
+            email,
+            deviceName,
+            deviceType,
+            createdAt
+          };
           names[docSnap.id] = displayName;
           meta[docSnap.id] = item;
           if (data.uid) {
@@ -1077,12 +1120,14 @@ export const ChatRoomView: React.FC = () => {
       isDev: isCreatorDev
     };
 
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+
     try {
       const roomPayload: ChatRoom = {
         id: roomId,
         name: newRoomName.trim(),
-        code: 'GROUP',
-        isPrivate: false,
+        code: randomCode,
+        isPrivate: true,
         createdBy: currentUser.uid,
         createdByName: userProfile?.displayName || 'Người dùng',
         ownerId: currentUser.uid,
@@ -1090,7 +1135,7 @@ export const ChatRoomView: React.FC = () => {
         avatar: newRoomAvatar || '',
         avatarColor: newRoomColor || '#10b981',
         createdAt: new Date().toISOString(),
-        description: 'Phòng nhóm chat',
+        description: `Phòng riêng tư bảo mật (Mã: ${randomCode})`,
         members: [creatorMember],
         membersCount: 1
       };
@@ -1558,13 +1603,16 @@ export const ChatRoomView: React.FC = () => {
                             setSelectedProfileUser({
                               uid: msg.senderId || msg.senderDevice,
                               displayName: senderDisplayName,
-                              email: isMe ? currentUser?.email : senderMeta?.email,
+                              email: isMe ? (currentUser?.email || '') : (senderMeta?.email || ''),
                               avatarUrl: effectiveAvatarUrl,
                               avatarColor: effectiveAvatarColor,
                               isDev: isDevMsg,
                               deviceName: isMe ? settings.deviceName : senderMeta?.deviceName,
                               deviceType: isMe ? settings.deviceType : senderMeta?.deviceType,
-                              createdAt: senderMeta?.createdAt
+                              createdAt: senderMeta?.createdAt,
+                              bannerUrl: isMe ? (settings.bannerUrl || userProfile?.bannerUrl) : senderMeta?.bannerUrl,
+                              customBio: isMe ? (settings.customBio || userProfile?.customBio) : (senderMeta?.customBio || (senderMeta as any)?.bio),
+                              customBadgeText: isMe ? (settings.customBadgeText || userProfile?.customBadgeText) : senderMeta?.customBadgeText
                             });
                           }}
                           title="Xem hồ sơ cá nhân"
@@ -2222,11 +2270,23 @@ export const ChatRoomView: React.FC = () => {
                 />
               </div>
 
-              {/* Simplified room creation: no privacy toggles needed */}
+              {/* Chế độ phòng: Luôn là phòng riêng tư */}
+              <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-800/60 text-xs text-purple-200 flex items-start gap-3">
+                <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-white flex items-center gap-1.5">
+                    <span>Phòng Riêng Tư Bảo Mật (Private Room)</span>
+                    <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">Mặc định</span>
+                  </p>
+                  <p className="text-[11px] text-purple-300/80 leading-relaxed">
+                    Hệ thống sẽ tạo 1 mã truy cập riêng (6 ký tự). Người khác chỉ có thể vào khi bạn chia sẻ mã phòng này.
+                  </p>
+                </div>
+              </div>
 
               <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
                 <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Bạn sẽ tự động là <strong>Trưởng phòng (Owner)</strong> quản lý nhóm này.</span>
+                <span>Bạn sẽ là <strong>Trưởng phòng (Owner)</strong> quản trị phòng riêng tư này.</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">

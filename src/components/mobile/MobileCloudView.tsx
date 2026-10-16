@@ -115,6 +115,12 @@ export const MobileCloudView: React.FC = () => {
           thumb = fallback.thumbnail || null;
         }
 
+        // Safety check: Never save empty URL docs to Firestore
+        if (!fileUrl || !fileUrl.trim()) {
+          console.warn(`Không thể tải tệp "${file.name}" lên Cloud, bỏ qua lưu trữ rỗng`);
+          continue;
+        }
+
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         let category: 'image' | 'video' | 'audio' | 'document' | 'other' = 'other';
         if (file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) category = 'image';
@@ -381,6 +387,11 @@ export const MobileCloudView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
+                if (!selectedFileAction.url || !selectedFileAction.url.trim()) {
+                  alert(`Tệp "${selectedFileAction.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                  setSelectedFileAction(null);
+                  return;
+                }
                 downloadFileSafely(selectedFileAction.url, selectedFileAction.name);
                 setSelectedFileAction(null);
               }}

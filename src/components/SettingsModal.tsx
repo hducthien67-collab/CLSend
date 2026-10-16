@@ -124,6 +124,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [customDesignData, setCustomDesignData] = useState<string | undefined>(settings.customDesignData);
   const [isFullscreenStudioOpen, setIsFullscreenStudioOpen] = useState(false);
   const [devToastMessage, setDevToastMessage] = useState<string | null>(null);
+  const [isDraggingAvatarFile, setIsDraggingAvatarFile] = useState(false);
+  const [isDraggingBannerFile, setIsDraggingBannerFile] = useState(false);
 
   const avatarFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -135,41 +137,75 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   
-  const handleBannerFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Lightweight image compression for fast avatar & banner loading without bloating Firestore
+  const compressProfileImage = (file: File, maxDim: number, quality: number): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawData = e.target?.result as string;
+        if (!rawData) {
+          resolve('');
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, width);
+          canvas.height = Math.max(1, height);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const compressed = canvas.toDataURL('image/jpeg', quality);
+            resolve(compressed);
+          } else {
+            resolve(rawData);
+          }
+        };
+        img.onerror = () => resolve(rawData);
+        img.src = rawData;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleBannerFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const result = uploadEvent.target?.result as string;
-      if (result) {
-        setCustomBannerUrl(result);
-        updateSettings({ bannerUrl: result });
-      }
-    };
-    reader.readAsDataURL(file);
+    const result = await compressProfileImage(file, 800, 0.82);
+    if (result) {
+      setCustomBannerUrl(result);
+      updateSettings({ bannerUrl: result });
+    }
     e.target.value = '';
   };
 
-  const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const result = uploadEvent.target?.result as string;
-      if (result) {
-        setCustomAvatarUrl(result);
-        updateSettings({ customAvatarUrl: result });
-      }
-    };
-    reader.readAsDataURL(file);
+    const result = await compressProfileImage(file, 256, 0.85);
+    if (result) {
+      setCustomAvatarUrl(result);
+      updateSettings({ customAvatarUrl: result });
+    }
     e.target.value = '';
   };
 
@@ -322,6 +358,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       cardStyle,
       customHexColor,
       customAvatarUrl,
+      bannerUrl: customBannerUrl,
       customDesignData,
     });
     if (syncedName && (!currentUser?.displayName || currentUser.displayName !== syncedName)) {
@@ -996,7 +1033,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* CỘT TRÁI (7 CỘT): CÁC TRƯỜNG CHỈNH SỬA PROFILE */}
                 <div className="lg:col-span-7 space-y-4">
                   {/* 1. Ảnh Đại Diện (Avatar) */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div 
+                    className={`bg-slate-950/60 border rounded-xl p-4 space-y-3 transition-all ${
+                      isDraggingAvatarFile ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-950/20' : 'border-slate-800'
+                    }`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingAvatarFile(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingAvatarFile(false);
+                    }}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingAvatarFile(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && file.type.startsWith('image/')) {
+                        const res = await compressProfileImage(file, 256, 0.85);
+                        if (res) {
+                          setCustomAvatarUrl(res);
+                          updateSettings({ customAvatarUrl: res });
+                        }
+                      }
+                    }}
+                  >
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                         <Flame className="w-4 h-4 text-emerald-400" />
@@ -1032,6 +1096,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                       </div>
                     </div>
+                    <p className="text-[10px] text-slate-400">
+                      💡 Bạn có thể kéo thả trực tiếp file ảnh đại diện vào ô này!
+                    </p>
                     {/* Màu sắc avatar fallback */}
                     <div className="flex items-center gap-2 flex-wrap pt-1">
                       <span className="text-[11px] text-slate-400">Hoặc chọn màu mặc định:</span>
@@ -1055,7 +1122,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
 
                   {/* 2. Ảnh Bìa (Banner / Cover Image) */}
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div 
+                    className={`bg-slate-950/60 border rounded-xl p-4 space-y-3 transition-all ${
+                      isDraggingBannerFile ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-950/20' : 'border-slate-800'
+                    }`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingBannerFile(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingBannerFile(false);
+                    }}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingBannerFile(false);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && file.type.startsWith('image/')) {
+                        const res = await compressProfileImage(file, 800, 0.82);
+                        if (res) {
+                          setCustomBannerUrl(res);
+                          updateSettings({ bannerUrl: res });
+                        }
+                      }
+                    }}
+                  >
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                         <Palette className="w-4 h-4 text-emerald-400" />
@@ -1092,7 +1186,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Ảnh bìa sẽ hiển thị ở phần trên cùng trong thẻ thông tin cá nhân (Profile Card) chuẩn Discord của bạn.
+                      Ảnh bìa sẽ hiển thị ở phần trên cùng trong thẻ thông tin cá nhân (Profile Card) chuẩn Discord của bạn. Bạn cũng có thể kéo thả trực tiếp ảnh bìa vào đây!
                     </p>
                   </div>
 
@@ -1119,7 +1213,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         rows={2}
                         maxLength={120}
                         value={customBio}
-                        onChange={(e) => setCustomBio(e.target.value)}
+                        onChange={(e) => setCustomBio(e.target.value.replace(/^\$+\s*/, '').replace(/\$/g, ''))}
                         placeholder="Viết vài dòng giới thiệu về bản thân bạn..."
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
                       />
@@ -1207,7 +1301,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               Giới thiệu
                             </span>
                             <p className="text-xs text-slate-300 italic leading-snug">
-                              "${customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.'}"
+                              "{customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.'}"
                             </p>
                           </div>
                         </div>

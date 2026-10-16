@@ -130,6 +130,12 @@ export const MobileCloudView: React.FC = () => {
 
         const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
         const safeThumb = (thumb && thumb.length < 700000) ? thumb : null;
+
+        if (!safeUrl || !safeUrl.trim()) {
+          console.warn(`Không thể tải tệp "${file.name}" lên Cloud do liên kết rỗng`);
+          continue;
+        }
+
         const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
         await setDoc(doc(db, 'cloud_files', docId), {

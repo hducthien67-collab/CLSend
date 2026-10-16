@@ -33,6 +33,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  RefreshCw,
   Copy,
   Edit2,
   X,
@@ -60,7 +62,7 @@ export const CloudDriveView: React.FC = () => {
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [editFileName, setEditFileName] = useState('');
   const [dragOver, setDragOver] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
   // Cloud URL Modal states
   const [isCloudUrlModalOpen, setIsCloudUrlModalOpen] = useState(false);
@@ -114,6 +116,8 @@ export const CloudDriveView: React.FC = () => {
   const [bottomToast, setBottomToast] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
   const toastTimerRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const reuploadInputRef = useRef<HTMLInputElement>(null);
+  const [reuploadingFile, setReuploadingFile] = useState<CloudDriveFile | null>(null);
 
   const showBottomToast = (message: string, isError = false) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -312,6 +316,12 @@ export const CloudDriveView: React.FC = () => {
         const safeViewUrl = (fileViewUrl && fileViewUrl.length < 700000) ? fileViewUrl : safeUrl;
         const safeThumbnail = (fileThumbnail && fileThumbnail.length < 700000) ? fileThumbnail : null;
 
+        if (!safeUrl || !safeUrl.trim()) {
+          console.error(`Không thể lưu trữ tệp "${file.name}" do liên kết tải về rỗng.`);
+          alert(`Không thể lưu tệp "${file.name}" lên Cloud do dữ liệu bị gián đoạn. Vui lòng thử lại.`);
+          continue;
+        }
+
         // Save metadata into Firestore
         const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
         await setDoc(doc(db, 'cloud_files', docId), {
@@ -378,6 +388,85 @@ export const CloudDriveView: React.FC = () => {
       setEditingFileId(null);
     } catch (err) {
       console.error('Error renaming file:', err);
+    }
+  };
+
+  // Re-upload data for an interrupted file
+  const handleTriggerReupload = (file: CloudDriveFile, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setReuploadingFile(file);
+    if (reuploadInputRef.current) {
+      reuploadInputRef.current.value = '';
+      reuploadInputRef.current.click();
+    }
+  };
+
+  const handleExecuteReupload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !reuploadingFile) return;
+
+    setUploading(true);
+    setUploadProgress(5);
+    setStatusMessage({
+      type: 'info',
+      text: `Đang tải bù dữ liệu phân mảnh cho tệp "${reuploadingFile.name}"...`
+    });
+
+    try {
+      const uploaded = await uploadFileToServer(file, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      if (!uploaded.url || !uploaded.url.trim()) {
+        throw new Error('Máy chủ chưa trả về đường dẫn tải.');
+      }
+
+      const safeUrl = uploaded.url;
+      const safeViewUrl = uploaded.viewUrl || safeUrl;
+      const safeThumbnail = uploaded.thumbnail || null;
+      const category = getFileCategory(file.type, file.name);
+
+      await updateDoc(doc(db, 'cloud_files', reuploadingFile.id), {
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        url: safeUrl,
+        viewUrl: safeViewUrl,
+        thumbnail: safeThumbnail,
+        category: category,
+        createdAt: new Date().toISOString()
+      });
+
+      setStatusMessage({
+        type: 'success',
+        text: `Đã khôi phục và cập nhật dữ liệu thành công cho tệp "${file.name}"!`
+      });
+      showBottomToast(`Đã khôi phục dữ liệu cho "${file.name}"`);
+    } catch (err: any) {
+      console.error('Lỗi khi tải bù tệp:', err);
+      setStatusMessage({
+        type: 'error',
+        text: err.message || 'Lỗi khi tải lại tệp lên máy chủ.'
+      });
+      alert(`Không thể tải lại tệp: ${err.message || 'Vui lòng thử lại'}`);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
+      setReuploadingFile(null);
+    }
+  };
+
+  // Clean all interrupted/broken files with empty URLs
+  const handleCleanBrokenFiles = async () => {
+    const broken = files.filter(f => !f.url || !f.url.trim());
+    if (broken.length === 0) return;
+    try {
+      for (const f of broken) {
+        await deleteDoc(doc(db, 'cloud_files', f.id)).catch(() => {});
+      }
+      showBottomToast(`Đã dọn dẹp ${broken.length} tệp bị gián đoạn.`);
+    } catch (err) {
+      console.error('Lỗi khi dọn tệp lỗi:', err);
     }
   };
 
@@ -525,6 +614,12 @@ export const CloudDriveView: React.FC = () => {
               onChange={(e) => handleUploadFiles(e.target.files)}
               className="hidden"
             />
+            <input
+              type="file"
+              ref={reuploadInputRef}
+              onChange={handleExecuteReupload}
+              className="hidden"
+            />
             <button
               id="upload-to-cloud-btn"
               type="button"
@@ -591,12 +686,16 @@ export const CloudDriveView: React.FC = () => {
           className={`p-4 rounded-xl border flex items-center justify-between gap-3 text-sm ${
             statusMessage.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : statusMessage.type === 'info'
+              ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
               : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
           }`}
         >
           <div className="flex items-center gap-2.5">
             {statusMessage.type === 'success' ? (
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            ) : statusMessage.type === 'info' ? (
+              <Loader2 className="w-5 h-5 text-sky-400 animate-spin shrink-0" />
             ) : (
               <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
             )}
@@ -765,7 +864,34 @@ export const CloudDriveView: React.FC = () => {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <>
+          {files.some((f) => !f.url || !f.url.trim()) && (
+            <div className="mb-4 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-amber-300">
+                    Phát hiện tệp bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh)
+                  </h4>
+                  <p className="text-slate-400 text-[11px] mt-0.5">
+                    Hệ thống đã nâng cấp Phân mảnh (Chunked Upload) cho tệp lớn. Bạn có thể bấm nút <strong>"Tải lại"</strong> trên tệp để chọn file bù vào, hoặc dọn dẹp các tệp bị gián đoạn này.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleCleanBrokenFiles}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-semibold text-xs transition-colors"
+                >
+                  Dọn dẹp tệp lỗi
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredFiles.map((file) => (
             <div
               key={file.id}
@@ -879,21 +1005,27 @@ export const CloudDriveView: React.FC = () => {
                 className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-slate-400"
               >
                 <div className="flex items-center gap-1">
-                  {/* Download */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!file.url) {
-                        alert(`Tệp "${file.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
-                        return;
-                      }
-                      downloadFileSafely(file.url, file.name);
-                    }}
-                    title="Tải về máy tính / điện thoại"
-                    className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                  </button>
+                  {/* Download or Re-upload */}
+                  {!file.url ? (
+                    <button
+                      type="button"
+                      onClick={(e) => handleTriggerReupload(file, e)}
+                      title="Tệp bị gián đoạn - Bấm để tải bù dữ liệu cho tệp này"
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <RefreshCw className="w-3 h-3 text-amber-300" />
+                      <span>Tải lại</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => downloadFileSafely(file.url, file.name)}
+                      title="Tải về máy tính / điện thoại"
+                      className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  )}
 
                   {/* Copy Share Link */}
                   <button
@@ -929,7 +1061,8 @@ export const CloudDriveView: React.FC = () => {
             </div>
           ))}
         </div>
-      )}
+      </>
+    )}
 
       {/* Preview Modal */}
       {previewFile && (
@@ -1021,20 +1154,48 @@ export const CloudDriveView: React.FC = () => {
                   <p className="text-xs text-slate-400 mb-5">
                     {getDocumentTypeInfo(previewFile.name, previewFile.type).label} • {formatFileSize(previewFile.size)}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!previewFile.url) {
-                        alert(`Tệp "${previewFile.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
-                        return;
-                      }
-                      downloadFileSafely(previewFile.url, previewFile.name);
-                    }}
-                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-2 shadow-lg hover:shadow-emerald-600/20 transition-all cursor-pointer"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Tải tệp về máy để xem</span>
-                  </button>
+                  {!previewFile.url ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <span className="text-amber-400 text-xs font-semibold">
+                        Tệp này bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh).
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const target = previewFile;
+                            setPreviewFile(null);
+                            handleTriggerReupload(target);
+                          }}
+                          className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 shadow-lg transition-all cursor-pointer"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                          <span>Tải bù dữ liệu ngay</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const target = previewFile;
+                            setPreviewFile(null);
+                            handleDeleteFile(target);
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold text-xs inline-flex items-center gap-2 transition-all cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>Xóa tệp này</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-2 shadow-lg hover:shadow-emerald-600/20 transition-all cursor-pointer"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Tải tệp về máy để xem</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>

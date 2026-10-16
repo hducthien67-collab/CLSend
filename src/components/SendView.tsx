@@ -730,6 +730,12 @@ export const SendView: React.FC = () => {
           const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
           const safeData = (serverThumbnail && serverThumbnail.length < 700000) ? serverThumbnail : '';
 
+          if (!safeUrl || !safeUrl.trim()) {
+            console.error(`Không thể gửi tệp "${item.name}" do lỗi kết nối lưu trữ.`);
+            alert(`Không thể gửi tệp "${item.name}" do không thể kết nối lưu trữ lên máy chủ. Vui lòng thử lại.`);
+            continue;
+          }
+
           const payload: any = {
             senderId: currentUser.uid,
             senderName: userProfile?.displayName || currentUser.displayName || 'Người dùng',

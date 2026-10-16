@@ -21,6 +21,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
+import { GpsLocationBadge } from './GpsLocationBadge';
 
 interface NavbarProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -226,6 +227,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
             </button>
           )}
+          {/* Real-Time GPS Location Badge */}
+          <GpsLocationBadge />
+
           {/* Rules / Nội quy Button */}
           {onOpenRules && (
             <button

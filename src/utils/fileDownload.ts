@@ -8,7 +8,7 @@
  */
 
 import { isSafeDownloadUrl, sanitizeFilename } from './fileSecurity';
-import { getFileBlobLocally } from './idbStorage';
+import { getFileBlobLocally, storeFileBlobLocally } from './idbStorage';
 
 // Global toast listener registry for download feedback
 type DownloadToastCallback = (msg: { text: string; type: 'info' | 'success' | 'error' }) => void;
@@ -174,6 +174,11 @@ export async function downloadFileSafely(
             }
           }
 
+          // Cache downloaded blob locally in IndexedDB for future instant / offline use
+          if (fileIdOrKey) {
+            storeFileBlobLocally(fileIdOrKey, blob).catch(() => {});
+          }
+
           blobUrl = URL.createObjectURL(blob);
           createdBlobUrl = true;
         } catch (fetchErr) {
@@ -248,7 +253,7 @@ export async function downloadFileSafely(
       if (onProgress) onProgress('completed');
       notifyDownload(`Đã gửi lệnh tải xuống "${safeFileName}".`, 'success');
       return true;
-    } catch (fallbackErr) {
+    } catch (fallbackErr: any) {
       if (onProgress) onProgress('error');
       notifyDownload(`Không thể tải về "${safeFileName}". Vui lòng thử lại.`, 'error');
       notifyErrorChat({

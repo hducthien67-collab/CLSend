@@ -64,7 +64,7 @@ interface SettingsModalProps {
   onOpenDevPage?: () => void;
 }
 
-type SettingsTab = 'device' | 'display_tv' | 'custom_design' | 'account_rules';
+type SettingsTab = 'device' | 'custom_design' | 'account_rules';
 
 // Theme Presets for Custom Design Frame
 const THEME_PRESETS = [
@@ -683,20 +683,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span>Thiết Bị & Mạng</span>
             </button>
 
-            {/* TAB 2: HIỂN THỊ & SMART TV */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('display_tv')}
-              className={`flex items-center gap-1 sm:gap-1.5 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 active:scale-95 ${
-                activeTab === 'display_tv'
-                  ? 'bg-amber-500 text-slate-950 shadow-sm shadow-amber-500/20 font-bold'
-                  : 'bg-slate-900 text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-slate-800'
-              }`}
-            >
-              <Tv className="w-3.5 h-3.5" />
-              <span>Hiển Thị & Smart TV</span>
-            </button>
-
             {/* TAB 3: KHUNG TỰ THIẾT KẾ (DESIGN STUDIO & CANVAS) */}
             <button
               type="button"
@@ -888,118 +874,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onChange={(e) => setSoundEnabled(e.target.checked)}
                         className="w-4 h-4 rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500"
                       />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ------------------------------------------------------------ */}
-          {/* TAB 2: HIỂN THỊ & SMART TV */}
-          {/* ------------------------------------------------------------ */}
-          {activeTab === 'display_tv' && (
-            <div className="space-y-3 sm:space-y-3.5 animate-in fade-in duration-200">
-              
-              {/* CHẾ ĐỘ SMART TV & PHÓNG TO DPI */}
-              <div className="bg-slate-950/60 border border-slate-800/90 rounded-xl p-3 sm:p-3.5 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                  <h3 className="text-[11px] sm:text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Tv className="w-3.5 h-3.5 shrink-0" />
-                    <span>Chế độ Smart TV & Sửa lỗi DPI Màn hình lớn</span>
-                  </h3>
-                  <span className="text-[9.5px] font-mono px-2 py-0.2 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold whitespace-nowrap shrink-0 w-fit">
-                    10-Foot UI
-                  </span>
-                </div>
-
-                {/* Nút gạt bật tắt TV Mode */}
-                <label className="flex items-center justify-between p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors gap-2.5">
-                  <div className="pr-2 min-w-0">
-                    <div className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
-                      <span>Kích hoạt Chế độ Tivi (Smart TV Mode)</span>
-                      {tvModeEnabled && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 whitespace-nowrap">
-                          Đang bật
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10.5px] text-slate-400 mt-0.5 leading-snug">
-                      Tối ưu giao diện cho màn hình Tivi (Samsung Tizen, LG WebOS, Android TV, Sony, TCL). Tự động nhận diện thiết bị là Smart TV.
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={tvModeEnabled}
-                    onChange={(e) => setTvModeEnabled(e.target.checked)}
-                    className="w-4 h-4 rounded text-amber-500 bg-slate-950 border-slate-700 focus:ring-amber-500 shrink-0 cursor-pointer"
-                  />
-                </label>
-
-                {/* Bộ chọn Tỷ lệ phóng to DPI TV */}
-                <div className="p-2.5 sm:p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                    <span className="text-[11px] font-bold text-white flex items-center gap-1.5">
-                      <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span>Tỷ lệ phóng to DPI TV</span>
-                    </span>
-                    <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.2 rounded border border-amber-500/20 whitespace-nowrap shrink-0 w-fit">
-                      {Math.round(tvDpiScale * 100)}%
-                    </span>
-                  </div>
-
-                  <p className="text-[10.5px] text-slate-400 leading-snug">
-                    Chọn mức phóng to phù hợp với kích thước TV của bạn:
-                  </p>
-
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-0.5">
-                    {[
-                      { scale: 1.0, label: '100%', note: 'Chuẩn PC' },
-                      { scale: 1.25, label: '125%', note: 'TV 32-43"' },
-                      { scale: 1.4, label: '140%', note: 'TV 49-55"' },
-                      { scale: 1.6, label: '160%', note: 'TV 65-75"' },
-                      { scale: 1.85, label: '185%', note: 'TV 4K' },
-                    ].map((preset) => {
-                      const isSelected = Math.abs(tvDpiScale - preset.scale) < 0.05;
-                      return (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          onClick={() => {
-                            setTvDpiScale(preset.scale);
-                            if (!tvModeEnabled) setTvModeEnabled(true);
-                          }}
-                          className={`p-2 rounded-lg text-center border transition-all ${
-                            isSelected
-                              ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm font-bold'
-                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="text-xs font-bold">{preset.label}</div>
-                          <div className="text-[9px] text-slate-400 mt-0.2">{preset.note}</div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Hướng dẫn phím Remote TV */}
-                <div className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-800 text-[10.5px] text-slate-300 space-y-1.5">
-                  <div className="font-bold text-amber-300 flex items-center gap-1.5">
-                    <span>🎮 Phím điều khiển Remote Tivi</span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-0.5 text-slate-400">
-                    <div className="p-2 rounded-md bg-slate-950 border border-slate-800/80">
-                      <strong className="text-white block mb-0.2">◀ / ▶ Trái - Phải:</strong>
-                      Chuyển tab nhanh
-                    </div>
-                    <div className="p-2 rounded-md bg-slate-950 border border-slate-800/80">
-                      <strong className="text-white block mb-0.2">🔘 OK / Enter:</strong>
-                      Chọn và gửi tệp
-                    </div>
-                    <div className="p-2 rounded-md bg-slate-950 border border-slate-800/80">
-                      <strong className="text-white block mb-0.2">↩ Back / Return:</strong>
-                      Đóng cửa sổ
                     </div>
                   </div>
                 </div>
@@ -2131,7 +2005,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
 
-              {/* SPECIAL DEV CONSOLE ACCESS (RESTRICTED TO DEVELOPER ONLY - CHỈ CHO PHÉP TRÊN MÁY TÍNH) */}
+              {/* SPECIAL DEV CONSOLE ACCESS (RESTRICTED TO DEVELOPER ONLY - FULLY COMPATIBLE ON MOBILE & PC) */}
               {isDevUser(currentUser?.email) && (
                 <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-emerald-900/20 border border-emerald-500/50 rounded-xl p-3 space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2141,7 +2015,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         Quyền hạn DEV: Datastore
                       </div>
                       <div className="text-[10.5px] text-slate-400">
-                        Quản trị cơ sở dữ liệu Firestore trực tiếp (Chỉ hỗ trợ trên Máy tính / Laptop).
+                        Quản trị cơ sở dữ liệu Firestore trực tiếp (Tương thích 100% cả Điện thoại & Máy tính).
                       </div>
                     </div>
 
@@ -2149,11 +2023,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          const isMobileDevice = typeof window !== 'undefined' && (window.innerWidth <= 840 || /mobile|iphone|ipod|android/i.test(navigator.userAgent));
-                          if (isMobileDevice) {
-                            alert('Tính năng DEV DataStore chỉ hoạt động trên Máy Tính (Desktop) màn hình rộng để tránh lỗi hiển thị và thao tác bảng dữ liệu.');
-                            return;
-                          }
                           onClose();
                           if (onOpenDevPage) {
                             onOpenDevPage();
@@ -2161,16 +2030,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             window.location.href = '/?page=datastore';
                           }
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1 transition-all"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
                       >
-                        <Database className="w-3 h-3" />
-                        <span>Mở Datastore (Chỉ PC)</span>
+                        <Database className="w-3.5 h-3.5" />
+                        <span>Mở Datastore</span>
                       </button>
                     </div>
                   </div>
-                  <div className="text-[9.5px] text-amber-400/80 italic flex items-center gap-1">
-                    <ShieldAlert className="w-3 h-3 shrink-0" />
-                    <span>Không hỗ trợ trên điện thoại do giao diện bảng dữ liệu Firestore chỉ dành cho máy tính.</span>
+                  <div className="text-[9.5px] text-emerald-400/90 italic flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 shrink-0 text-emerald-400" />
+                    <span>Hỗ trợ đầy đủ giao diện đáp ứng (responsive) trên mọi kích thước màn hình.</span>
                   </div>
                 </div>
               )}

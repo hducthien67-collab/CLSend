@@ -877,7 +877,7 @@ export const SendView: React.FC = () => {
   const [isSearchingCode, setIsSearchingCode] = useState(false);
 
   const CLSEND_DEMO_DEVICE: PresenceDevice = {
-    id: 'official_clsend_relay_node',
+    deviceId: 'official_clsend_relay_node',
     uid: 'u_clsend_official',
     connectCode: 'CLSEND',
     displayName: 'CloudSend Official Hub',

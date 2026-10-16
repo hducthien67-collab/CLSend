@@ -109,7 +109,7 @@ export const MobileReceiveView: React.FC = () => {
   };
 
   return (
-    <div className="w-full flex-1 flex flex-col px-3 py-2.5 space-y-2.5 overscroll-contain no-scrollbar">
+    <div className="w-full max-w-md mx-auto flex-1 flex flex-col px-3 py-2.5 space-y-2.5 overscroll-contain no-scrollbar">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed top-16 left-3.5 right-3.5 z-50 p-2.5 rounded-2xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-200 text-xs font-semibold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-2">

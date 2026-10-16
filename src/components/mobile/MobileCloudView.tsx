@@ -194,7 +194,7 @@ export const MobileCloudView: React.FC = () => {
   });
 
   return (
-    <div className="w-full flex-1 flex flex-col px-3 py-2.5 space-y-3 overscroll-contain relative pb-20 no-scrollbar">
+    <div className="w-full max-w-md mx-auto flex-1 flex flex-col px-3 py-2.5 space-y-3 overscroll-contain relative pb-20 no-scrollbar">
       {/* Hidden Upload Inputs */}
       <input
         type="file"

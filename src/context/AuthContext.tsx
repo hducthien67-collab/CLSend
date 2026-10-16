@@ -1369,7 +1369,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setCurrentUser((prev) => prev ? ({ ...prev, photoURL: newSettings.customAvatarUrl || null }) : null);
       }
 
-      const updatedProfile: UserDevice = {
+      const cleanUndefined = (obj: any): any => {
+        if (!obj || typeof obj !== 'object') return obj;
+        const cleaned: any = Array.isArray(obj) ? [] : {};
+        for (const key of Object.keys(obj)) {
+          const val = obj[key];
+          if (val !== undefined) {
+            cleaned[key] = (val && typeof val === 'object' && !(val instanceof Date)) ? cleanUndefined(val) : val;
+          }
+        }
+        return cleaned;
+      };
+
+      const rawProfile = {
         uid: currentUsr.uid,
         email: currentUsr.email || '',
         displayName: newSettings.deviceName || currentUsr.displayName || currentUsr.email?.split('@')[0] || 'Người dùng',
@@ -1378,12 +1390,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deviceName: newSettings.deviceName ?? settings.deviceName,
         deviceType: effectiveType,
         avatarColor: newSettings.avatarColor ?? settings.avatarColor,
-        customAvatarUrl: effectiveAvatar || undefined,
-        bannerUrl: newSettings.bannerUrl !== undefined ? newSettings.bannerUrl : (userProfile?.bannerUrl || settings.bannerUrl),
-        customBio: newSettings.customBio !== undefined ? newSettings.customBio : (userProfile?.customBio || settings.customBio),
-        customBadgeText: newSettings.customBadgeText !== undefined ? newSettings.customBadgeText : (userProfile?.customBadgeText || settings.customBadgeText),
-        customHexColor: newSettings.customHexColor ?? userProfile?.customHexColor ?? settings.customHexColor,
+        customAvatarUrl: effectiveAvatar || null,
+        bannerUrl: newSettings.bannerUrl !== undefined ? newSettings.bannerUrl : (userProfile?.bannerUrl || settings.bannerUrl || null),
+        customBio: newSettings.customBio !== undefined ? newSettings.customBio : (userProfile?.customBio || settings.customBio || null),
+        customBadgeText: newSettings.customBadgeText !== undefined ? newSettings.customBadgeText : (userProfile?.customBadgeText || settings.customBadgeText || null),
+        customHexColor: (newSettings.customHexColor ?? userProfile?.customHexColor ?? settings.customHexColor) || null,
       };
+
+      const updatedProfile: UserDevice = cleanUndefined(rawProfile);
       setUserProfile(updatedProfile);
       try {
         await setDoc(doc(db, 'users', currentUsr.uid), updatedProfile, { merge: true });

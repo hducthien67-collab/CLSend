@@ -13,11 +13,15 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 interface MobileLayoutProps {
   onToggleViewMode: () => void;
   onOpenRules: () => void;
+  onOpenDevConsole?: () => void;
+  onOpenDevPage?: () => void;
 }
 
 export const MobileLayout: React.FC<MobileLayoutProps> = ({
   onToggleViewMode,
-  onOpenRules
+  onOpenRules,
+  onOpenDevConsole,
+  onOpenDevPage
 }) => {
   const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>('send');
@@ -44,37 +48,40 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   }, [currentUser?.uid]);
 
   return (
-    <div className="h-screen max-h-screen w-full bg-[#0b0f19] text-slate-100 flex flex-col relative overflow-hidden selection:bg-emerald-500 selection:text-slate-950 font-sans touch-manipulation">
+    <div className="h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-[#0b0f19] text-slate-100 flex flex-col relative overflow-hidden selection:bg-emerald-500 selection:text-slate-950 font-sans touch-manipulation">
       {/* Mobile Top Header */}
       <MobileHeader
         onOpenSettings={() => setIsSettingsOpen(true)}
         onToggleViewMode={onToggleViewMode}
         viewMode="mobile"
+        onOpenDevPage={onOpenDevPage}
       />
 
-      {/* Main Tab Content Area - No outer scrollbar */}
-      <main className="flex-1 min-h-0 w-full flex flex-col overflow-hidden pb-[46px]">
-        {activeTab === 'send' && (
-          <div key="m-send" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-            <MobileSendView />
-          </div>
-        )}
-        {activeTab === 'receive' && (
-          <div key="m-receive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-            <MobileReceiveView />
-          </div>
-        )}
-        {activeTab === 'chat' && (
-          <div key="m-chat" className="flex-1 min-h-0 h-full flex flex-col overflow-hidden animate-in fade-in duration-150">
-            <MobileChatView />
-          </div>
-        )}
-        {activeTab === 'drive' && (
-          <div key="m-drive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-            <MobileCloudView />
-          </div>
-        )}
-      </main>
+      {/* Centered Main Tab Content Area (Symmetrically balanced, never skewed or shifted) */}
+      <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col overflow-hidden">
+        <main className="flex-1 min-h-0 w-full flex flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom,0px))]">
+          {activeTab === 'send' && (
+            <div key="m-send" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+              <MobileSendView />
+            </div>
+          )}
+          {activeTab === 'receive' && (
+            <div key="m-receive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+              <MobileReceiveView />
+            </div>
+          )}
+          {activeTab === 'chat' && (
+            <div key="m-chat" className="flex-1 min-h-0 h-full flex flex-col overflow-hidden animate-in fade-in duration-150">
+              <MobileChatView />
+            </div>
+          )}
+          {activeTab === 'drive' && (
+            <div key="m-drive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+              <MobileCloudView />
+            </div>
+          )}
+        </main>
+      </div>
 
       {/* Mobile Bottom Navigation Bar */}
       <MobileBottomNav
@@ -93,8 +100,12 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         onOpenRules={onOpenRules}
-        onOpenDevConsole={() => {}}
-        onOpenDevPage={() => {}}
+        onOpenDevConsole={onOpenDevConsole || (() => {})}
+        onOpenDevPage={onOpenDevPage || (() => {
+          setIsSettingsOpen(false);
+          window.history.pushState(null, '', '/?page=datastore');
+          window.location.reload();
+        })}
       />
     </div>
   );

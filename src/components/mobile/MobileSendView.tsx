@@ -239,7 +239,7 @@ export const MobileSendView: React.FC = () => {
   };
 
   const CLSEND_DEMO_DEVICE = {
-    id: 'official_clsend_relay_node',
+    deviceId: 'official_clsend_relay_node',
     uid: 'u_clsend_official',
     connectCode: 'CLSEND',
     displayName: 'CloudSend Official Hub',
@@ -265,7 +265,7 @@ export const MobileSendView: React.FC = () => {
   })();
 
   return (
-    <div className="w-full flex-1 flex flex-col px-3 py-2.5 space-y-3 overscroll-contain no-scrollbar">
+    <div className="w-full max-w-md mx-auto flex-1 flex flex-col px-3 py-2.5 space-y-3 overscroll-contain no-scrollbar">
       {/* Hidden Mobile Native Inputs */}
       <input
         type="file"

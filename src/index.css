@@ -586,10 +586,27 @@ input:focus, textarea:focus, select:focus {
 /* ==========================================================
    SMART TV & 10-FOOT LEANBACK UI ADAPTATIONS
    Keeps standard responsive layouts on all TV brands (Samsung, LG, Sony, TCL, Android TV)
-   while providing distinct remote control focus indicators
+   while providing distinct remote control focus indicators and high-DPI safety
    ========================================================== */
 html.tv-mode {
   user-select: none;
+}
+
+html.tv-mode,
+html.high-dpi-device {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html.high-dpi-device * {
+  box-sizing: border-box;
+}
+
+/* Ensure flex/grid items don't blow out on extreme DPI phones or TV browsers */
+html.high-dpi-device .min-w-0,
+html.tv-mode .min-w-0 {
+  min-width: 0 !important;
 }
 
 html.tv-mode :focus-visible,
@@ -620,4 +637,24 @@ body.modal-open [key*="tab"] {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Safe-area insets for notches, punch-holes, and mobile navigation bars */
+.safe-top {
+  padding-top: max(8px, env(safe-area-inset-top, 8px)) !important;
+}
+.safe-bottom {
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 8px)) !important;
+}
+.safe-left {
+  padding-left: max(8px, env(safe-area-inset-left, 8px)) !important;
+}
+.safe-right {
+  padding-right: max(8px, env(safe-area-inset-right, 8px)) !important;
+}
+
+/* Strict horizontal containment to prevent crooked/shifted layouts */
+html, body, #root {
+  max-width: 100vw;
+  overflow-x: hidden !important;
 }

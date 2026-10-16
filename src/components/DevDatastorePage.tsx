@@ -170,6 +170,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const devFileInputRef = useRef<HTMLInputElement>(null);
   const devImageInputRef = useRef<HTMLInputElement>(null);
   const [showScrollBottomBtn, setShowScrollBottomBtn] = useState(false);
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
 
   // State chuyên biệt cho Tác vụ 2. Những Người Dùng (Quản trị, Thiết bị, Thông báo riêng, Kỷ luật AI)
   const [firestoreUsers, setFirestoreUsers] = useState<any[]>([]);
@@ -1899,26 +1900,38 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         {/* ========================================================================= */}
         <section 
           id="datastore-frame-left"
-          className="w-full md:w-72 lg:w-80 shrink-0 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/60 p-3 sm:p-4 flex flex-col overflow-y-auto"
+          className="w-full md:w-72 lg:w-80 shrink-0 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/60 p-3 sm:p-4 flex flex-col"
         >
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800/80 mb-3">
+          <div className="flex items-center justify-between pb-2 sm:pb-3 border-b border-slate-800/80 mb-2 sm:mb-3">
             <div className="flex items-center gap-2 text-emerald-400">
               <PanelLeft className="w-4 h-4" />
               <h3 className="text-xs sm:text-sm font-bold tracking-wide uppercase">
                 2. Phân Loại & Bộ Lọc
               </h3>
             </div>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-              {activeTask === 'rooms' && 'Phân loại phòng'}
-              {activeTask === 'users' && 'Check Online'}
-              {activeTask === 'violators' && 'Hệ thống lọc'}
-              {activeTask === 'banned' && 'Lọc người Ban'}
-              {activeTask === 'broadcast' && 'Kênh thông báo'}
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 hidden sm:inline-block">
+                {activeTask === 'rooms' && 'Phân loại phòng'}
+                {activeTask === 'users' && 'Check Online'}
+                {activeTask === 'violators' && 'Hệ thống lọc'}
+                {activeTask === 'banned' && 'Lọc người Ban'}
+                {activeTask === 'broadcast' && 'Kênh thông báo'}
+              </span>
+              {/* Nút bấm thu gọn/mở rộng bộ lọc trên màn hình điện thoại */}
+              <button
+                type="button"
+                onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)}
+                className="md:hidden flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:scale-95 transition-all cursor-pointer"
+                title="Bấm để ẩn hoặc hiện danh sách bộ lọc trên điện thoại"
+              >
+                <span>{isMobileFilterOpen ? 'Thu gọn bộ lọc' : 'Mở bộ lọc'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMobileFilterOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
           </div>
 
-          {/* NỘI DUNG KHUNG 2 THEO TỪNG TÁC VỤ ĐƯỢC YÊU CẦU: */}
-          <div className="flex-1 flex flex-col gap-2">
+          {/* NỘI DUNG KHUNG 2 THEO TỪNG TÁC VỤ: Trên mobile mặc định ẩn hoặc mở theo nút, tối đa 220px để chừa chỗ cho dữ liệu */}
+          <div className={`${isMobileFilterOpen ? 'flex' : 'hidden md:flex'} flex-1 flex flex-col gap-2 max-h-56 md:max-h-none overflow-y-auto`}>
 
             {/* MỤC 1. CÁC PHÒNG CHAT */}
             {activeTask === 'rooms' && (

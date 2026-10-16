@@ -1,3 +1,5 @@
+import { isSmartTv } from './device';
+
 export type DpiScaleMode = 'auto' | 'compact' | 'standard' | 'large' | 'xlarge';
 
 export interface DeviceDpiInfo {
@@ -8,6 +10,14 @@ export interface DeviceDpiInfo {
   windowWidth: number;
   windowHeight: number;
   effectiveScale: number;
+  isHighDpi: boolean;
+  isTv: boolean;
+}
+
+export function isHighDpiDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  const dpr = window.devicePixelRatio || 1;
+  return dpr >= 1.75;
 }
 
 export function getDeviceDpiInfo(mode: DpiScaleMode = 'auto'): DeviceDpiInfo {
@@ -20,15 +30,19 @@ export function getDeviceDpiInfo(mode: DpiScaleMode = 'auto'): DeviceDpiInfo {
       windowWidth: 1920,
       windowHeight: 1080,
       effectiveScale: 1,
+      isHighDpi: false,
+      isTv: false,
     };
   }
 
   const pixelRatio = window.devicePixelRatio || 1;
   const estimatedDpi = Math.round(pixelRatio * 96);
-  const screenWidth = window.screen.width;
-  const screenHeight = window.screen.height;
+  const screenWidth = window.screen?.width || window.innerWidth;
+  const screenHeight = window.screen?.height || window.innerHeight;
   const windowWidth = window.innerWidth;
   const windowHeight = window.innerHeight;
+  const isTv = isSmartTv();
+  const isHighDpi = pixelRatio >= 1.75;
 
   let effectiveScale = 1.0;
   switch (mode) {
@@ -46,11 +60,14 @@ export function getDeviceDpiInfo(mode: DpiScaleMode = 'auto'): DeviceDpiInfo {
       break;
     case 'auto':
     default:
-      // Calibrate auto scale based on DPI and viewport size
-      // High density phones (dpr >= 2.6 and narrow screen <= 380px)
-      if (windowWidth <= 380 && pixelRatio >= 2.5) {
+      if (isTv) {
+        // Smart TV automatic DPI calibration: keep crisp 100% scale without overflowing 10-foot viewport
+        effectiveScale = 1.0;
+      } else if (windowWidth <= 380 && pixelRatio >= 2.5) {
+        // High density compact smartphones (iPhone mini, compact Galaxy): avoid cutoffs
         effectiveScale = 0.95;
-      } else if (windowWidth >= 1920 && pixelRatio === 1) {
+      } else if (windowWidth >= 2560 && pixelRatio <= 1.25) {
+        // High-res desktop monitor
         effectiveScale = 1.05;
       } else {
         effectiveScale = 1.0;
@@ -66,17 +83,49 @@ export function getDeviceDpiInfo(mode: DpiScaleMode = 'auto'): DeviceDpiInfo {
     windowWidth,
     windowHeight,
     effectiveScale,
+    isHighDpi,
+    isTv,
   };
 }
 
-export function applyDpiScale(mode: DpiScaleMode = 'auto') {
-  if (typeof document === 'undefined') return;
+/**
+ * Automatically calibrates and applies DPI styles, CSS custom properties,
+ * and adaptive classes on the root element. Runs automatically on every screen change.
+ */
+export function autoCalibrateAndApplyDpi(mode: DpiScaleMode = 'auto'): DeviceDpiInfo {
+  if (typeof document === 'undefined' || typeof window === 'undefined') {
+    return getDeviceDpiInfo(mode);
+  }
 
   const info = getDeviceDpiInfo(mode);
-  const baseFontSize = 16 * info.effectiveScale;
-  
-  // Set root font-size so standard Tailwind rem calculations scale proportionally
-  document.documentElement.style.fontSize = `${baseFontSize}px`;
-  document.documentElement.style.setProperty('--app-scale', info.effectiveScale.toString());
-  document.documentElement.style.setProperty('--device-pixel-ratio', info.pixelRatio.toString());
+  const docEl = document.documentElement;
+
+  // Set CSS custom variables for dynamic layout scaling
+  docEl.style.setProperty('--device-pixel-ratio', info.pixelRatio.toString());
+  docEl.style.setProperty('--app-scale', info.effectiveScale.toString());
+  docEl.style.setProperty('--viewport-width', `${info.windowWidth}px`);
+  docEl.style.setProperty('--viewport-height', `${info.windowHeight}px`);
+
+  // Ensure stable base font size (16px) to maintain rem integrity across all browsers
+  docEl.style.fontSize = '16px';
+
+  // Automatic high DPI class
+  if (info.isHighDpi) {
+    docEl.classList.add('high-dpi-device');
+  } else {
+    docEl.classList.remove('high-dpi-device');
+  }
+
+  // Automatic Smart TV mode (LG WebOS, Samsung Tizen, Android TV, Sony, etc.)
+  if (info.isTv) {
+    docEl.classList.add('tv-mode');
+  } else {
+    docEl.classList.remove('tv-mode');
+  }
+
+  return info;
+}
+
+export function applyDpiScale(mode: DpiScaleMode = 'auto') {
+  autoCalibrateAndApplyDpi(mode);
 }

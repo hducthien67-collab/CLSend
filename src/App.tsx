@@ -37,7 +37,8 @@ import {
 } from 'lucide-react';
 import { isDevUser } from './utils/devModeration';
 import { playReceiveSound } from './utils/sound';
-import { formatFileSize } from './utils/device';
+import { formatFileSize, isSmartTv } from './utils/device';
+import { autoCalibrateAndApplyDpi } from './utils/dpi';
 import { renderClickableText } from './utils/textFormat';
 
 function MainApp() {
@@ -65,12 +66,22 @@ function MainApp() {
   const checkIsMobileDPI = (): boolean => {
     if (typeof window === 'undefined') return false;
 
+    // Smart TVs (LG WebOS, Samsung Tizen, Android TV, Apple TV, Sony, etc.) always use the widescreen layout
+    if (isSmartTv()) {
+      return false;
+    }
+
     const width = window.innerWidth;
     const ua = navigator.userAgent || '';
-    const isMobileUA = /mobile|iphone|ipod|android|blackberry|opera mini|iemobile|wpdesktop/i.test(ua);
+    const isTv = /(smart-tv|smarttv|googletv|appletv|android tv|hbbtv|pov_tv|netcast|webos|web0s|tizen|viera|bravia|sonydtv|roku|firetv|hisense|tcl|crkey|chromecast|\btv\b|lgbrowser|lg browser)/i.test(ua);
+    if (isTv) {
+      return false;
+    }
+
+    const isMobileUA = /mobile|iphone|ipod|blackberry|opera mini|iemobile|wpdesktop|android.*mobile/i.test(ua);
     const isIPad = /ipad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
-    // Large desktop screen (>= 1024px) without mobile UA is Desktop
+    // Large desktop / laptop screen (>= 1024px) without mobile UA is Desktop
     if (width >= 1024 && !isMobileUA) {
       return false;
     }
@@ -259,24 +270,25 @@ function MainApp() {
     setIsRulesOpen(true);
   };
 
-  // Keep standard crisp responsive sizing on TV (prevent oversized rem blowing up TV browsers)
-  const isTv = settings?.deviceType === 'tv' || settings?.tvModeEnabled;
+  // Keep standard crisp responsive sizing on TV and automatic high-DPI handling
+  const isTv = settings?.deviceType === 'tv' || settings?.tvModeEnabled || isSmartTv();
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
 
-    if (isTv) {
-      document.documentElement.classList.add('tv-mode');
-    } else {
-      document.documentElement.classList.remove('tv-mode');
-    }
-    document.documentElement.style.fontSize = '16px';
-    (document.body.style as any).zoom = '1';
+    // Automatically calibrate DPI, high-density screen adjustments, and TV adaptations
+    autoCalibrateAndApplyDpi();
+
+    const handleDpiChange = () => {
+      autoCalibrateAndApplyDpi();
+    };
+
+    window.addEventListener('resize', handleDpiChange);
+    window.addEventListener('orientationchange', handleDpiChange);
 
     return () => {
-      document.documentElement.classList.remove('tv-mode');
-      document.documentElement.style.fontSize = '16px';
-      (document.body.style as any).zoom = '1';
+      window.removeEventListener('resize', handleDpiChange);
+      window.removeEventListener('orientationchange', handleDpiChange);
     };
   }, [isTv]);
 
@@ -425,35 +437,7 @@ function MainApp() {
       return <AuthModal />;
     }
 
-    // 2. Chặn hoàn toàn trên điện thoại di động vì bảng dữ liệu Firestore không hỗ trợ màn hình hẹp
-    if (isMobileMode || checkIsMobileDPI()) {
-      return (
-        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-slate-100 selection:bg-amber-500 selection:text-white">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mb-4 shadow-lg shadow-amber-500/10">
-            <ShieldAlert className="w-7 h-7" />
-          </div>
-          <h1 className="text-base sm:text-lg font-bold text-white mb-2">DEV DataStore Không Hỗ Trợ Trên Điện Thoại</h1>
-          <p className="text-xs text-slate-400 max-w-sm mb-2 leading-relaxed">
-            Hệ thống Quản trị Datastore có bảng cấu trúc dữ liệu Firestore phức tạp, không hỗ trợ thiết bị di động để tránh vỡ khung và thao tác nhầm dữ liệu.
-          </p>
-          <p className="text-[11px] text-amber-300 font-mono bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20 mb-6 max-w-sm">
-            Vui lòng mở ứng dụng trên Máy tính / Laptop (Desktop) để sử dụng trang này.
-          </p>
-          <button
-            type="button"
-            onClick={() => {
-              window.history.pushState(null, '', '/');
-              setIsDatastorePage(false);
-            }}
-            className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all shadow-md active:scale-95"
-          >
-            Quay lại ứng dụng CloudSend
-          </button>
-        </div>
-      );
-    }
-
-    // 3. Đã đăng nhập nhưng KHÔNG PHẢI tài khoản DEV (hducthien67@gmail.com) -> Chặn truy cập 403
+    // 2. Đã đăng nhập nhưng KHÔNG PHẢI tài khoản DEV (hducthien67@gmail.com) -> Chặn truy cập 403
     if (!isDevUser(currentUser.email)) {
       return (
         <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center text-slate-100 selection:bg-rose-500 selection:text-white">
@@ -481,7 +465,7 @@ function MainApp() {
       );
     }
 
-    // 3. Là DEV chính chủ -> Cho phép vào
+    // 3. Là DEV chính chủ -> Cho phép vào (tương thích 100% cả Mobile, Tablet, PC & TV)
     return (
       <DevDatastorePage
         onBackToApp={() => {
@@ -506,6 +490,22 @@ function MainApp() {
         <MobileLayout
           onToggleViewMode={handleToggleViewMode}
           onOpenRules={handleOpenRulesManually}
+          onOpenDevConsole={() => setIsDevConsoleOpen(true)}
+          onOpenDevPage={() => {
+            window.history.pushState(null, '', '/?page=datastore');
+            setIsDatastorePage(true);
+          }}
+        />
+
+        {/* DEV Cloud Audit & Progressive Moderation Modal on Mobile */}
+        <DevCloudConsoleModal
+          isOpen={isDevConsoleOpen}
+          onClose={() => setIsDevConsoleOpen(false)}
+          onSwitchToStandalone={() => {
+            setIsDevConsoleOpen(false);
+            window.history.pushState(null, '', '/?page=datastore');
+            setIsDatastorePage(true);
+          }}
         />
 
         {/* First-Time Google Sign-In Display Name Setup Modal */}

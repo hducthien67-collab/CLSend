@@ -165,6 +165,15 @@ export async function downloadFileSafely(
           }
 
           const blob = await res.blob();
+
+          // Guard against HTML error pages / 404 responses being saved as files
+          if (blob.type.includes('text/html') || blob.size < 2000) {
+            const textCheck = await blob.text().catch(() => '');
+            if (textCheck.startsWith('<') || textCheck.includes('<!DOCTYPE') || textCheck.includes('<html') || textCheck.includes('Cannot GET') || textCheck.includes('404 Not Found')) {
+              throw new Error('Máy chủ trả về trang lỗi HTML thay vì tệp dữ liệu thực tế.');
+            }
+          }
+
           blobUrl = URL.createObjectURL(blob);
           createdBlobUrl = true;
         } catch (fetchErr) {

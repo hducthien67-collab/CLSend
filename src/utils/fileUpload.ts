@@ -1,5 +1,24 @@
 import { inspectFileSecurity, sanitizeFilename } from './fileSecurity';
 import { getTelegramConfig, uploadToTelegram } from './telegramStorage';
+import { storeFileBlobLocally } from './idbStorage';
+
+async function cacheAndReturn(file: File, fileInfo: UploadedFileInfo): Promise<UploadedFileInfo> {
+  try {
+    const url = fileInfo.url || '';
+    let fileId = '';
+    if (url.includes('/api/files/download/')) {
+      fileId = url.split('/api/files/download/')[1]?.split('?')[0];
+    } else if (fileInfo.id) {
+      fileId = fileInfo.id;
+    }
+    if (fileId) {
+      await storeFileBlobLocally(fileId, file);
+    }
+  } catch (e) {
+    console.warn('IDB caching warning:', e);
+  }
+  return fileInfo;
+}
 
 export interface UploadedFileInfo {
   id: string;
@@ -462,7 +481,7 @@ export async function uploadFileToServer(
       const tgRes = await uploadToTelegram(file);
       if (tgRes.downloadUrl) {
         if (onProgress) onProgress(100);
-        return {
+        return await cacheAndReturn(file, {
           id: tgRes.fileId,
           name: file.name,
           originalName: file.name,
@@ -471,7 +490,7 @@ export async function uploadFileToServer(
           url: tgRes.downloadUrl,
           viewUrl: tgRes.downloadUrl,
           thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
-        };
+        });
       }
     } catch (tgErr: any) {
       console.warn('Telegram Storage notice, transferring to high-speed CLSend storage:', tgErr?.message || tgErr);
@@ -482,7 +501,8 @@ export async function uploadFileToServer(
   // This bypasses Cloud Run 32MB single-request proxy limit completely.
   if (file.size > 15 * 1024 * 1024) {
     try {
-      return await uploadViaChunks(file, onProgress);
+      const res = await uploadViaChunks(file, onProgress);
+      return await cacheAndReturn(file, res);
     } catch (chunkErr: any) {
       console.warn(`Primary chunked upload strategy notice for "${file.name}":`, chunkErr?.message || chunkErr);
     }
@@ -490,14 +510,16 @@ export async function uploadFileToServer(
 
   // Strategy 2: Standard Fetch multipart upload
   try {
-    return await uploadViaFetch(file, onProgress);
+    const res = await uploadViaFetch(file, onProgress);
+    return await cacheAndReturn(file, res);
   } catch (err: any) {
     console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
   }
 
   // Strategy 3: Fallback to Chunked Upload if Fetch was blocked or returned HTML
   try {
-    return await uploadViaChunks(file, onProgress);
+    const res = await uploadViaChunks(file, onProgress);
+    return await cacheAndReturn(file, res);
   } catch (fallbackChunkErr: any) {
     console.warn(`Fallback chunked upload notice for "${file.name}":`, fallbackChunkErr?.message || fallbackChunkErr);
   }
@@ -505,7 +527,8 @@ export async function uploadFileToServer(
   // Strategy 4: Base64 JSON upload for files up to 30MB
   if (file.size <= 30 * 1024 * 1024) {
     try {
-      return await uploadViaBase64(file, onProgress);
+      const res = await uploadViaBase64(file, onProgress);
+      return await cacheAndReturn(file, res);
     } catch (fallbackErr: any) {
       console.warn(`Base64 upload strategy notice for "${file.name}":`, fallbackErr?.message || fallbackErr);
     }
@@ -513,7 +536,8 @@ export async function uploadFileToServer(
 
   // Strategy 5: XHR multipart upload
   try {
-    return await uploadViaMultipart(file, onProgress);
+    const res = await uploadViaMultipart(file, onProgress);
+    return await cacheAndReturn(file, res);
   } catch (xhrErr: any) {
     console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
   }
@@ -522,7 +546,8 @@ export async function uploadFileToServer(
   if (isImageFile(file) || file.size <= 400 * 1024) {
     console.log(`Activating safe client-side preview/storage for "${file.name}"...`);
     if (onProgress) onProgress(100);
-    return await createClientFallbackFileInfo(file);
+    const res = await createClientFallbackFileInfo(file);
+    return await cacheAndReturn(file, res);
   }
 
   throw new Error(`Không thể kết nối đến máy chủ lưu trữ cho tệp "${file.name}". Vui lòng thử lại.`);

@@ -17,6 +17,8 @@ import { DevDatastorePage } from './components/DevDatastorePage';
 import { RulesModal } from './components/RulesModal';
 import { GoogleDisplayNameModal } from './components/GoogleDisplayNameModal';
 import { RobloxModerationModal } from './components/RobloxModerationModal';
+import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
+import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
@@ -50,6 +52,14 @@ function MainApp() {
   const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
   const [chatNotification, setChatNotification] = useState<{ id: string; senderName: string; text: string } | null>(null);
   const [copiedNoticeText, setCopiedNoticeText] = useState(false);
+  const [errorChatInfo, setErrorChatInfo] = useState<ErrorChatInfo | null>(null);
+
+  useEffect(() => {
+    const unregister = registerErrorChatListener((info) => {
+      setErrorChatInfo(info);
+    });
+    return () => unregister();
+  }, []);
 
   // Real-time Automatic Mobile DPI & Viewport Detection
   const checkIsMobileDPI = (): boolean => {
@@ -768,6 +778,16 @@ function MainApp() {
           }
         }}
       />
+      {/* Interactive Error Chat Assistant Modal */}
+      {errorChatInfo && (
+        <ErrorChatAssistantModal
+          fileName={errorChatInfo.fileName}
+          errorMessage={errorChatInfo.errorMessage}
+          onRetry={errorChatInfo.onRetry}
+          onDirectCDN={errorChatInfo.onDirectCDN}
+          onClose={() => setErrorChatInfo(null)}
+        />
+      )}
     </div>
   );
 }

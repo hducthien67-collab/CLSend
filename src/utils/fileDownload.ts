@@ -8,6 +8,7 @@
  */
 
 import { isSafeDownloadUrl, sanitizeFilename } from './fileSecurity';
+import { getFileBlobLocally } from './idbStorage';
 
 // Global toast listener registry for download feedback
 type DownloadToastCallback = (msg: { text: string; type: 'info' | 'success' | 'error' }) => void;
@@ -21,6 +22,26 @@ export function registerDownloadToast(cb: DownloadToastCallback): () => void {
 function notifyDownload(text: string, type: 'info' | 'success' | 'error' = 'info') {
   downloadToastListeners.forEach(cb => {
     try { cb({ text, type }); } catch {}
+  });
+}
+
+export type ErrorChatInfo = {
+  fileName: string;
+  errorMessage: string;
+  onRetry?: () => void;
+  onDirectCDN?: () => void;
+};
+
+let errorChatListeners: Set<(info: ErrorChatInfo) => void> = new Set();
+
+export function registerErrorChatListener(cb: (info: ErrorChatInfo) => void): () => void {
+  errorChatListeners.add(cb);
+  return () => errorChatListeners.delete(cb);
+}
+
+export function notifyErrorChat(info: ErrorChatInfo) {
+  errorChatListeners.forEach(cb => {
+    try { cb(info); } catch {}
   });
 }
 
@@ -80,65 +101,93 @@ export async function downloadFileSafely(
 
   try {
     let resolvedSource = source;
+    let telegramOriginalUrl = '';
 
-    // Telegram URLs: route through backend proxy to avoid iframe CORS restrictions
+    // If source is a Telegram URL, save original for direct CDN fallback
     if (resolvedSource.includes('api.telegram.org/file/bot')) {
+      telegramOriginalUrl = resolvedSource;
       resolvedSource = `/api/telegram/download?url=${encodeURIComponent(resolvedSource)}&name=${encodeURIComponent(safeFileName)}`;
     }
 
-    // Resolve relative path against current window origin
-    if (resolvedSource.startsWith('/')) {
-      resolvedSource = `${window.location.origin}${resolvedSource}`;
+    // Check IndexedDB cache first (works 100% offline and on static GitHub pages)
+    let fileIdOrKey = '';
+    if (resolvedSource.includes('/api/files/download/')) {
+      fileIdOrKey = resolvedSource.split('/api/files/download/')[1]?.split('?')[0];
+    } else if (telegramOriginalUrl) {
+      fileIdOrKey = telegramOriginalUrl.split('/').pop()?.split('?')[0] || '';
+    }
+
+    let localBlob: Blob | null = null;
+    if (fileIdOrKey) {
+      localBlob = await getFileBlobLocally(fileIdOrKey).catch(() => null);
     }
 
     let blobUrl: string | null = null;
     let createdBlobUrl = false;
 
-    if (resolvedSource.startsWith('data:')) {
-      // 1. Data URL (Base64) -> Convert to Blob -> blob: URL
-      const blob = dataUrlToBlob(resolvedSource);
-      blobUrl = URL.createObjectURL(blob);
+    if (localBlob) {
+      blobUrl = URL.createObjectURL(localBlob);
       createdBlobUrl = true;
-    } else if (resolvedSource.startsWith('blob:')) {
-      // 2. Already a blob URL
-      blobUrl = resolvedSource;
     } else {
-      // 3. Remote / Relative URL (/api/files/download/:id)
-      try {
-        if (onProgress) onProgress('downloading');
-        const res = await fetch(resolvedSource, {
-          method: 'GET',
-          headers: { 'Accept': '*/*' },
-          cache: 'no-cache'
-        });
+      // Resolve relative path against current window origin
+      let fetchUrl = resolvedSource;
+      if (fetchUrl.startsWith('/')) {
+        fetchUrl = `${window.location.origin}${fetchUrl}`;
+      }
 
-        if (!res.ok) {
-          throw new Error(`Máy chủ trả về mã HTTP ${res.status}`);
-        }
-
-        const blob = await res.blob();
+      if (fetchUrl.startsWith('data:')) {
+        const blob = dataUrlToBlob(fetchUrl);
         blobUrl = URL.createObjectURL(blob);
         createdBlobUrl = true;
-      } catch (fetchErr) {
-        console.warn('Direct blob fetch failed, trying direct anchor fallback:', fetchErr);
-        
-        // Fallback Strategy: Direct Anchor with download attribute
-        const a = document.createElement('a');
-        a.href = resolvedSource;
-        a.download = safeFileName;
-        a.target = '_self';
-        a.rel = 'noopener noreferrer';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        
-        setTimeout(() => {
-          try { document.body.removeChild(a); } catch {}
-        }, 1500);
+      } else if (fetchUrl.startsWith('blob:')) {
+        blobUrl = fetchUrl;
+      } else {
+        try {
+          if (onProgress) onProgress('downloading');
+          let res = await fetch(fetchUrl, {
+            method: 'GET',
+            headers: { 'Accept': '*/*' },
+            cache: 'no-cache'
+          });
 
-        if (onProgress) onProgress('completed');
-        notifyDownload(`Đã bắt đầu tải xuống "${safeFileName}"!`, 'success');
-        return true;
+          // If backend proxy failed (e.g. 404 on static hosting / GitHub Pages), fallback to direct Telegram CDN
+          if (!res.ok && telegramOriginalUrl) {
+            console.warn('Backend proxy download failed, falling back to direct Telegram CDN URL:', telegramOriginalUrl);
+            res = await fetch(telegramOriginalUrl, {
+              method: 'GET',
+              mode: 'cors',
+              cache: 'no-cache'
+            });
+          }
+
+          if (!res.ok) {
+            throw new Error(`Máy chủ trả về mã HTTP ${res.status}`);
+          }
+
+          const blob = await res.blob();
+          blobUrl = URL.createObjectURL(blob);
+          createdBlobUrl = true;
+        } catch (fetchErr) {
+          console.warn('Fetch fallback, trying direct anchor fallback:', fetchErr);
+          
+          const targetUrl = telegramOriginalUrl || fetchUrl;
+          const a = document.createElement('a');
+          a.href = targetUrl;
+          a.download = safeFileName;
+          a.target = '_self';
+          a.rel = 'noopener noreferrer';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          
+          setTimeout(() => {
+            try { document.body.removeChild(a); } catch {}
+          }, 1500);
+
+          if (onProgress) onProgress('completed');
+          notifyDownload(`Đã bắt đầu tải xuống "${safeFileName}"!`, 'success');
+          return true;
+        }
       }
     }
 
@@ -193,6 +242,18 @@ export async function downloadFileSafely(
     } catch (fallbackErr) {
       if (onProgress) onProgress('error');
       notifyDownload(`Không thể tải về "${safeFileName}". Vui lòng thử lại.`, 'error');
+      notifyErrorChat({
+        fileName: safeFileName,
+        errorMessage: err?.message || fallbackErr?.message || 'Không thể thiết lập kết nối tải tệp',
+        onRetry: () => downloadFileSafely(source, fileName, onProgress),
+        onDirectCDN: () => {
+          const a = document.createElement('a');
+          a.href = source;
+          a.download = safeFileName;
+          a.target = '_blank';
+          a.click();
+        }
+      });
       return false;
     }
   }

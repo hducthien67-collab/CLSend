@@ -876,10 +876,36 @@ export const SendView: React.FC = () => {
 
   const [isSearchingCode, setIsSearchingCode] = useState(false);
 
+  const CLSEND_DEMO_DEVICE: PresenceDevice = {
+    id: 'official_clsend_relay_node',
+    uid: 'u_clsend_official',
+    connectCode: 'CLSEND',
+    displayName: 'CloudSend Official Hub',
+    deviceName: 'CloudSend Relay Node',
+    deviceType: 'desktop',
+    avatarColor: '#10B981',
+    status: 'online',
+    lastSeen: new Date().toISOString(),
+    lastSeenMs: Date.now(),
+  };
+
   // Directly connect to any peer across internet by their 6-digit Connect Code
   const handleDirectCodeConnect = async (codeToSearch?: string) => {
     const rawCode = (codeToSearch || searchQuery).trim().toUpperCase().replace('#', '');
     if (!rawCode || isSearchingCode) return;
+
+    // Check if searching for CLSend / clsend / Clsend or related
+    if (rawCode.includes('CLSEND') || rawCode.includes('CLS') || rawCode === 'CL' || rawCode.includes('CLSEND') || rawCode.includes('CLSEND')) {
+      setOnlineDevices((prev) => {
+        if (prev.some(d => d.connectCode === 'CLSEND')) return prev;
+        return [CLSEND_DEMO_DEVICE, ...prev];
+      });
+      setStatusMessage(`Đã kết nối thành công với "CloudSend Official Relay" (Mã #CLSEND)! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`);
+      setTimeout(() => setStatusMessage(null), 6000);
+      setIsSearchingCode(false);
+      return;
+    }
+
     setIsSearchingCode(true);
 
     try {
@@ -918,11 +944,20 @@ export const SendView: React.FC = () => {
     }
   };
 
-  const filteredDevices = onlineDevices.filter(d => 
-    d.deviceName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    d.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (d.connectCode && d.connectCode.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredDevices = (() => {
+    const q = searchQuery.toLowerCase().trim();
+    const baseFiltered = onlineDevices.filter(d => 
+      d.deviceName.toLowerCase().includes(q) ||
+      d.displayName.toLowerCase().includes(q) ||
+      (d.connectCode && d.connectCode.toLowerCase().includes(q))
+    );
+
+    const wantsClsend = q.includes('clsend') || q.includes('cl') || q.includes('cloudsend');
+    if (wantsClsend && !baseFiltered.some(d => d.connectCode === 'CLSEND')) {
+      return [CLSEND_DEMO_DEVICE, ...baseFiltered];
+    }
+    return baseFiltered;
+  })();
 
   return (
     <div className="w-full max-w-6xl 2xl:max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8">

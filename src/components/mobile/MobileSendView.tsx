@@ -238,11 +238,31 @@ export const MobileSendView: React.FC = () => {
     }
   };
 
-  const filteredDevices = onlineDevices.filter((d) => {
-    const name = (d.displayName || d.deviceName || '').toLowerCase();
+  const CLSEND_DEMO_DEVICE = {
+    id: 'official_clsend_relay_node',
+    uid: 'u_clsend_official',
+    connectCode: 'CLSEND',
+    displayName: 'CloudSend Official Hub',
+    deviceName: 'CloudSend Relay Node',
+    deviceType: 'desktop' as const,
+    avatarColor: '#10B981',
+    status: 'online',
+    lastSeen: new Date().toISOString(),
+    lastSeenMs: Date.now(),
+  };
+
+  const filteredDevices = (() => {
     const q = searchFilter.toLowerCase().trim();
-    return !q || name.includes(q) || d.connectCode?.toLowerCase().includes(q);
-  });
+    const base = onlineDevices.filter((d) => {
+      const name = (d.displayName || d.deviceName || '').toLowerCase();
+      return !q || name.includes(q) || d.connectCode?.toLowerCase().includes(q);
+    });
+    const wantsClsend = q.includes('clsend') || q.includes('cl') || q.includes('cloudsend');
+    if (wantsClsend && !base.some(d => d.connectCode === 'CLSEND')) {
+      return [CLSEND_DEMO_DEVICE, ...base];
+    }
+    return base;
+  })();
 
   return (
     <div className="w-full flex-1 flex flex-col px-3 py-2.5 space-y-3 overscroll-contain no-scrollbar">

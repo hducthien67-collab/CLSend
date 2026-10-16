@@ -6,4 +6,4 @@ Disallow: /?page=dev-cloud
 Disallow: /datastore
 Disallow: /dev-cloud
 
-Sitemap: https://cloudsend-bw7z.onrender.com/sitemap.xml
+Sitemap: https://clend.vercel.app/sitemap.xml

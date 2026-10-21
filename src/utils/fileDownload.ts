@@ -238,37 +238,44 @@ export async function downloadFileSafely(
   } catch (err: any) {
     console.error('Safe download error:', err);
 
-    // Ultimate fallback for strict environments: Direct hidden navigation
+    // Ultimate fallback for strict environments: Direct hidden navigation & window.open
     try {
       const a = document.createElement('a');
       a.href = source;
       a.download = safeFileName;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
         try { document.body.removeChild(a); } catch {}
-      }, 1000);
+      }, 1500);
+
+      try {
+        window.open(source, '_blank');
+      } catch {}
 
       if (onProgress) onProgress('completed');
-      notifyDownload(`Đã gửi lệnh tải xuống "${safeFileName}".`, 'success');
+      notifyDownload(`Đã mở liên kết tải xuống cho "${safeFileName}".`, 'success');
       return true;
     } catch (fallbackErr: any) {
       if (onProgress) onProgress('error');
-      notifyDownload(`Không thể tải về "${safeFileName}". Vui lòng thử lại.`, 'error');
-      notifyErrorChat({
-        fileName: safeFileName,
-        errorMessage: err?.message || fallbackErr?.message || 'Không thể thiết lập kết nối tải tệp',
-        onRetry: () => downloadFileSafely(source, fileName, onProgress),
-        onDirectCDN: () => {
-          const a = document.createElement('a');
-          a.href = source;
-          a.download = safeFileName;
-          a.target = '_blank';
-          a.click();
-        }
-      });
-      return false;
+      notifyDownload(`Đang chuyển hướng tải xuống trực tiếp...`, 'info');
+      try {
+        window.location.href = source;
+        return true;
+      } catch {
+        notifyErrorChat({
+          fileName: safeFileName,
+          errorMessage: err?.message || fallbackErr?.message || 'Không thể thiết lập kết nối tải tệp',
+          onRetry: () => downloadFileSafely(source, fileName, onProgress),
+          onDirectCDN: () => {
+            window.open(source, '_blank');
+          }
+        });
+        return false;
+      }
     }
   }
 }

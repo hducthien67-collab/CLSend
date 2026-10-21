@@ -40,7 +40,7 @@ import { useLanguage } from '../../context/LanguageContext';
 
 export const MobileSendView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
   const [onlineDevices, setOnlineDevices] = useState<PresenceDevice[]>([]);
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedTargetDevice, setSelectedTargetDevice] = useState<PresenceDevice | null>(null);

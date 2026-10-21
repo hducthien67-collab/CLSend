@@ -347,7 +347,6 @@ export const TRANSLATIONS = {
     'settings.verifying_otp': 'Đang xác thực...',
     'settings.verify_and_save': 'Xác Thực & Lưu',
     'settings.sessions_title_5': '5. Thiết Bị Đã Đăng Nhập',
-    'settings.sessions_desc': 'Theo dõi thiết bị và thời gian đăng nhập',
     'settings.refresh': 'Làm mới',
     'settings.current_device': 'Hiện tại',
     'settings.logout_session': 'Đăng xuất',
@@ -754,11 +753,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const t = (key: string, fallback?: string): string => {
-    const dict = TRANSLATIONS[currentLang];
+    const dict = TRANSLATIONS[currentLang] as Record<string, string>;
     if (dict && dict[key]) {
       return dict[key];
     }
-    const viDict = TRANSLATIONS['vi'];
+    const viDict = TRANSLATIONS['vi'] as Record<string, string>;
     if (viDict && viDict[key]) {
       return viDict[key];
     }

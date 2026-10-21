@@ -222,15 +222,15 @@ export async function downloadFileSafely(
       try { document.body.removeChild(a); } catch {}
     }, 1000);
 
-    // Free memory object URL after 45 seconds
-    if (createdBlobUrl && blobUrl) {
-      const urlToRevoke = blobUrl;
-      setTimeout(() => {
-        try {
-          URL.revokeObjectURL(urlToRevoke);
-        } catch {}
-      }, 45000);
-    }
+    // Free memory object URL (Disabled to prevent stale blob URLs in browser downloads)
+    // if (createdBlobUrl && blobUrl) {
+    //   const urlToRevoke = blobUrl;
+    //   setTimeout(() => {
+    //     try {
+    //       URL.revokeObjectURL(urlToRevoke);
+    //     } catch {}
+    //   }, 45000);
+    // }
 
     if (onProgress) onProgress('completed');
     notifyDownload(`Đã tải về thành công "${safeFileName}"!`, 'success');

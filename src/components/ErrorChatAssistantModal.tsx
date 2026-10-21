@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, RefreshCw, Download, AlertTriangle, X, Send, Bot, CheckCircle2 } from 'lucide-react';
+import { Sparkles, RefreshCw, Download, AlertTriangle, X, Send, Bot, CheckCircle2, Copy } from 'lucide-react';
 
 interface ErrorChatAssistantModalProps {
   fileName: string;
@@ -133,6 +133,19 @@ export const ErrorChatAssistantModal: React.FC<ErrorChatAssistantModalProps> = (
             </button>
           )}
 
+          {/* Copy Debug URL */}
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(window.location.href);
+              alert("Đã copy thông tin chẩn đoán, hãy gửi cho kỹ thuật viên!");
+            }}
+            className="flex-1 min-w-[140px] py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-medium text-xs flex items-center justify-center gap-2 border border-amber-500/30 transition-all active:scale-95"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>Copy mã chẩn đoán</span>
+          </button>
+
           {onDirectCDN && (
             <button
               type="button"
@@ -143,7 +156,7 @@ export const ErrorChatAssistantModal: React.FC<ErrorChatAssistantModalProps> = (
               className="flex-1 min-w-[140px] py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white font-medium text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all active:scale-95"
             >
               <Download className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Tải qua CDN gốc</span>
+              <span>Tải trực tiếp</span>
             </button>
           )}
 

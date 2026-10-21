@@ -1,6 +1,7 @@
 import { inspectFileSecurity, sanitizeFilename } from './fileSecurity';
 import { getTelegramConfig, uploadToTelegram } from './telegramStorage';
 import { storeFileBlobLocally } from './idbStorage';
+import { uploadToExternalWebServices } from './externalStorage';
 
 async function cacheAndReturn(file: File, fileInfo: UploadedFileInfo): Promise<UploadedFileInfo> {
   try {
@@ -540,6 +541,23 @@ export async function uploadFileToServer(
     return await cacheAndReturn(file, res);
   } catch (xhrErr: any) {
     console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
+  }
+
+  // Strategy 5.5: External Free Web Hosting Services (Catbox.moe, Litterbox, Pomf)
+  try {
+    const extRes = await uploadToExternalWebServices(file, onProgress);
+    return await cacheAndReturn(file, {
+      id: `ext-${Date.now()}`,
+      name: extRes.name,
+      originalName: extRes.name,
+      size: extRes.size,
+      type: extRes.type,
+      url: extRes.url,
+      viewUrl: extRes.url,
+      thumbnail: isImageFile(file) ? extRes.url : undefined
+    });
+  } catch (extErr: any) {
+    console.warn(`External web storage strategy notice for "${file.name}":`, extErr?.message || extErr);
   }
 
   // Strategy 6: Resilient client-side fallback for images or small files (< 400KB)

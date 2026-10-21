@@ -227,6 +227,22 @@ export const TRANSLATIONS = {
     'mobile_send.exit': 'Thoát',
     'mobile_send.confirm': 'Xác nhận',
 
+    // ChatRoom Creation Modal
+    'chat.create_room_title': 'Tạo phòng chat mới',
+    'chat.avatar_label': 'ẢNH ĐẠI DIỆN & BIỂU TƯỢNG NHÓM',
+    'chat.upload_photo': 'Tải ảnh lên',
+    'chat.use_default_icon': 'Dùng icon mặc định',
+    'chat.drag_hint': '💡 Bạn có thể kéo thả trực tiếp ảnh từ máy tính vào ô này!',
+    'chat.bg_color': 'Màu nền:',
+    'chat.name_label': 'DÒNG 1: TÊN PHÒNG',
+    'chat.name_placeholder': 'Ví dụ: Team Dự Án, Nhóm Bạn Thân, Trao Đổi...',
+    'chat.private_room': 'Phòng Riêng Tư Bảo Mật (Private Room)',
+    'chat.default': 'Mặc định',
+    'chat.private_desc': 'Hệ thống sẽ tạo 1 mã truy cập riêng (6 ký tự). Người khác chỉ có thể vào khi bạn chia sẻ mã phòng này.',
+    'chat.owner_badge': 'Bạn sẽ là Trưởng phòng (Owner) quản trị phòng riêng tư này.',
+    'chat.cancel': 'Hủy',
+    'chat.create_now': 'Tạo phòng ngay',
+
     // ChatRoomView Strings
     'chat.global_lounge': 'Đại Sảnh Toàn Cầu (Global Lounge)',
     'chat.global_lounge_desc': 'Sảnh kết nối công khai không giới hạn cho mọi thiết bị trên mạng',
@@ -679,6 +695,7 @@ export const TRANSLATIONS = {
     'chat.create_room_title': 'Create new chat room',
     'chat.avatar_label': 'AVATAR & GROUP ICON',
     'chat.upload_photo': 'Upload photo',
+    'chat.use_default_icon': 'Use default icon',
     'chat.drag_hint': '💡 You can drag and drop photos from your computer here!',
     'chat.bg_color': 'Background color:',
     'chat.name_label': 'ROW 1: ROOM NAME',

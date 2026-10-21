@@ -610,15 +610,22 @@ export const SendView: React.FC = () => {
         }
       }
 
-      setStatusMessage('⚠️ Bộ nhớ tạm hiện đang trống. Hãy sao chép nội dung rồi nhấn Dán hoặc Ctrl+V.');
+      setStatusMessage(currentLang === 'en' 
+        ? '⚠️ Clipboard is currently empty. Copy some content then click Paste or press Ctrl+V.' 
+        : '⚠️ Bộ nhớ tạm hiện đang trống. Hãy sao chép nội dung rồi nhấn Dán hoặc Ctrl+V.');
       setTimeout(() => setStatusMessage(null), 4000);
     } catch (err: any) {
       console.warn('Clipboard read permission error:', err);
       // Detailed explanation for why the browser prevented reading
-      if (err?.name === 'NotAllowedError') {
-        setStatusMessage('🔒 Trình duyệt đã chặn quyền đọc bộ nhớ tạm. Hãy chọn "Cho phép" (Allow) trên thanh địa chỉ, hoặc bấm Ctrl+V để dán trực tiếp.');
+      const isDenied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError' || String(err?.message || '').toLowerCase().includes('denied') || String(err?.message || '').toLowerCase().includes('permission');
+      if (isDenied) {
+        setStatusMessage(currentLang === 'en'
+          ? '🔒 Browser has blocked clipboard access. Please select "Allow" in the address bar, or press Ctrl+V to paste directly.'
+          : '🔒 Trình duyệt đã chặn quyền đọc bộ nhớ tạm. Hãy chọn "Cho phép" (Allow) trên thanh địa chỉ, hoặc bấm Ctrl+V để dán trực tiếp.');
       } else {
-        setStatusMessage('💡 Nhấn phím Ctrl + V (hoặc Cmd + V) trên bàn phím để dán nội dung ngay lập tức.');
+        setStatusMessage(currentLang === 'en'
+          ? '💡 Press Ctrl + V (or Cmd + V) on your keyboard to paste content immediately.'
+          : '💡 Nhấn phím Ctrl + V (hoặc Cmd + V) trên bàn phím để dán nội dung ngay lập tức.');
       }
       setTimeout(() => setStatusMessage(null), 5000);
     }
@@ -1973,7 +1980,7 @@ export const SendView: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm sm:text-base font-bold text-white tracking-wide flex items-center gap-2">
                 <AlignLeft className="w-4 h-4 text-sky-400" />
-                <span>Nhập tin nhắn</span>
+                <span>{currentLang === 'en' ? 'Enter Message' : 'Nhập tin nhắn'}</span>
               </h3>
               <button
                 type="button"
@@ -1995,7 +2002,7 @@ export const SendView: React.FC = () => {
                 onChange={(md) => setModalTextValue(md)}
                 onSend={handleConfirmTextModal}
                 enterKeyMode="newline"
-                placeholder="Nhập nội dung văn bản cần gửi..."
+                placeholder={currentLang === 'en' ? 'Enter message text to send...' : 'Nhập nội dung văn bản cần gửi...'}
                 className="bg-transparent border-0 min-h-[100px] max-h-[220px]"
               />
             </div>
@@ -2010,14 +2017,14 @@ export const SendView: React.FC = () => {
                 }}
                 className="px-3.5 py-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-slate-800"
               >
-                Thoát
+                {currentLang === 'en' ? 'Exit' : 'Thoát'}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmTextModal}
                 className="px-5 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <span>Xác nhận</span>
+                <span>{currentLang === 'en' ? 'Confirm' : 'Xác nhận'}</span>
               </button>
             </div>
           </div>

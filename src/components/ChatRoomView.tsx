@@ -2258,7 +2258,7 @@ export const ChatRoomView: React.FC = () => {
                           onClick={() => setNewRoomAvatar('')}
                           className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-xs transition-colors"
                         >
-                          Dùng icon mặc định
+                          {t('chat.use_default_icon')}
                         </button>
                       )}
                     </div>

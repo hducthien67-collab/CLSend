@@ -30,6 +30,7 @@ import { isDevUser } from '../utils/devModeration';
 import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
 import { ResetServerModal } from './ResetServerModal';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
+import { useLanguage } from '../context/LanguageContext';
 
 interface RoomDetailsModalProps {
   isOpen: boolean;
@@ -56,6 +57,8 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   onRoomDeleted,
   onRoomLeft,
 }) => {
+  const { t, currentLang } = useLanguage();
+  const isEn = currentLang === 'en';
   const [activeTab, setActiveTab] = useState<'info' | 'members' | 'gallery'>('info');
 
   // Edit room state
@@ -357,7 +360,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={() => {
                   if (canEditRoom) fileInputRef.current?.click();
                 }}
-                title={canEditRoom ? "Bấm để đổi ảnh đại diện nhóm (Chỉ Trưởng phòng)" : "Ảnh đại diện nhóm"}
+                title={canEditRoom ? (isEn ? "Click to change room avatar (Host only)" : "Bấm để đổi ảnh đại diện nhóm (Chỉ Trưởng phòng)") : (isEn ? "Room avatar" : "Ảnh đại diện nhóm")}
               >
                 {customAvatar ? (
                   <img src={customAvatar} alt="Room" className="w-full h-full object-cover" />
@@ -370,21 +373,23 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 {canEditRoom && (
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-white">
                     <Camera className="w-3.5 h-3.5 text-emerald-300" />
-                    <span className="text-[7.5px] font-bold">Đổi ảnh</span>
+                    <span className="text-[7.5px] font-bold">{isEn ? 'Change' : 'Đổi ảnh'}</span>
                   </div>
                 )}
               </div>
 
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <h3 className="text-xs sm:text-sm font-bold text-white truncate max-w-[150px] sm:max-w-[200px]">{roomName || room.name}</h3>
+                  <h3 className="text-xs sm:text-sm font-bold text-white truncate max-w-[150px] sm:max-w-[200px]">
+                    {room.id === 'public-relay-lounge' ? (isEn ? 'Global Lounge' : (roomName || room.name)) : (roomName || room.name)}
+                  </h3>
                   <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shrink-0 ${
                     room.isPrivate !== false 
                       ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' 
                       : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                   }`}>
                     {room.isPrivate !== false ? <Lock className="w-2.5 h-2.5" /> : <Globe className="w-2.5 h-2.5" />}
-                    {room.isPrivate !== false ? 'Riêng tư' : 'Cộng đồng'}
+                    {room.isPrivate !== false ? (isEn ? 'Private' : 'Riêng tư') : (isEn ? 'Public' : 'Cộng đồng')}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5 text-[10.5px]">
@@ -392,13 +397,13 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     type="button"
                     onClick={handleCopyCode}
                     className="font-mono text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 shrink-0"
-                    title="Sao chép ID / Mã phòng"
+                    title={isEn ? "Copy ID / Room Code" : "Sao chép ID / Mã phòng"}
                   >
                     <span className="copyable-text select-text cursor-text" data-copyable="true">ID: {room.code}</span>
                     {copiedCode ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-slate-400" />}
                   </button>
                   <span className="text-slate-500">•</span>
-                  <span className="text-slate-400 shrink-0">{membersList.length} thành viên</span>
+                  <span className="text-slate-400 shrink-0">{membersList.length} {isEn ? (membersList.length > 1 ? 'members' : 'member') : 'thành viên'}</span>
                 </div>
               </div>
             </div>
@@ -424,7 +429,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               }`}
             >
               <Edit3 className="w-3.5 h-3.5" />
-              <span>Cấu trúc & Ảnh nhóm</span>
+              <span>{isEn ? 'Structure & Photo' : 'Cấu trúc & Ảnh nhóm'}</span>
             </button>
             <button
               type="button"
@@ -436,7 +441,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Thành viên ({membersList.length})</span>
+              <span>{isEn ? `Members (${membersList.length})` : `Thành viên (${membersList.length})`}</span>
             </button>
             <button
               type="button"
@@ -448,7 +453,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5" />
-              <span>Hình ảnh ({allImages.length})</span>
+              <span>{isEn ? `Images (${allImages.length})` : `Hình ảnh (${allImages.length})`}</span>
             </button>
           </div>
 
@@ -473,16 +478,20 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         )}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-bold text-white truncate">{room.name}</h3>
+                        <h3 className="text-sm font-bold text-white truncate">
+                          {room.id === 'public-relay-lounge' ? (isEn ? 'Global Lounge' : room.name) : room.name}
+                        </h3>
                         <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">
-                          {room.description || 'Chưa có mô tả cho nhóm chat này.'}
+                          {room.id === 'public-relay-lounge' 
+                            ? (isEn ? 'Public connection lounge without limits for all devices on the network' : (room.description || 'Chưa có mô tả cho nhóm chat này.'))
+                            : (room.description || (isEn ? 'No description for this chat group yet.' : 'Chưa có mô tả cho nhóm chat này.'))}
                         </p>
                       </div>
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
                       <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Chỉ <strong>Trưởng phòng</strong> mới có quyền chỉnh sửa tên, ảnh đại diện và màu sắc nhóm.</span>
+                      <span>{isEn ? 'Only Room Owner can edit group name, avatar, and color.' : 'Chỉ Trưởng phòng mới có quyền chỉnh sửa tên, ảnh đại diện và màu sắc nhóm.'}</span>
                     </div>
                   </div>
                 ) : (
@@ -491,11 +500,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                          1. Ảnh đại diện phòng chat
+                          {isEn ? '1. Chat room avatar' : '1. Ảnh đại diện phòng chat'}
                         </label>
                         {avatarSaveSuccess && (
                           <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 animate-pulse">
-                            <Check className="w-3 h-3" /> Đã chọn ảnh! Nhấn 'Lưu' bên dưới để áp dụng
+                            <Check className="w-3 h-3" /> {isEn ? "Photo selected! Click 'Save' below to apply" : "Đã chọn ảnh! Nhấn 'Lưu' bên dưới để áp dụng"}
                           </span>
                         )}
                       </div>
@@ -542,7 +551,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               fileInputRef.current?.click();
                             }
                           }}
-                          title={customAvatar ? 'Bấm để phóng to xem ảnh' : 'Bấm để tải ảnh lên'}
+                          title={customAvatar ? (isEn ? 'Click to zoom in' : 'Bấm để phóng to xem ảnh') : (isEn ? 'Click to upload photo' : 'Bấm để tải ảnh lên')}
                         >
                           {customAvatar ? (
                             <img src={customAvatar} alt="Room" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
@@ -564,7 +573,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-[11px] font-semibold text-emerald-300 border border-emerald-500/40 flex items-center gap-1 transition-colors cursor-pointer active:scale-95 shadow-xs"
                             >
                               <Camera className="w-3 h-3 text-emerald-400" />
-                              <span>{customAvatar ? 'Đổi ảnh khác' : 'Tải ảnh lên'}</span>
+                              <span>{customAvatar ? (isEn ? 'Change photo' : 'Đổi ảnh khác') : (isEn ? 'Upload photo' : 'Tải ảnh lên')}</span>
                             </button>
                             {customAvatar && (
                               <button
@@ -572,14 +581,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                                 onClick={handleRemoveAvatar}
                                 className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] font-medium transition-colors cursor-pointer"
                               >
-                                Xóa ảnh
+                                {isEn ? 'Remove photo' : 'Xóa ảnh'}
                               </button>
                             )}
                           </div>
 
                           {/* Color Palette */}
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-[10px] text-slate-400 mr-0.5">Màu nền:</span>
+                            <span className="text-[10px] text-slate-400 mr-0.5">{isEn ? 'Background:' : 'Màu nền:'}</span>
                             {AVATAR_COLORS.map((col) => (
                               <button
                                 key={col}
@@ -589,21 +598,21 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                                   selectedColor === col ? 'scale-110 ring-2 ring-white' : 'hover:scale-105 opacity-80 hover:opacity-100'
                                 }`}
                                 style={{ backgroundColor: col }}
-                                title={`Chọn màu ${col}`}
+                                title={isEn ? `Select color ${col}` : `Chọn màu ${col}`}
                               />
                             ))}
                           </div>
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-500 italic">
-                        💡 Mẹo: Bạn có thể kéo thả ảnh trực tiếp vào ô trên. Sau khi chọn ảnh, nhấn "Lưu cấu trúc phòng" để cập nhật.
+                        {isEn ? '💡 Tip: You can drag and drop photos directly into the box above. After selecting, click "Save room structure" to update.' : '💡 Mẹo: Bạn có thể kéo thả ảnh trực tiếp vào ô trên. Sau khi chọn ảnh, nhấn "Lưu cấu trúc phòng" để cập nhật.'}
                       </p>
                     </div>
 
                     {/* 2. Tên của nhóm */}
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                        2. Tên của nhóm
+                        {isEn ? '2. Group Name' : '2. Tên của nhóm'}
                       </label>
                       <input
                         type="text"
@@ -613,7 +622,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.preventDefault();
                         }}
-                        placeholder="Nhập tên phòng..."
+                        placeholder={isEn ? 'Enter room name...' : 'Nhập tên phòng...'}
                         className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                     </div>
@@ -621,7 +630,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     {/* 3. Mô tả phòng */}
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                        3. Mô tả phòng
+                        {isEn ? '3. Room Description' : '3. Mô tả phòng'}
                       </label>
                       <input
                         type="text"
@@ -630,7 +639,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.preventDefault();
                         }}
-                        placeholder="Mô tả mục đích nhóm chat..."
+                        placeholder={isEn ? 'Describe the purpose of this chat group...' : 'Mô tả mục đích nhóm chat...'}
                         className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                     </div>
@@ -639,11 +648,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div className="flex items-center justify-between pt-1">
                       {saveSuccess ? (
                         <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" /> Đã lưu cấu trúc phòng thành công!
+                          <Check className="w-3.5 h-3.5" /> {isEn ? 'Room structure saved successfully!' : 'Đã lưu cấu trúc phòng thành công!'}
                         </span>
                       ) : hasUnsavedChanges ? (
                         <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1">
-                          ⚠️ Có thay đổi chưa lưu
+                          {isEn ? '⚠️ Unsaved changes' : '⚠️ Có thay đổi chưa lưu'}
                         </span>
                       ) : (
                         <span />
@@ -658,7 +667,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               : 'bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50'
                           }`}
                         >
-                          {isSaving ? 'Đang lưu...' : hasUnsavedChanges ? '💾 Lưu cấu trúc phòng' : 'Lưu cấu trúc phòng'}
+                          {isSaving ? (isEn ? 'Saving...' : 'Đang lưu...') : hasUnsavedChanges ? (isEn ? '💾 Save room structure' : '💾 Lưu cấu trúc phòng') : (isEn ? 'Save room structure' : 'Lưu cấu trúc phòng')}
                         </button>
                       </div>
                     </div>
@@ -670,17 +679,17 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                   {room.id === 'public-relay-lounge' ? (
                     <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
                       <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Đại Sảnh Toàn Cầu là phòng hệ thống mặc định, được bảo vệ vĩnh viễn và không thể xóa.</span>
+                      <span>{isEn ? 'Global Lounge is a system default room, permanently protected and cannot be deleted.' : 'Đại Sảnh Toàn Cầu là phòng hệ thống mặc định, được bảo vệ vĩnh viễn và không thể xóa.'}</span>
                     </div>
                   ) : isOwner || isDev ? (
                     <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-rose-300 flex items-center gap-1">
                           <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                          Giải tán & Xóa nhóm
+                          {isEn ? 'Dissolve & Delete Group' : 'Giải tán & Xóa nhóm'}
                         </h4>
                         <p className="text-[10px] text-rose-400/80 mt-0.5 leading-snug">
-                          Trưởng phòng gửi lời nhắn cuối cùng tới các thành viên khi giải tán.
+                          {isEn ? 'Room Owner sends a final message to all members upon dissolving.' : 'Trưởng phòng gửi lời nhắn cuối cùng tới các thành viên khi giải tán.'}
                         </p>
                       </div>
                       <button
@@ -688,7 +697,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onClick={() => setShowDissolveModal(true)}
                         className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shrink-0 shadow-md transition-colors cursor-pointer"
                       >
-                        Xóa nhóm
+                        {isEn ? 'Delete Group' : 'Xóa nhóm'}
                       </button>
                     </div>
                   ) : (
@@ -696,10 +705,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1">
                           <LogOut className="w-3.5 h-3.5 text-slate-400" />
-                          Rời khỏi nhóm
+                          {isEn ? 'Leave Group' : 'Rời khỏi nhóm'}
                         </h4>
                         <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
-                          Bạn sẽ rời khỏi phòng này và có thể tham gia lại bằng mã phòng.
+                          {isEn ? 'You will leave this room and can rejoin using the room code.' : 'Bạn sẽ rời khỏi phòng này và có thể tham gia lại bằng mã phòng.'}
                         </p>
                       </div>
                       <button
@@ -707,7 +716,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onClick={handleLeaveRoom}
                         className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs shrink-0 border border-slate-700 transition-colors cursor-pointer"
                       >
-                        Rời nhóm
+                        {isEn ? 'Leave Group' : 'Rời nhóm'}
                       </button>
                     </div>
                   )}
@@ -718,7 +727,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
-                          <h4 className="text-xs font-bold text-white">Reset Máy Chủ (Đặc quyền DEV)</h4>
+                          <h4 className="text-xs font-bold text-white">{isEn ? 'Reset Server (DEV Privilege)' : 'Reset Máy Chủ (Đặc quyền DEV)'}</h4>
                         </div>
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-0.5">
                           <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
@@ -726,7 +735,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[10.5px] text-slate-400 leading-snug">
-                        Xóa toàn bộ tin nhắn hoặc tự động dọn dẹp các tin nhắn cũ hơn 1 tuần (7 ngày) để chống máy chủ bị lag.
+                        {isEn ? 'Delete all messages or automatically clean messages older than 1 week (7 days) to prevent server lag.' : 'Xóa toàn bộ tin nhắn hoặc tự động dọn dẹp các tin nhắn cũ hơn 1 tuần (7 ngày) để chống máy chủ bị lag.'}
                       </p>
                       <button
                         type="button"
@@ -734,7 +743,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         className="w-full py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-bold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
                       >
                         <Zap className="w-3.5 h-3.5 fill-current" />
-                        <span>Mở Bảng Điều Khiển Reset Máy Chủ</span>
+                        <span>{isEn ? 'Open Reset Server Control Panel' : 'Mở Bảng Điều Khiển Reset Máy Chủ'}</span>
                       </button>
                     </div>
                   )}
@@ -747,10 +756,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    Danh sách thành viên ({membersList.length})
+                    {isEn ? `MEMBERS LIST (${membersList.length})` : `DANH SÁCH THÀNH VIÊN (${membersList.length})`}
                   </h4>
                   <span className="text-[10px] text-slate-500">
-                    Trưởng phòng đứng đầu
+                    {isEn ? 'Host at the top' : 'Trưởng phòng đứng đầu'}
                   </span>
                 </div>
 
@@ -795,7 +804,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               </span>
                               {isSelf && (
                                 <span className="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-300">
-                                  Bạn
+                                  {isEn ? 'You' : 'Bạn'}
                                 </span>
                               )}
                               {isMemberDev && (
@@ -807,18 +816,18 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               {isRoomOwner && !isMemberDev && (
                                 <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
                                   <Crown className="w-2.5 h-2.5 text-amber-400" />
-                                  Trưởng phòng
+                                  {isEn ? 'Host' : 'Trưởng phòng'}
                                 </span>
                               )}
                             </div>
                             <p className="text-[10px] text-slate-400 truncate">
-                              {isMemberDev ? 'Quản trị viên tối cao' : `Thiết bị: ${m.deviceName || 'Trực tuyến'}`}
+                              {isMemberDev ? (isEn ? 'Supreme Admin' : 'Quản trị viên tối cao') : `${isEn ? 'Device: ' : 'Thiết bị: '}${m.deviceName || (isEn ? 'Online' : 'Trực tuyến')}`}
                             </p>
                           </div>
                         </div>
 
                         {isMemberDev ? (
-                          <div className="p-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0" title="DEV chính chủ">
+                          <div className="p-1 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0" title="DEV">
                             <Crown className="w-3.5 h-3.5 fill-amber-400" />
                           </div>
                         ) : isRoomOwner ? (
@@ -838,18 +847,18 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    Hình ảnh trong nhóm ({allImages.length})
+                    {isEn ? `IMAGES IN ROOM (${allImages.length})` : `HÌNH ẢNH TRONG NHÓM (${allImages.length})`}
                   </h4>
                   <span className="text-[10px] text-slate-500">
-                    Kho ảnh
+                    {isEn ? 'Gallery' : 'Kho ảnh'}
                   </span>
                 </div>
 
                 {allImages.length === 0 ? (
                   <div className="p-6 text-center rounded-xl bg-slate-950/40 border border-slate-800 space-y-1.5">
                     <ImageIcon className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-xs font-semibold text-slate-400">Chưa có hình ảnh nào</p>
-                    <p className="text-[10.5px] text-slate-500">Ảnh gửi trong phòng sẽ lưu tự động ở đây.</p>
+                    <p className="text-xs font-semibold text-slate-400">{isEn ? 'No images yet' : 'Chưa có hình ảnh nào'}</p>
+                    <p className="text-[10.5px] text-slate-500">{isEn ? 'Images sent in the room will be saved here automatically.' : 'Ảnh gửi trong phòng sẽ lưu tự động ở đây.'}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
@@ -867,7 +876,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                             type="button"
                             onClick={() => setViewingZoomImage({ url: img.url, name: img.name })}
                             className="p-0.5 rounded bg-black/60 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
-                            title="Xem phóng to ảnh"
+                            title={isEn ? 'Zoom image' : 'Xem phóng to ảnh'}
                           >
                             <Eye className="w-3 h-3" />
                           </button>
@@ -898,7 +907,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
           isOpen={Boolean(viewingZoomImage)}
           onClose={() => setViewingZoomImage(null)}
           imageUrl={viewingZoomImage.url}
-          imageName={viewingZoomImage.name || 'Hình ảnh'}
+          imageName={viewingZoomImage.name || (isEn ? 'Image' : 'Hình ảnh')}
         />
       )}
 
@@ -911,26 +920,26 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 <AlertTriangle className="w-4 h-4 text-rose-400" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-xs sm:text-sm font-bold text-white">Giải tán nhóm</h3>
+                <h3 className="text-xs sm:text-sm font-bold text-white">{isEn ? 'Dissolve Group' : 'Giải tán nhóm'}</h3>
                 <p className="text-[10px] text-rose-300">
-                  Lời nhắn sẽ được gửi tới tất cả thành viên trong phòng!
+                  {isEn ? 'A notification message will be sent to all members in the room!' : 'Lời nhắn sẽ được gửi tới tất cả thành viên trong phòng!'}
                 </p>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-[11px] font-semibold text-slate-300">
-                Nội dung lời nhắn thông báo:
+                {isEn ? 'Farewell notice content:' : 'Nội dung lời nhắn thông báo:'}
               </label>
               <textarea
                 rows={3}
                 value={finalMessage}
                 onChange={(e) => setFinalMessage(e.target.value)}
-                placeholder="Nhập lời chào tạm biệt hoặc lý do giải tán nhóm..."
+                placeholder={isEn ? 'Enter farewell message or reason for dissolving group...' : 'Nhập lời chào tạm biệt hoặc lý do giải tán nhóm...'}
                 className="w-full p-2.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500"
               />
               <p className="text-[10px] text-slate-400 leading-snug">
-                Phòng chat sẽ được xóa vĩnh viễn và các thành viên sẽ nhận được thông báo này.
+                {isEn ? 'The chat room will be permanently deleted and all members will receive this notice.' : 'Phòng chat sẽ được xóa vĩnh viễn và các thành viên sẽ nhận được thông báo này.'}
               </p>
             </div>
 
@@ -941,7 +950,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={() => setShowDissolveModal(false)}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
               >
-                Hủy bỏ
+                {isEn ? 'Cancel' : 'Hủy bỏ'}
               </button>
               <button
                 type="button"
@@ -949,7 +958,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={handleDissolveRoom}
                 className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md flex items-center gap-1.5 transition-all active:scale-95"
               >
-                {isDeleting ? 'Đang xóa...' : 'Giải tán nhóm'}
+                {isDeleting ? (isEn ? 'Deleting...' : 'Đang xóa...') : (isEn ? 'Dissolve Group' : 'Giải tán nhóm')}
                 <Send className="w-3 h-3" />
               </button>
             </div>

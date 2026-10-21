@@ -84,48 +84,49 @@ export function detectDeviceType(): DeviceType {
   return 'desktop';
 }
 
-export function getDeviceTypeInfo(type: DeviceType): {
+export function getDeviceTypeInfo(type: DeviceType, lang: 'vi' | 'en' = 'vi'): {
   type: DeviceType;
   label: string;
   subLabel: string;
   description: string;
 } {
+  const isEn = lang === 'en';
   switch (type) {
     case 'mobile':
       return {
         type: 'mobile',
-        label: 'Điện thoại (Mobile)',
-        subLabel: 'Thiết bị di động thông minh',
-        description: 'Được tự động nhận diện theo phần cứng điện thoại'
+        label: isEn ? 'Mobile (Smartphone)' : 'Điện thoại (Mobile)',
+        subLabel: isEn ? 'Smart mobile device' : 'Thiết bị di động thông minh',
+        description: isEn ? 'Auto-detected based on mobile phone hardware' : 'Được tự động nhận diện theo phần cứng điện thoại'
       };
     case 'tablet':
       return {
         type: 'tablet',
-        label: 'Máy tính bảng (Tablet)',
-        subLabel: 'Thiết bị màn hình phẳng',
-        description: 'Được tự động nhận diện theo phần cứng iPad / Máy tính bảng'
+        label: isEn ? 'Tablet (iPad / Pad)' : 'Máy tính bảng (Tablet)',
+        subLabel: isEn ? 'Flat-screen tablet device' : 'Thiết bị màn hình phẳng',
+        description: isEn ? 'Auto-detected based on iPad / Tablet hardware' : 'Được tự động nhận diện theo phần cứng iPad / Máy tính bảng'
       };
     case 'laptop':
       return {
         type: 'laptop',
-        label: 'Laptop (Máy tính xách tay)',
-        subLabel: 'Máy tính xách tay',
-        description: 'Được tự động nhận diện theo màn hình & phần cứng Laptop'
+        label: isEn ? 'Laptop (Notebook PC)' : 'Laptop (Máy tính xách tay)',
+        subLabel: isEn ? 'Portable laptop computer' : 'Máy tính xách tay',
+        description: isEn ? 'Auto-detected based on laptop display & hardware' : 'Được tự động nhận diện theo màn hình & phần cứng Laptop'
       };
     case 'tv':
       return {
         type: 'tv',
-        label: 'Smart TV (Truyền hình thông minh)',
-        subLabel: 'Tivi thông minh (Tizen / WebOS / Android TV)',
-        description: 'Được tối ưu giao diện màn hình lớn, phóng to DPI chống mỏi mắt và tự động nhận file'
+        label: isEn ? 'Smart TV (Living Room)' : 'Smart TV (Truyền hình thông minh)',
+        subLabel: isEn ? 'Smart Television (Tizen / WebOS / Android TV)' : 'Tivi thông minh (Tizen / WebOS / Android TV)',
+        description: isEn ? 'Optimized for large TV display, high DPI and auto file reception' : 'Được tối ưu giao diện màn hình lớn, phóng to DPI chống mỏi mắt và tự động nhận file'
       };
     case 'desktop':
     default:
       return {
         type: 'desktop',
-        label: 'PC (Máy tính để bàn)',
-        subLabel: 'Máy tính bàn cố định',
-        description: 'Được tự động nhận diện theo cấu hình máy tính để bàn'
+        label: isEn ? 'PC (Desktop Computer)' : 'PC (Máy tính để bàn)',
+        subLabel: isEn ? 'Fixed desktop computer' : 'Máy tính bàn cố định',
+        description: isEn ? 'Auto-detected based on desktop computer configuration' : 'Được tự động nhận diện theo cấu hình máy tính để bàn'
       };
   }
 }

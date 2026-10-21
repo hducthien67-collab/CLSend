@@ -76,7 +76,8 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 
 export const MobileChatView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
+  const isEn = currentLang === 'en';
   
   // Room navigation state: 'rooms_list' | 'chat_feed'
   const [viewMode, setViewMode] = useState<'rooms_list' | 'chat_feed'>('chat_feed');
@@ -796,19 +797,19 @@ export const MobileChatView: React.FC = () => {
               type="button"
               onClick={() => setShowJoinModal(true)}
               className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 border border-slate-700 active:scale-95 transition-all"
-              title="Nhập mã phòng"
+              title={isEn ? "Enter Room Code" : "Nhập mã phòng"}
             >
               <Key className="w-3 h-3 text-amber-400" />
-              <span>Nhập mã</span>
+              <span>{isEn ? "Join Code" : "Nhập mã"}</span>
             </button>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
               className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm active:scale-95 transition-all"
-              title="Tạo phòng mới"
+              title={isEn ? "Create Room" : "Tạo phòng mới"}
             >
               <Plus className="w-3 h-3" />
-              <span>Tạo phòng</span>
+              <span>{isEn ? "Create Room" : "Tạo phòng"}</span>
             </button>
           </div>
         </div>
@@ -821,7 +822,7 @@ export const MobileChatView: React.FC = () => {
               type="text"
               value={roomSearchQuery}
               onChange={(e) => setRoomSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm phòng chat theo tên hoặc mã ID..."
+              placeholder={isEn ? "Search chat rooms by name or ID code..." : "Tìm kiếm phòng chat theo tên hoặc mã ID..."}
               className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -912,13 +913,14 @@ export const MobileChatView: React.FC = () => {
         </div>
 
         {/* Modal Tạo phòng mới */}
+        {/* Modal Tạo phòng mới */}
         {showCreateModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in duration-150">
             <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-md shadow-2xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <MessagesSquare className="w-5 h-5 text-emerald-400" />
-                  Tạo phòng chat mới
+                  {isEn ? 'Create new chat room' : 'Tạo phòng chat mới'}
                 </h3>
                 <button
                   type="button"
@@ -946,7 +948,7 @@ export const MobileChatView: React.FC = () => {
                   <div className="flex-1 space-y-2">
                     <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 inline-flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5" />
-                      Tải ảnh đại diện
+                      {isEn ? 'Upload photo' : 'Tải ảnh đại diện'}
                       <input 
                         type="file" 
                         accept="image/*" 
@@ -965,7 +967,7 @@ export const MobileChatView: React.FC = () => {
                     </label>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-400">Màu nền:</span>
+                      <span className="text-[10px] text-slate-400">{isEn ? 'Background:' : 'Màu nền:'}</span>
                       {ROOM_PRESET_COLORS.map((col) => (
                         <button
                           key={col}
@@ -983,14 +985,14 @@ export const MobileChatView: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Tên phòng
+                    {isEn ? 'ROW 1: ROOM NAME' : 'Tên phòng'}
                   </label>
                   <input
                     type="text"
                     required
                     value={newRoomName}
                     onChange={(e) => setNewRoomName(e.target.value)}
-                    placeholder="Nhập tên phòng..."
+                    placeholder={isEn ? 'e.g. Project Team, Best Friends...' : 'Nhập tên phòng...'}
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1000,11 +1002,11 @@ export const MobileChatView: React.FC = () => {
                     <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-bold text-white flex items-center gap-1.5">
-                        <span>Phòng Riêng Tư Bảo Mật</span>
-                        <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">Mặc định</span>
+                        <span>{isEn ? 'Private Secure Room (Private Room)' : 'Phòng Riêng Tư Bảo Mật'}</span>
+                        <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">{isEn ? 'Default' : 'Mặc định'}</span>
                       </p>
                       <p className="text-[11px] text-purple-300/80 mt-0.5 leading-snug">
-                        Tự động tạo mã truy cập 6 ký tự. Chỉ thành viên có mã mới vào được phòng.
+                        {isEn ? 'The system will generate a unique 6-digit access code. Others can only join when you share this code.' : 'Tự động tạo mã truy cập 6 ký tự. Chỉ thành viên có mã mới vào được phòng.'}
                       </p>
                     </div>
                   </div>
@@ -1015,7 +1017,7 @@ export const MobileChatView: React.FC = () => {
                   disabled={!newRoomName.trim()}
                   className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs shadow-md"
                 >
-                  Tạo phòng ngay
+                  {isEn ? 'Create room now' : 'Tạo phòng ngay'}
                 </button>
               </form>
             </div>
@@ -1029,7 +1031,7 @@ export const MobileChatView: React.FC = () => {
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Key className="w-5 h-5 text-amber-400" />
-                  Nhập mã ID phòng
+                  {isEn ? 'Enter Room ID Code' : 'Nhập mã ID phòng'}
                 </h3>
                 <button
                   type="button"
@@ -1047,7 +1049,7 @@ export const MobileChatView: React.FC = () => {
                     required
                     value={joinCodeInput}
                     onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    placeholder="Nhập mã 6 ký tự (VD: ABCD12)..."
+                    placeholder={isEn ? 'Enter 6-character code (e.g. ABCD12)...' : 'Nhập mã 6 ký tự (VD: ABCD12)...'}
                     className="w-full px-3.5 py-3 text-center font-mono uppercase tracking-widest text-base font-bold bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500"
                   />
                   {joinError && (
@@ -1060,7 +1062,7 @@ export const MobileChatView: React.FC = () => {
                   disabled={!joinCodeInput.trim()}
                   className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs shadow-md"
                 >
-                  Tham gia phòng
+                  {isEn ? 'Join Room' : 'Tham gia phòng'}
                 </button>
               </form>
             </div>

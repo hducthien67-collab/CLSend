@@ -120,7 +120,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     syncGoogleProfilePhoto,
     linkWithGoogleAccount
   } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
   
   // Tab Management
   const [activeTab, setActiveTab] = useState<SettingsTab>('device');
@@ -608,7 +608,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setEditDisplayName(newName);
   };
 
-  const deviceInfo = getDeviceTypeInfo(settings.deviceType);
+  const deviceInfo = getDeviceTypeInfo(settings.deviceType, currentLang);
 
   const renderCurrentDeviceIcon = (sizeClass = 'w-5 h-5') => {
     switch (settings.deviceType) {
@@ -831,10 +831,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const formatSessionTime = (isoString?: string) => {
-    if (!isoString) return 'Vừa xong';
+    if (!isoString) return currentLang === 'en' ? 'Just now' : 'Vừa xong';
     try {
       const d = new Date(isoString);
-      return d.toLocaleString('vi-VN', {
+      return d.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN', {
         hour: '2-digit',
         minute: '2-digit',
         day: '2-digit',
@@ -2026,7 +2026,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           {isGoogleUser ? t('settings.sessions_title_3') : t('settings.sessions_title_5')}
                         </h4>
                         <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 font-bold">
-                          {sessions.length} {t('settings.sessions_count_label')}
+                          {sessions.length} {currentLang === 'en' ? (sessions.length > 1 ? 'sessions' : 'session') : 'phiên'}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.2 truncate">
@@ -2066,7 +2066,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-xs font-bold text-white truncate">
-                              {sess.deviceName || 'Thiết bị'}
+                              {sess.deviceName || (currentLang === 'en' ? 'Device' : 'Thiết bị')}
                             </span>
                             {sess.isCurrent && (
                               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
@@ -2078,11 +2078,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-y-0.5 gap-x-2">
                             <span className="flex items-center gap-0.5 text-slate-300">
                               <Cpu className="w-2.5 h-2.5 text-emerald-400" />
-                              {sess.browser ? (sess.browser.includes('trên') ? sess.browser.split('trên')[1].trim() : sess.browser) : 'Thiết bị'}
+                              {sess.browser ? (sess.browser.includes('trên') ? (currentLang === 'en' ? sess.browser.replace('trên', 'on') : sess.browser).split(currentLang === 'en' ? 'on' : 'trên')[1]?.trim() || sess.browser : sess.browser) : (currentLang === 'en' ? 'Device' : 'Thiết bị')}
                             </span>
                             <span className="flex items-center gap-0.5 text-slate-300">
                               <MapPin className="w-2.5 h-2.5 text-rose-400 shrink-0" />
-                              {sess.location || 'Việt Nam'}
+                              {sess.location || (currentLang === 'en' ? 'Vietnam' : 'Việt Nam')}
                             </span>
                             <span className="flex items-center gap-0.5 text-slate-400 font-mono">
                               <Clock className="w-2.5 h-2.5 text-teal-400 shrink-0" />

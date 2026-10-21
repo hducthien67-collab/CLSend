@@ -204,14 +204,14 @@ export const MobileSendView: React.FC = () => {
   const handlePasteAndSend = async (targetDev?: PresenceDevice) => {
     const target = targetDev || selectedTargetDevice;
     if (!target) {
-      showToast('Vui lòng chọn thiết bị nhận trước!', 'error');
+      showToast(t('mobile_send.select_device_error'), 'error');
       return;
     }
 
     try {
       const text = await navigator.clipboard.readText();
       if (!text) {
-        showToast('Bộ nhớ tạm đang trống.', 'info');
+        showToast(t('mobile_send.clipboard_empty'), 'info');
         return;
       }
 
@@ -220,7 +220,7 @@ export const MobileSendView: React.FC = () => {
       setIsTextSheetOpen(true);
       setIsActionSheetOpen(false);
     } catch (err) {
-      showToast('Không thể truy cập bộ nhớ tạm. Vui lòng dán thủ công.', 'error');
+      showToast(t('mobile_send.clipboard_error'), 'error');
     }
   };
 
@@ -665,9 +665,11 @@ export const MobileSendView: React.FC = () => {
                   createdAt: new Date().toISOString()
                 });
               }
-              showToast(`Đã gửi ${selectedFiles.length} tệp từ Cloud tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`, 'success');
+              showToast(currentLang === 'en'
+                ? `Sent ${selectedFiles.length} file(s) from Cloud to ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`
+                : `Đã gửi ${selectedFiles.length} tệp từ Cloud tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`, 'success');
             } catch (err) {
-              showToast('Lỗi khi gửi tệp từ Cloud.', 'error');
+              showToast(currentLang === 'en' ? 'Error sending files from Cloud.' : 'Lỗi khi gửi tệp từ Cloud.', 'error');
             } finally {
               setIsSending(false);
             }

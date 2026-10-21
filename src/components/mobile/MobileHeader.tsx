@@ -4,7 +4,6 @@ import { CloudSendLogo } from '../CloudSendLogo';
 import { Settings, Copy, Check, Monitor, Smartphone, ShieldCheck, Sparkles, Crown } from 'lucide-react';
 import { PresenceDevice } from '../../types';
 import { isDevUser } from '../../utils/devModeration';
-import { GpsLocationBadge } from '../GpsLocationBadge';
 
 interface MobileHeaderProps {
   onOpenSettings: () => void;
@@ -75,10 +74,8 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
           )}
         </div>
 
-        {/* Right Controls: GPS Badge, Connect Code Pill & Profile/Settings Avatar */}
+        {/* Right Controls: Connect Code Pill & Profile/Settings Avatar */}
         <div className="flex items-center gap-1.5">
-          <GpsLocationBadge compact={true} />
-
           {/* Connect Code Quick Pill */}
           <button
             type="button"

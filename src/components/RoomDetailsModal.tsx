@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebase/config';
 import { doc, setDoc, updateDoc, deleteDoc, collection, addDoc } from 'firebase/firestore';
-import { ChatRoom, ChatMessage, RoomMember } from '../types';
+import { ChatRoom, ChatMessage, RoomMember } from './types';
 import { 
   X, 
   Users, 

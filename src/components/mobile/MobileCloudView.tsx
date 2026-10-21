@@ -39,11 +39,13 @@ import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { MobileBottomSheet } from './MobileBottomSheet';
+import { useLanguage } from '../../context/LanguageContext';
 
 const MAX_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB
 
 export const MobileCloudView: React.FC = () => {
   const { currentUser, settings } = useAuth();
+  const { t } = useLanguage();
   const [files, setFiles] = useState<CloudDriveFile[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'image' | 'video' | 'audio' | 'document' | 'favorite'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -228,8 +230,8 @@ export const MobileCloudView: React.FC = () => {
               <Cloud className="w-3.5 h-3.5" />
             </div>
             <div>
-              <h2 className="text-[11px] font-bold text-white">Kho Cloud Cá Nhân</h2>
-              <p className="text-[9px] text-slate-400">Đồng bộ không giới hạn thiết bị</p>
+              <h2 className="text-[11px] font-bold text-white">{t('drive.mobile_header')}</h2>
+              <p className="text-[9px] text-slate-400">{t('drive.mobile_sub')}</p>
             </div>
           </div>
 
@@ -250,11 +252,11 @@ export const MobileCloudView: React.FC = () => {
       {/* Category Filter Pills (Horizontal Scroll) */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-xs">
         {[
-          { id: 'all' as const, label: 'Tất cả', count: files.length },
-          { id: 'image' as const, label: 'Hình ảnh', count: files.filter(f => f.category === 'image').length },
-          { id: 'video' as const, label: 'Video', count: files.filter(f => f.category === 'video').length },
-          { id: 'document' as const, label: 'Tài liệu', count: files.filter(f => f.category === 'document').length },
-          { id: 'favorite' as const, label: 'Yêu thích', count: files.filter(f => f.isFavorite).length },
+          { id: 'all' as const, label: t('drive.filter_all'), count: files.length },
+          { id: 'image' as const, label: t('drive.filter_image'), count: files.filter(f => f.category === 'image').length },
+          { id: 'video' as const, label: t('drive.filter_video'), count: files.filter(f => f.category === 'video').length },
+          { id: 'document' as const, label: t('drive.filter_doc'), count: files.filter(f => f.category === 'document').length },
+          { id: 'favorite' as const, label: t('drive.filter_fav'), count: files.filter(f => f.isFavorite).length },
         ].map((cat) => (
           <button
             key={cat.id}

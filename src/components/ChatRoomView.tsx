@@ -1,6 +1,7 @@
 import { UserProfileModal } from './UserProfileModal';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { db } from '../firebase/config';
 import { 
   collection, 
@@ -19,7 +20,7 @@ import {
   deleteDoc,
   writeBatch 
 } from 'firebase/firestore';
-import { ChatRoom, ChatMessage, ChatAttachment, RoomMember } from '../types';
+import { ChatRoom, ChatMessage, ChatAttachment, RoomMember } from './types';
 import { 
   MessagesSquare, 
   Plus, 
@@ -102,6 +103,7 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 
 export const ChatRoomView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
+  const { t } = useLanguage();
   
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string>('public-relay-lounge');
@@ -124,7 +126,16 @@ export const ChatRoomView: React.FC = () => {
     createdAt?: string;
   }>>({});
   const [selectedProfileUser, setSelectedProfileUser] = useState<any>(null);
-  const [profileAnchor, setProfileAnchor] = useState<{ top: number; left: number; isRightHalf: boolean } | null>(null);
+  const [profileAnchor, setProfileAnchor] = useState<{
+    top: number;
+    bottom?: number;
+    left: number;
+    right?: number;
+    width?: number;
+    height?: number;
+    isRightHalf?: boolean;
+    isMe?: boolean;
+  } | null>(null);
 
   // Helper to extract a reliable numeric timestamp from a message (prioritizes true atomic server time)
   const getMessageTime = (msg: Partial<ChatMessage>): number => {
@@ -1243,7 +1254,7 @@ export const ChatRoomView: React.FC = () => {
         <div className="p-3.5 sm:p-4 border-b border-slate-800 bg-slate-950/40 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <MessagesSquare className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-bold text-white">Phòng Chat</h3>
+            <h3 className="text-base font-bold text-white">{t('chat.rooms')}</h3>
           </div>
           <button
             id="create-room-btn"
@@ -1252,7 +1263,7 @@ export const ChatRoomView: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-colors"
           >
             <Plus className="w-4 h-4" />
-            Tạo phòng
+            {t('chat.new_room')}
           </button>
         </div>
 
@@ -1263,14 +1274,14 @@ export const ChatRoomView: React.FC = () => {
               type="text"
               value={joinCodeInput}
               onChange={(e) => setJoinCodeInput(e.target.value)}
-              placeholder="Mã phòng (VD: AB12CD)"
+              placeholder={t('chat.join_room')}
               className="flex-1 px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 uppercase focus:outline-none focus:border-emerald-500 font-mono"
             />
             <button
               type="submit"
               className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold shrink-0 transition-colors"
             >
-              Vào
+              OK
             </button>
           </form>
           {joinError && <p className="text-xs text-rose-400 mt-1.5">{joinError}</p>}
@@ -1320,16 +1331,16 @@ export const ChatRoomView: React.FC = () => {
                     </span>
                     {room.id === 'public-relay-lounge' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
-                        Chung
+                        {t('chat.public')}
                       </span>
                     ) : isOwner ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 flex items-center gap-0.5">
                         <Crown className="w-2.5 h-2.5 text-amber-400" />
-                        Trưởng phòng
+                        {t('chat.owner')}
                       </span>
                     ) : (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
-                        Thành viên
+                        {t('chat.member')}
                       </span>
                     )}
                   </div>
@@ -1591,31 +1602,39 @@ export const ChatRoomView: React.FC = () => {
                       <div className={`flex items-center gap-2 mb-1 px-1 text-[11px] text-slate-400 flex-wrap ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                         {/* Avatar on top of chat frame */}
                         <div 
-                          className="relative shrink-0 select-none group/avatar cursor-pointer hover:scale-105 transition-transform"
+                          className={`relative shrink-0 select-none group/avatar transition-transform ${isMe ? '' : 'cursor-pointer hover:scale-105'}`}
                           onClick={(e) => {
+                            // UX Filter Logic: Chặn tài khoản chính (Current User), hoàn toàn im lặng, chỉ kích hoạt cho người khác
+                            if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
+
                             const rect = e.currentTarget.getBoundingClientRect();
-                            const isRightHalf = rect.left > window.innerWidth / 2;
                             setProfileAnchor({
-                              top: rect.bottom,
-                              left: isRightHalf ? rect.right : rect.left,
-                              isRightHalf
+                              top: rect.top,
+                              bottom: rect.bottom,
+                              left: rect.left,
+                              right: rect.right,
+                              width: rect.width,
+                              height: rect.height,
+                              isRightHalf: false,
+                              isMe: false
                             });
                             setSelectedProfileUser({
                               uid: msg.senderId || msg.senderDevice,
                               displayName: senderDisplayName,
-                              email: isMe ? (currentUser?.email || '') : (senderMeta?.email || ''),
+                              email: senderMeta?.email || '',
                               avatarUrl: effectiveAvatarUrl,
                               avatarColor: effectiveAvatarColor,
                               isDev: isDevMsg,
-                              deviceName: isMe ? settings.deviceName : senderMeta?.deviceName,
-                              deviceType: isMe ? settings.deviceType : senderMeta?.deviceType,
+                              deviceName: senderMeta?.deviceName,
+                              deviceType: senderMeta?.deviceType,
                               createdAt: senderMeta?.createdAt,
-                              bannerUrl: isMe ? (settings.bannerUrl || userProfile?.bannerUrl) : senderMeta?.bannerUrl,
-                              customBio: isMe ? (settings.customBio || userProfile?.customBio) : (senderMeta?.customBio || (senderMeta as any)?.bio),
-                              customBadgeText: isMe ? (settings.customBadgeText || userProfile?.customBadgeText) : senderMeta?.customBadgeText
+                              bannerUrl: senderMeta?.bannerUrl,
+                              customBio: senderMeta?.customBio || (senderMeta as any)?.bio,
+                              customBadgeText: senderMeta?.customBadgeText,
+                              isMe: false
                             });
                           }}
-                          title="Xem hồ sơ cá nhân"
+                          title={isMe ? undefined : "Xem hồ sơ cá nhân"}
                         >
                           {effectiveAvatarUrl ? (
                             <img
@@ -2011,17 +2030,28 @@ export const ChatRoomView: React.FC = () => {
                 </button>
               </div>
 
-              {/* Smart Format / Clean Text Button */}
+              {/* Typing Indicator & Smart Format / Clean Text Button */}
               {inputText.trim().length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleCleanInputText}
-                  title="Tự động xóa khoảng trắng rác, dòng trống thừa, ký tự ẩn và căn chỉnh văn bản gọn gàng không bị hiện lung tung"
-                  className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm active:scale-95 ml-auto"
-                >
-                  <Wand2 className="w-3 h-3 text-emerald-400" />
-                  <span>Làm gọn</span>
-                </button>
+                <div className="flex items-center gap-2 ml-auto animate-in fade-in slide-in-from-bottom-1 duration-150">
+                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                    <span className="flex items-center gap-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.3s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.15s]" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" />
+                    </span>
+                    <span className="italic">Đang soạn tin...</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleCleanInputText}
+                    title="Tự động xóa khoảng trắng rác, dòng trống thừa, ký tự ẩn và căn chỉnh văn bản gọn gàng không bị hiện lung tung"
+                    className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                  >
+                    <Wand2 className="w-3 h-3 text-emerald-400" />
+                    <span>Làm gọn</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -2119,7 +2149,7 @@ export const ChatRoomView: React.FC = () => {
                   }}
                   enterKeyMode={enterKeyMode}
                   disabled={false}
-                  placeholder="Nhập tin nhắn... (Bôi đen & Ctrl+B để in đậm, Ctrl+I để in nghiêng, Enter gửi)"
+                  placeholder={t('chat.placeholder')}
                   className="smooth-input"
                 />
               </div>
@@ -2130,7 +2160,7 @@ export const ChatRoomView: React.FC = () => {
                 type="submit"
                 disabled={(!inputText.trim() && attachments.length === 0) || isCompressing}
                 className="p-2 sm:p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-md active:scale-95 shrink-0"
-                title="Gửi tin nhắn"
+                title={t('chat.send_btn')}
               >
                 <Send className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
@@ -2146,7 +2176,7 @@ export const ChatRoomView: React.FC = () => {
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <MessagesSquare className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base font-bold text-white">Tạo phòng chat mới</h3>
+                <h3 className="text-base font-bold text-white">{t('chat.create_room_title')}</h3>
               </div>
               <button
                 type="button"
@@ -2161,7 +2191,7 @@ export const ChatRoomView: React.FC = () => {
               {/* Ảnh đại diện & Biểu tượng nhóm */}
               <div className="space-y-2">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Ảnh đại diện & Biểu tượng nhóm
+                  {t('chat.avatar_label')}
                 </label>
                 <div 
                   className={`flex items-center gap-3.5 p-3 rounded-2xl bg-slate-950/60 border transition-all ${
@@ -2206,7 +2236,7 @@ export const ChatRoomView: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 flex items-center gap-1.5 transition-colors">
                         <Camera className="w-3.5 h-3.5" />
-                        Tải ảnh lên
+                        {t('chat.upload_photo')}
                         <input 
                           type="file" 
                           accept="image/*" 
@@ -2234,11 +2264,11 @@ export const ChatRoomView: React.FC = () => {
                     </div>
 
                     <p className="text-[10px] text-slate-400">
-                      💡 Bạn có thể kéo thả trực tiếp ảnh từ máy tính vào ô này!
+                      {t('chat.drag_hint')}
                     </p>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-slate-400 mr-1">Màu nền:</span>
+                      <span className="text-[11px] text-slate-400 mr-1">{t('chat.bg_color')}</span>
                       {ROOM_PRESET_COLORS.map((col) => (
                         <button
                           key={col}
@@ -2258,14 +2288,14 @@ export const ChatRoomView: React.FC = () => {
               {/* Dòng 1: Tên phòng */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Dòng 1: Tên phòng
+                  {t('chat.name_label')}
                 </label>
                 <input
                   type="text"
                   required
                   value={newRoomName}
                   onChange={(e) => setNewRoomName(e.target.value)}
-                  placeholder="Ví dụ: Team Dự Án, Nhóm Bạn Thân, Trao Đổi..."
+                  placeholder={t('chat.name_placeholder')}
                   className="w-full px-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
                 />
               </div>
@@ -2275,18 +2305,18 @@ export const ChatRoomView: React.FC = () => {
                 <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-bold text-white flex items-center gap-1.5">
-                    <span>Phòng Riêng Tư Bảo Mật (Private Room)</span>
-                    <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">Mặc định</span>
+                    <span>{t('chat.private_room')}</span>
+                    <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">{t('chat.default')}</span>
                   </p>
                   <p className="text-[11px] text-purple-300/80 leading-relaxed">
-                    Hệ thống sẽ tạo 1 mã truy cập riêng (6 ký tự). Người khác chỉ có thể vào khi bạn chia sẻ mã phòng này.
+                    {t('chat.private_desc')}
                   </p>
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
                 <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Bạn sẽ là <strong>Trưởng phòng (Owner)</strong> quản trị phòng riêng tư này.</span>
+                <span>{t('chat.owner_badge')}</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -2295,13 +2325,13 @@ export const ChatRoomView: React.FC = () => {
                   onClick={() => setShowCreateModal(false)}
                   className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
                 >
-                  Hủy
+                  {t('chat.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-5 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/20 transition-all active:scale-95"
                 >
-                  Tạo phòng ngay
+                  {t('chat.create_now')}
                 </button>
               </div>
             </form>

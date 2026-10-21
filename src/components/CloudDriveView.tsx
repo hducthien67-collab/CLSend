@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { db } from '../firebase/config';
 import {
   collection,
@@ -13,7 +14,7 @@ import {
   addDoc,
   serverTimestamp
 } from 'firebase/firestore';
-import { CloudDriveFile } from '../types';
+import { CloudDriveFile } from './../types';
 import {
   Cloud,
   Upload,
@@ -51,6 +52,7 @@ const MAX_QUOTA_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB personal storage quo
 
 export const CloudDriveView: React.FC = () => {
   const { currentUser, settings } = useAuth();
+  const { t } = useLanguage();
   const [files, setFiles] = useState<CloudDriveFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -273,7 +275,7 @@ export const CloudDriveView: React.FC = () => {
             const tgRes = await uploadToTelegram(file);
             if (tgRes.downloadUrl) {
               fileUrl = tgRes.downloadUrl;
-              fileViewUrl = tgRes.downloadUrl;
+              fileViewUrl = tgRes.viewUrl || tgRes.downloadUrl;
             }
           } catch (tgErr: any) {
             console.warn(`Telegram upload notice for "${file.name}", using high-speed CLSend storage:`, tgErr?.message || tgErr);
@@ -593,13 +595,13 @@ export const CloudDriveView: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-                  Kho Cloud Cá Nhân
+                  {t('drive.title')}
                   <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono border border-emerald-500/30">
                     Live Sync
                   </span>
                 </h2>
                 <p className="text-xs sm:text-sm text-slate-400">
-                  Lưu trữ lâu dài, đồng bộ tức thì giữa Điện thoại & Máy tính mà không cần cáp nối
+                  {t('drive.desc')}
                 </p>
               </div>
             </div>
@@ -635,19 +637,9 @@ export const CloudDriveView: React.FC = () => {
               ) : (
                 <>
                   <Upload className="w-4 h-4 text-slate-950" />
-                  <span>Tải tệp lên Cloud</span>
+                  <span>{t('drive.upload_btn')}</span>
                 </>
               )}
-            </button>
-            <button
-              id="upload-url-to-cloud-btn"
-              type="button"
-              disabled={uploading}
-              onClick={() => setIsCloudUrlModalOpen(true)}
-              className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-indigo-300 border border-indigo-500/40 font-bold text-sm shadow-lg flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
-            >
-              <LinkIcon className="w-4 h-4 text-indigo-400" />
-              <span>Thêm URL</span>
             </button>
           </div>
         </div>
@@ -657,7 +649,7 @@ export const CloudDriveView: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 mb-2 font-medium gap-2">
             <div className="flex items-center gap-2">
               <HardDrive className="w-4 h-4 text-emerald-400" />
-              <span>Dung lượng đã sử dụng:</span>
+              <span>{t('drive.used')}</span>
               <span className="text-white font-semibold">{formatFileSize(totalSizeBytes)}</span>
               <span>/ 100 GB</span>
             </div>
@@ -742,10 +734,10 @@ export const CloudDriveView: React.FC = () => {
       >
         <Upload className={`w-8 h-8 mx-auto mb-2 transition-transform ${dragOver ? 'text-emerald-400 scale-125' : 'text-slate-400'}`} />
         <p className="text-sm font-semibold text-slate-200">
-          Kéo thả tệp hoặc bấm vào đây để tải lên Cloud của bạn
+          {t('drive.drop_title')}
         </p>
         <p className="text-xs text-slate-400 mt-1">
-          Hỗ trợ ảnh, video, âm thanh, tài liệu PDF/Word (lên đến 250 MB/tệp)
+          {t('drive.drop_sub')}
         </p>
       </div>
 
@@ -754,12 +746,12 @@ export const CloudDriveView: React.FC = () => {
         {/* Category Pills with Icons matching Image 1 */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none text-xs">
           {[
-            { id: 'all', label: 'Tất cả', icon: HardDrive, iconClass: 'text-emerald-400', count: files.length },
-            { id: 'image', label: 'Hình ảnh', icon: ImageIcon, iconClass: 'text-sky-400', count: files.filter((f) => f.category === 'image').length },
-            { id: 'document', label: 'Tài liệu', icon: FileText, iconClass: 'text-amber-400', count: files.filter((f) => f.category === 'document').length },
-            { id: 'video', label: 'Video', icon: Video, iconClass: 'text-rose-400', count: files.filter((f) => f.category === 'video').length },
-            { id: 'audio', label: 'Âm thanh', icon: Music, iconClass: 'text-purple-400', count: files.filter((f) => f.category === 'audio').length },
-            { id: 'favorite', label: 'Yêu thích', icon: Star, iconClass: 'text-yellow-400 fill-yellow-400', count: files.filter((f) => f.isFavorite).length },
+            { id: 'all', label: t('drive.filter_all'), icon: HardDrive, iconClass: 'text-emerald-400', count: files.length },
+            { id: 'image', label: t('drive.filter_image'), icon: ImageIcon, iconClass: 'text-sky-400', count: files.filter((f) => f.category === 'image').length },
+            { id: 'document', label: t('drive.filter_doc'), icon: FileText, iconClass: 'text-amber-400', count: files.filter((f) => f.category === 'document').length },
+            { id: 'video', label: t('drive.filter_video'), icon: Video, iconClass: 'text-rose-400', count: files.filter((f) => f.category === 'video').length },
+            { id: 'audio', label: t('drive.filter_audio'), icon: Music, iconClass: 'text-purple-400', count: files.filter((f) => f.category === 'audio').length },
+            { id: 'favorite', label: t('drive.filter_fav'), icon: Star, iconClass: 'text-yellow-400 fill-yellow-400', count: files.filter((f) => f.isFavorite).length },
           ].map((cat) => {
             const IconComp = cat.icon;
             const isSelected = selectedCategory === cat.id;
@@ -793,10 +785,10 @@ export const CloudDriveView: React.FC = () => {
                   type="button"
                   onClick={() => handleDeleteFiles('category')}
                   className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm whitespace-nowrap"
-                  title={`Xóa tất cả ${selectedCategory === 'image' ? 'hình ảnh' : selectedCategory === 'video' ? 'video' : selectedCategory === 'audio' ? 'âm thanh' : selectedCategory === 'document' ? 'tài liệu' : 'mục'} trong danh mục này`}
+                  title={t('drive.delete_category')}
                 >
                   <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Xóa mục này ({filteredFiles.length})</span>
+                  <span>{t('drive.delete_category')} ({filteredFiles.length})</span>
                 </button>
               )}
 
@@ -804,10 +796,10 @@ export const CloudDriveView: React.FC = () => {
                 type="button"
                 onClick={() => handleDeleteFiles('all')}
                 className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 active:scale-95 shadow-sm whitespace-nowrap"
-                title="Xóa tất cả các tệp (Hình ảnh, Video, Âm thanh, Tài liệu) khỏi Kho Cloud"
+                title={t('drive.delete_all')}
               >
                 <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                <span>Xóa tất cả ({files.length})</span>
+                <span>{t('drive.delete_all')} ({files.length})</span>
               </button>
             </div>
           )}
@@ -817,7 +809,7 @@ export const CloudDriveView: React.FC = () => {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Tìm kiếm tệp..."
+              placeholder={t('drive.search')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="smooth-input w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none transition-all duration-200"
@@ -839,20 +831,16 @@ export const CloudDriveView: React.FC = () => {
       {loading ? (
         <div className="py-20 text-center">
           <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-400">Đang đồng bộ tệp đám mây của bạn...</p>
+          <p className="text-sm text-slate-400">Loading...</p>
         </div>
       ) : filteredFiles.length === 0 ? (
         <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl py-16 px-6 text-center">
           <Cloud className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-slate-300 mb-1">
-            {searchQuery
-              ? 'Không tìm thấy tệp nào phù hợp'
-              : selectedCategory !== 'all'
-              ? 'Chưa có tệp nào trong danh mục này'
-              : 'Kho lưu trữ Cloud của bạn đang trống'}
+            {t('drive.empty')}
           </h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto mb-5">
-            Tải lên ảnh chụp từ điện thoại, video kỷ niệm hoặc tài liệu làm việc để truy cập mọi lúc, mọi nơi.
+            {t('drive.empty_sub')}
           </p>
           <button
             type="button"
@@ -860,7 +848,7 @@ export const CloudDriveView: React.FC = () => {
             className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 text-xs font-semibold text-emerald-400 transition-colors inline-flex items-center gap-2"
           >
             <Upload className="w-4 h-4" />
-            <span>Tải lên ngay</span>
+            <span>{t('drive.upload_btn')}</span>
           </button>
         </div>
       ) : (
@@ -973,7 +961,7 @@ export const CloudDriveView: React.FC = () => {
                     </h4>
                     <button
                       type="button"
-                      title="Đổi tên"
+                      title={t('drive.rename')}
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingFileId(file.id);
@@ -994,7 +982,7 @@ export const CloudDriveView: React.FC = () => {
                       Lỗi tải lên
                     </span>
                   ) : (
-                    <span>{new Date(file.createdAt).toLocaleDateString('vi-VN')}</span>
+                    <span>{new Date(file.createdAt).toLocaleDateString()}</span>
                   )}
                 </div>
               </div>
@@ -1014,13 +1002,13 @@ export const CloudDriveView: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       <RefreshCw className="w-3 h-3 text-amber-300" />
-                      <span>Tải lại</span>
+                      <span>{t('drive.reupload')}</span>
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={() => downloadFileSafely(file.url, file.name)}
-                      title="Tải về máy tính / điện thoại"
+                      title={t('drive.download_btn')}
                       className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
@@ -1030,7 +1018,7 @@ export const CloudDriveView: React.FC = () => {
                   {/* Copy Share Link */}
                   <button
                     type="button"
-                    title="Sao chép liên kết chia sẻ cho bạn bè"
+                    title={t('drive.share')}
                     onClick={(e) => handleCopyLink(file, e)}
                     className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-sky-400 transition-colors"
                   >
@@ -1040,7 +1028,7 @@ export const CloudDriveView: React.FC = () => {
                   {/* Preview */}
                   <button
                     type="button"
-                    title="Xem trước"
+                    title={t('drive.preview')}
                     onClick={() => setPreviewFile(file)}
                     className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-teal-400 transition-colors"
                   >
@@ -1051,7 +1039,7 @@ export const CloudDriveView: React.FC = () => {
                 {/* Delete */}
                 <button
                   type="button"
-                  title="Xóa khỏi Cloud"
+                  title={t('drive.delete_btn')}
                   onClick={(e) => handleDeleteFile(file, e)}
                   className="p-1.5 rounded-lg hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 transition-colors"
                 >

@@ -42,7 +42,7 @@ import {
   limit 
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { ChatRoom, ChatMessage, UserSanction, UserDevice } from '../types';
+import { ChatRoom, ChatMessage, UserSanction, UserDevice } from './types';
 import { applyTierSanction, removeDevSanction, isDevUser, SANCTION_TIERS } from '../utils/devModeration';
 import { runDevContentAudit, censorProfanity, ContentAuditReport } from '../utils/moderation';
 

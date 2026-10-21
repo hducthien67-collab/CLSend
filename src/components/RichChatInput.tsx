@@ -416,13 +416,25 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
   return (
     <div
       ref={containerRef}
-      className={`relative w-full rounded-xl bg-slate-950/80 border border-slate-800 focus-within:border-emerald-500/80 transition-all duration-150 ${className}`}
+      className={`relative w-full rounded-xl bg-slate-950/80 border border-slate-800 focus-within:border-emerald-500/80 transition-all duration-150 overflow-hidden ${className}`}
     >
       {/* Placeholder khi ô nhập đang trống */}
       {!value && (
         <div className="absolute left-4 top-2.5 text-sm text-slate-500 pointer-events-none select-none truncate max-w-[calc(100%-2rem)]">
           {placeholder}
         </div>
+      )}
+
+      {/* Custom Neon Glowing Gliding Caret | */}
+      {isFocused && (
+        <div
+          className="absolute pointer-events-none w-[2.5px] h-[20px] bg-gradient-to-t from-emerald-500 via-teal-400 to-emerald-300 rounded-full shadow-[0_0_10px_#10b981,0_0_20px_rgba(52,211,153,0.9)] z-20 animate-pulse"
+          style={{
+            left: `${caretPos.x}px`,
+            top: `${caretPos.y}px`,
+            transition: 'left 0.08s cubic-bezier(0.16, 1, 0.3, 1), top 0.08s cubic-bezier(0.16, 1, 0.3, 1)',
+          }}
+        />
       )}
 
       {/* Ô gõ tin nhắn trực tiếp WYSIWYG: Bôi đen & Ctrl+B ra chữ đậm thật, Ctrl+I ra chữ nghiêng thật */}
@@ -460,7 +472,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
         onPaste={handlePaste}
         className="relative z-10 w-full px-4 py-2.5 min-h-[44px] max-h-32 overflow-y-auto scrollbar-thin text-sm text-white focus:outline-none font-sans leading-relaxed break-words [overflow-wrap:anywhere] transition-colors selection:bg-emerald-500/30 selection:text-white"
         style={{
-          caretColor: 'var(--theme-primary, #10b981)',
+          caretColor: 'transparent',
           wordBreak: 'break-word',
           whiteSpace: 'pre-wrap'
         }}

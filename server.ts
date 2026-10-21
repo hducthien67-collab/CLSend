@@ -617,34 +617,56 @@ async function startServer() {
     }
   });
 
-  // Telegram Cloud Storage Download Proxy (Bypasses browser CORS & sandboxed iframe restrictions)
+  // Telegram Cloud Storage Download & Media Streaming Proxy (Bypasses CORS, supports audio/video inline streaming & range requests)
   app.get('/api/telegram/download', async (req, res) => {
     try {
       const fileUrl = req.query.url as string;
       const originalName = sanitizeServerFilename((req.query.name as string) || 'telegram-file');
+      const isInline = req.query.inline === 'true' || req.query.view === 'true';
 
       if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
         return res.status(400).send('URL Telegram không hợp lệ');
       }
 
-      const upstreamRes = await fetch(fileUrl);
-      if (!upstreamRes.ok) {
+      // Forward range request if requested by audio/video players
+      const headers: Record<string, string> = {};
+      if (req.headers.range) {
+        headers['range'] = req.headers.range;
+      }
+
+      const upstreamRes = await fetch(fileUrl, { headers });
+      if (!upstreamRes.ok && upstreamRes.status !== 206) {
         return res.status(upstreamRes.status).send('Không thể lấy tệp từ máy chủ Telegram.');
       }
 
-      const mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
+      let mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
+      const ext = originalName.split('.').pop()?.toLowerCase() || '';
+      if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus'].includes(ext)) {
+        mimeType = ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' ? 'audio/ogg' : `audio/${ext}`;
+      } else if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) {
+        mimeType = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : `video/${ext}`;
+      }
+
       const contentLength = upstreamRes.headers.get('content-length');
+      const contentRange = upstreamRes.headers.get('content-range');
       const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
 
+      res.status(upstreamRes.status);
       res.setHeader('Content-Type', mimeType);
+      res.setHeader('Accept-Ranges', 'bytes');
       if (contentLength) {
         res.setHeader('Content-Length', contentLength);
       }
+      if (contentRange) {
+        res.setHeader('Content-Range', contentRange);
+      }
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges');
+      
+      const dispositionType = isInline ? 'inline' : 'attachment';
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+        `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
       );
 
       if (upstreamRes.body) {
@@ -1126,7 +1148,15 @@ Quy định trả về JSON:
             const locationString = city && region && city !== region 
               ? `${city}, ${region}, ${country}` 
               : city ? `${city}, ${country}` : country;
-            return res.json({ success: true, location: locationString, city, country });
+            return res.json({ 
+              success: true, 
+              location: locationString, 
+              city, 
+              region, 
+              country, 
+              latitude: data.latitude || 12.6800, 
+              longitude: data.longitude || 108.0383 
+            });
           }
         }
       }
@@ -1137,14 +1167,37 @@ Quy định trả về JSON:
         const data = await fallbackRes.json();
         if (data.success) {
           const city = data.city || 'Hà Nội';
+          const region = data.region || '';
           const country = data.country || 'Việt Nam';
-          return res.json({ success: true, location: `${city}, ${country}`, city, country });
+          return res.json({ 
+            success: true, 
+            location: `${city}, ${country}`, 
+            city, 
+            region, 
+            country, 
+            latitude: data.latitude || 21.0285, 
+            longitude: data.longitude || 105.8542 
+          });
         }
       }
 
-      return res.json({ success: true, location: 'Việt Nam (Hà Nội / TP.HCM)' });
+      return res.json({ 
+        success: true, 
+        location: 'Việt Nam (Hà Nội / TP.HCM)', 
+        city: 'Việt Nam', 
+        country: 'Việt Nam',
+        latitude: 12.6800,
+        longitude: 108.0383
+      });
     } catch {
-      return res.json({ success: true, location: 'Việt Nam (Hà Nội / TP.HCM)' });
+      return res.json({ 
+        success: true, 
+        location: 'Việt Nam (Hà Nội / TP.HCM)',
+        city: 'Việt Nam',
+        country: 'Việt Nam',
+        latitude: 12.6800,
+        longitude: 108.0383
+      });
     }
   });
 
@@ -1356,7 +1409,10 @@ Quy định trả về JSON:
     try {
       const { createServer: createViteServer } = await import('vite');
       const vite = await createViteServer({
-        server: { middlewareMode: true },
+        server: { 
+          middlewareMode: true,
+          hmr: false,
+        },
         appType: 'spa',
       });
       app.use(vite.middlewares);

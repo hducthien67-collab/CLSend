@@ -1,6 +1,7 @@
 import { UserProfileModal } from '../UserProfileModal';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage } from '../../context/LanguageContext';
 import { db } from '../../firebase/config';
 import { 
   collection, 
@@ -75,6 +76,7 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 
 export const MobileChatView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
+  const { t } = useLanguage();
   
   // Room navigation state: 'rooms_list' | 'chat_feed'
   const [viewMode, setViewMode] = useState<'rooms_list' | 'chat_feed'>('chat_feed');
@@ -1543,7 +1545,7 @@ export const MobileChatView: React.FC = () => {
               handleSendMessage(e.currentTarget.value);
             }
           }}
-          placeholder="Nhập tin nhắn... (Enter gửi ngay)"
+          placeholder={t('chat.placeholder')}
           className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
         />
 

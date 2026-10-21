@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { db } from '../firebase/config';
 import { 
   collection, 
@@ -12,7 +13,7 @@ import {
   deleteDoc,
   writeBatch
 } from 'firebase/firestore';
-import { DirectTransfer, DeviceType } from '../types';
+import { DirectTransfer, DeviceType } from './types';
 import { 
   Download, 
   FileText, 
@@ -69,6 +70,7 @@ function getFileCategory(mimeType: string, fileName: string): 'image' | 'video' 
 
 export const ReceiveView: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
+  const { t } = useLanguage();
   const [transfers, setTransfers] = useState<DirectTransfer[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -531,11 +533,11 @@ export const ReceiveView: React.FC = () => {
                 </span>
                 <span className="flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
                   <Radio className="w-3 h-3 animate-pulse" />
-                  Sẵn sàng nhận dữ liệu
+                  {t('receive.ready')}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Thiết bị đang trực tuyến. Nhận tệp tin, hình ảnh, video và văn bản tức thời qua máy chủ Relay.
+                {t('receive.ready_sub')}
               </p>
             </div>
           </div>
@@ -545,8 +547,8 @@ export const ReceiveView: React.FC = () => {
             {/* Toggle 1: Auto Accept */}
             <div className="flex items-center gap-3 bg-slate-950/70 p-3 rounded-2xl border border-slate-800/90 shadow-sm">
               <div className="text-left">
-                <span className="text-xs font-bold text-white block">Tự động nhận tệp</span>
-                <span className="text-[10px] text-slate-400 block">Duyệt tức thì</span>
+                <span className="text-xs font-bold text-white block">{t('receive.auto_accept')}</span>
+                <span className="text-[10px] text-slate-400 block">{t('receive.auto_accept_sub')}</span>
               </div>
               <button
                 id="toggle-quick-save-btn"
@@ -569,9 +571,9 @@ export const ReceiveView: React.FC = () => {
               <div className="text-left">
                 <span className="text-xs font-bold text-sky-300 flex items-center gap-1">
                   <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                  Tự lưu vào Cloud
+                  {t('receive.auto_cloud')}
                 </span>
-                <span className="text-[10px] text-slate-400 block">Lưu trữ 24/7</span>
+                <span className="text-[10px] text-slate-400 block">{t('receive.auto_cloud_sub')}</span>
               </div>
               <button
                 id="toggle-auto-cloud-btn"
@@ -594,27 +596,27 @@ export const ReceiveView: React.FC = () => {
         {/* Live Quick Stats Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-800/80">
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-            <span className="text-[11px] text-slate-400 block">Tổng mục nhận</span>
+            <span className="text-[11px] text-slate-400 block">{t('receive.stat_total')}</span>
             <span className="text-sm font-bold text-white font-mono mt-0.5 block">
-              {transfers.length} mục
+              {transfers.length}
             </span>
           </div>
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-            <span className="text-[11px] text-slate-400 block">Tổng dung lượng</span>
+            <span className="text-[11px] text-slate-400 block">{t('receive.stat_size')}</span>
             <span className="text-sm font-bold text-emerald-400 font-mono mt-0.5 block">
               {formatFileSize(totalReceivedBytes)}
             </span>
           </div>
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-            <span className="text-[11px] text-slate-400 block">Đã lưu Kho Cloud</span>
+            <span className="text-[11px] text-slate-400 block">{t('receive.stat_saved')}</span>
             <span className="text-sm font-bold text-sky-300 font-mono mt-0.5 block">
-              {tabCounts.saved_cloud} tệp
+              {tabCounts.saved_cloud}
             </span>
           </div>
           <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-            <span className="text-[11px] text-slate-400 block">Chờ xử lý</span>
+            <span className="text-[11px] text-slate-400 block">{t('receive.stat_pending')}</span>
             <span className="text-sm font-bold text-amber-400 font-mono mt-0.5 block">
-              {tabCounts.pending} yêu cầu
+              {tabCounts.pending}
             </span>
           </div>
         </div>
@@ -668,7 +670,7 @@ export const ReceiveView: React.FC = () => {
               }`}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>Tất Cả</span>
+              <span>{t('receive.tab_all')}</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 activeTab === 'all' ? 'bg-slate-950/30 text-slate-950' : 'bg-slate-800 text-slate-300'
               }`}>
@@ -687,7 +689,7 @@ export const ReceiveView: React.FC = () => {
               }`}
             >
               <FileDocIcon fileName="sample.pdf" size="sm" />
-              <span>Tệp & Ảnh</span>
+              <span>{t('receive.tab_files')}</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 activeTab === 'files' ? 'bg-slate-950/30 text-slate-950' : 'bg-slate-800 text-slate-300'
               }`}>
@@ -706,7 +708,7 @@ export const ReceiveView: React.FC = () => {
               }`}
             >
               <Copy className="w-3.5 h-3.5" />
-              <span>Văn Bản & Link</span>
+              <span>{t('receive.tab_text')}</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 activeTab === 'text' ? 'bg-slate-950/30 text-slate-950' : 'bg-slate-800 text-slate-300'
               }`}>
@@ -725,7 +727,7 @@ export const ReceiveView: React.FC = () => {
               }`}
             >
               <Cloud className="w-3.5 h-3.5 text-sky-400" />
-              <span>Đã Lưu Cloud</span>
+              <span>{t('receive.tab_saved')}</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 activeTab === 'saved_cloud' ? 'bg-slate-950/30 text-slate-950' : 'bg-sky-950 text-sky-300 border border-sky-500/30'
               }`}>
@@ -745,7 +747,7 @@ export const ReceiveView: React.FC = () => {
                 }`}
               >
                 <Clock className="w-3.5 h-3.5" />
-                <span>Chờ Duyệt</span>
+                <span>{t('receive.tab_pending')}</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-amber-500 text-slate-950 animate-pulse">
                   {tabCounts.pending}
                 </span>
@@ -762,7 +764,7 @@ export const ReceiveView: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm kiếm tệp, người gửi..."
+                placeholder={t('receive.search_placeholder')}
                 className="w-full pl-9 pr-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
               />
               {searchQuery && (
@@ -784,17 +786,17 @@ export const ReceiveView: React.FC = () => {
                   onClick={handleSaveAllToCloudDrive}
                   disabled={isSavingAllToCloud}
                   className="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:bg-sky-700/60 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-sky-600/20 transition-all active:scale-95 cursor-pointer"
-                  title="Lưu toàn bộ danh sách nhận vào Kho Cloud 24/7"
+                  title={t('receive.save_all')}
                 >
                   {isSavingAllToCloud ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Đang lưu...</span>
+                      <span>{t('receive.saved')}...</span>
                     </>
                   ) : (
                     <>
                       <Cloud className="w-3.5 h-3.5" />
-                      <span>Lưu Tất Cả Vào Cloud</span>
+                      <span>{t('receive.save_all')}</span>
                     </>
                   )}
                 </button>
@@ -862,19 +864,17 @@ export const ReceiveView: React.FC = () => {
             </div>
             <div className="space-y-1.5">
               <h3 className="text-base font-bold text-white">
-                {searchQuery ? 'Không tìm thấy tệp nào phù hợp' : 'Chưa có tệp nào trong danh mục này'}
+                {t('receive.empty_title')}
               </h3>
               <p className="text-xs text-slate-400 max-w-md mx-auto">
-                {searchQuery 
-                  ? `Thử tìm kiếm với từ khóa khác hoặc xóa bộ lọc để xem toàn bộ danh sách.` 
-                  : `Khi ai đó gửi tệp tin hoặc văn bản tới bạn, thông báo và tệp tải về sẽ xuất hiện ở đây ngay lập tức.`}
+                {t('receive.empty_sub')}
               </p>
             </div>
             
             <div className="pt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-400">
               <span className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-sky-300">
                 <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                <span>Hỗ trợ lưu dữ liệu & tệp tin trực tiếp vào Kho Cloud an toàn</span>
+                <span>{t('drive.desc')}</span>
               </span>
             </div>
           </div>
@@ -959,7 +959,7 @@ export const ReceiveView: React.FC = () => {
                       </div>
 
                       <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
-                        <span>Từ: <strong className="text-slate-200">{item.senderDevice}</strong> ({item.senderName})</span>
+                        <span>{t('receive.from')} <strong className="text-slate-200">{item.senderDevice}</strong> ({item.senderName})</span>
                         <span>•</span>
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3 text-slate-500" />
@@ -976,7 +976,7 @@ export const ReceiveView: React.FC = () => {
                             className="text-[11px] text-emerald-400 hover:text-emerald-300 hover:underline flex items-center gap-1 font-medium cursor-pointer"
                           >
                             <Eye className="w-3 h-3" />
-                            Xem ảnh trước khi tải
+                            {t('receive.preview')}
                           </button>
                         </div>
                       )}
@@ -1004,7 +1004,7 @@ export const ReceiveView: React.FC = () => {
                           className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
                         >
                           <Check className="w-3.5 h-3.5" />
-                          Chấp nhận
+                          {t('receive.accept')}
                         </button>
                         <button
                           id={`decline-transfer-${item.id}`}
@@ -1013,7 +1013,7 @@ export const ReceiveView: React.FC = () => {
                           className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-medium flex items-center gap-1 active:scale-95 cursor-pointer"
                         >
                           <X className="w-3.5 h-3.5" />
-                          Từ chối
+                          {t('receive.reject')}
                         </button>
                       </>
                     ) : (
@@ -1023,7 +1023,7 @@ export const ReceiveView: React.FC = () => {
                           type="button"
                           onClick={() => handleSaveToCloudDrive(item)}
                           disabled={isSavingInCloud || isSavedInCloud}
-                          title="Lưu tệp hoặc văn bản này vào Kho Cloud cá nhân 24/7"
+                          title={t('receive.save_cloud')}
                           className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer ${
                             isSavedInCloud
                               ? 'bg-sky-500/20 border-sky-500/40 text-sky-300'
@@ -1033,17 +1033,17 @@ export const ReceiveView: React.FC = () => {
                           {isSavingInCloud ? (
                             <>
                               <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
-                              <span>Đang lưu...</span>
+                              <span>{t('receive.saved')}...</span>
                             </>
                           ) : isSavedInCloud ? (
                             <>
                               <Check className="w-3.5 h-3.5 text-sky-400 stroke-[3]" />
-                              <span>Đã lưu vào Cloud</span>
+                              <span>{t('receive.saved')}</span>
                             </>
                           ) : (
                             <>
                               <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                              <span>Lưu vào Cloud</span>
+                              <span>{t('receive.save_cloud')}</span>
                             </>
                           )}
                         </button>
@@ -1058,10 +1058,10 @@ export const ReceiveView: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
-                                title={`Mở liên kết: ${url}`}
+                                title={`URL: ${url}`}
                               >
                                 <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Mở link</span>
+                                <span>Link</span>
                               </a>
                             ))}
 
@@ -1073,12 +1073,12 @@ export const ReceiveView: React.FC = () => {
                               {copiedId === item.id ? (
                                 <>
                                   <Check className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span className="text-emerald-400">Đã sao chép</span>
+                                  <span className="text-emerald-400">{t('receive.copied')}</span>
                                 </>
                               ) : (
                                 <>
                                   <Copy className="w-3.5 h-3.5" />
-                                  <span>Sao chép</span>
+                                  <span>{t('receive.copy_text')}</span>
                                 </>
                               )}
                             </button>
@@ -1095,7 +1095,7 @@ export const ReceiveView: React.FC = () => {
                                 className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                               >
                                 <Eye className="w-3.5 h-3.5" />
-                                Xem
+                                {t('receive.preview')}
                               </button>
                             )}
                             <button
@@ -1108,17 +1108,17 @@ export const ReceiveView: React.FC = () => {
                               {downloadingIds[item.id] === 'downloading' ? (
                                 <>
                                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  Đang tải...
+                                  {t('receive.download')}...
                                 </>
                               ) : downloadingIds[item.id] === 'done' ? (
                                 <>
                                   <Check className="w-3.5 h-3.5 text-white" />
-                                  Đã tải xong
+                                  {t('receive.saved')}
                                 </>
                               ) : (
                                 <>
                                   <Download className="w-3.5 h-3.5" />
-                                  Tải về
+                                  {t('receive.download')}
                                 </>
                               )}
                             </button>

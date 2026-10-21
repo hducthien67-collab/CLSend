@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { CloudSendLogo } from './CloudSendLogo';
-import { SilkFabricBackground } from './SilkFabricBackground';
-import { SmoothTypewriter } from './SmoothTypewriter';
-import { CompactWheelDatePicker } from './CompactWheelDatePicker';
+import { useAuth } from '../../context/AuthContext';
+import { CloudSendLogo } from '../CloudSendLogo';
+import { SilkFabricBackground } from '../SilkFabricBackground';
+import { SmoothTypewriter } from '../SmoothTypewriter';
+import { CompactWheelDatePicker } from '../CompactWheelDatePicker';
 import { 
   ShieldCheck, 
   Sparkles, 

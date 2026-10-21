@@ -73,7 +73,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
-import { ChatRoom, UserDevice, UserSanction, ChatMessage, ContentReport, ChatAttachment, DeviceType } from '../types';
+import { ChatRoom, UserDevice, UserSanction, ChatMessage, ContentReport, ChatAttachment, DeviceType } from './types';
 import { formatFileSize } from '../utils/device';
 import { 
   isDevUser, 
@@ -4692,7 +4692,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         <button
                           type="button"
                           onClick={() => {
-                            alert();
+                            alert('Đã gửi thông báo cảnh cáo vi phạm tới tài khoản người dùng!');
                             setShowDetailModal(false);
                           }}
                           className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"

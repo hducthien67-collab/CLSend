@@ -1,5 +1,6 @@
-import React from 'react';
-import { X, Crown, Shield, Calendar, Sparkles, Mail, Smartphone, Globe } from 'lucide-react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { X, Crown, Calendar, Sparkles, Mail, Smartphone } from 'lucide-react';
 
 interface UserProfileModalProps {
   user: {
@@ -17,33 +18,195 @@ interface UserProfileModalProps {
     customBio?: string;
     customBadgeText?: string;
     createdAt?: string;
+    isMe?: boolean;
   } | null;
-  anchorPosition?: { top: number; left: number; isRightHalf: boolean } | null;
+  anchorPosition?: {
+    top: number;
+    bottom?: number;
+    left: number;
+    right?: number;
+    width?: number;
+    height?: number;
+    isRightHalf?: boolean;
+    isMe?: boolean;
+  } | null;
   onClose: () => void;
 }
 
-export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClose }) => {
-  if (!user) return null;
+export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, anchorPosition, onClose }) => {
+  // UX Filter Logic: Chặn tài khoản chính (Current User), tuyệt đối không mở khung
+  if (!user || user.isMe || !anchorPosition) return null;
+
+  const modalRef = useRef<HTMLDivElement>(null);
+
+  // 1. Click Outside Handler
+  useEffect(() => {
+    const handlePointerDown = (e: MouseEvent) => {
+      if (modalRef.current && !modalRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [onClose]);
+
+  // 2. Escape Key Handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // 3. Scroll & Resize Handler: Clean up and close on scroll to prevent detached floating
+  useEffect(() => {
+    const handleScrollOrResize = () => {
+      onClose();
+    };
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+    return () => {
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, [onClose]);
+
+  // 4. Smart Boundary & Drift Adjuster (Pixel-Perfect Dynamic Nudging, No 180° Flip)
+  const computePosition = (measuredHeight = 410, measuredWidth = 320) => {
+    if (!anchorPosition) {
+      return {
+        top: 0,
+        left: 0,
+        arrowSide: 'top' as 'top' | 'left',
+        arrowPos: 16
+      };
+    }
+
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1000;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+    const avatarTop = anchorPosition.top;
+    const avatarBottom = anchorPosition.bottom ?? (anchorPosition.top + (anchorPosition.height ?? 28));
+    const avatarLeft = anchorPosition.left;
+    const avatarRight = anchorPosition.right ?? (anchorPosition.left + (anchorPosition.width ?? 28));
+
+    // Mặc định: Khung Profile xuất hiện sát ngay dưới góc phải của ảnh đại diện nhỏ, dịch sang phải thêm một khoảng thoáng
+    const idealTop = avatarBottom + 4;
+    const idealLeft = avatarRight + 2;
+
+    // Giữ trong khung nhìn chiều ngang (Viewport X clamp)
+    let finalLeft = idealLeft;
+    if (finalLeft + measuredWidth > vw - 12) {
+      finalLeft = vw - measuredWidth - 12;
+    }
+    if (finalLeft < 12) {
+      finalLeft = 12;
+    }
+
+    // Xử lý va chạm viền dưới màn hình (Viewport Collision):
+    // KHÔNG lật ngược 180 độ. Tính chính xác số pixel bị tràn (Overflow Delta) và trượt (slide) ngược lên vừa đủ
+    const bottomLimit = vh - 12;
+    const overflowDelta = Math.max(0, (idealTop + measuredHeight) - bottomLimit);
+    let finalTop = idealTop - overflowDelta;
+
+    // Chặn mép trên an toàn
+    if (finalTop < 12) {
+      finalTop = 12;
+    }
+
+    // Neo giữ mũi tên (Arrow Anchor):
+    // Điểm neo trên avatar: góc phải dưới của icon (avatarRight, avatarBottom)
+    const targetAnchorX = avatarRight;
+    const targetAnchorY = avatarBottom;
+
+    const relX = targetAnchorX - finalLeft;
+    const relY = targetAnchorY - finalTop;
+
+    let arrowSide: 'top' | 'left' = 'top';
+    let arrowPos = 12;
+
+    if (relY <= 14 && relX >= -4) {
+      // Khung chưa trượt quá avatar: mũi tên ở cạnh trên trỏ thẳng góc phải avatar
+      arrowSide = 'top';
+      arrowPos = Math.max(8, Math.min(Math.max(8, relX + 6), measuredWidth - 28));
+    } else {
+      // Khung dịch sang hẳn bên phải hoặc trượt lên: mũi tên chuyển sang cạnh trái trỏ ngang vào avatar
+      arrowSide = 'left';
+      arrowPos = Math.max(10, Math.min(Math.max(10, relY - 7), measuredHeight - 32));
+    }
+
+    return {
+      top: Math.round(finalTop),
+      left: Math.round(finalLeft),
+      arrowSide,
+      arrowPos: Math.round(arrowPos)
+    };
+  };
+
+  const [coords, setCoords] = useState(() => computePosition());
+
+  useLayoutEffect(() => {
+    if (!anchorPosition) return;
+    const modalEl = modalRef.current;
+    if (modalEl) {
+      const h = modalEl.offsetHeight;
+      const w = modalEl.offsetWidth;
+      setCoords(computePosition(h, w));
+    }
+  }, [anchorPosition]);
 
   const initialChar = (user.displayName?.trim().charAt(0) || 'U').toUpperCase();
   const bannerGradient = user.bannerUrl 
     ? `url(${user.bannerUrl}) center/cover no-repeat` 
     : 'linear-gradient(to right, #059669, #0d9488, #4f46e5)';
 
-  // Fix bỏ dấu $ ở tiểu sử
   const rawBio = user.customBio || user.bio || '';
   const cleanBio = rawBio.replace(/^\$+\s*/, '').replace(/\$/g, '').trim();
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-fadeIn">
+  // GPU transform-origin dynamic setting based on arrow anchor
+  const transformOrigin = coords.arrowSide === 'top'
+    ? `${coords.arrowPos + 7}px 0px`
+    : `0px ${coords.arrowPos + 7}px`;
+
+  // Render via React Portal directly into document.body to isolate from parent CSS transforms & scroll offsets
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div 
+      className="fixed inset-0 z-[9999] bg-black/25 backdrop-blur-[0.5px] transition-opacity animate-in fade-in duration-150" 
+      onClick={onClose}
+    >
       <div 
-        className="relative w-full max-w-[360px] bg-[#1e1f22] text-slate-100 rounded-2xl shadow-2xl border border-slate-700/80 overflow-hidden animate-scaleUp select-none"
+        ref={modalRef}
+        className="fixed w-[320px] max-w-[calc(100vw-24px)] max-h-[calc(100vh-24px)] overflow-y-auto bg-[#1e1f22] text-slate-100 rounded-2xl shadow-2xl border border-slate-700/90 overflow-hidden select-none z-[10000] animate-profile-pop will-change-transform"
+        style={{
+          top: `${coords.top}px`,
+          left: `${coords.left}px`,
+          transformOrigin,
+        }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Dynamic Neo Mũi Tên Chỉ Hướng: Tự động bám chặt theo avatar mà không biến dạng khi khung trượt lên */}
+        {coords.arrowSide === 'top' ? (
+          <div 
+            className="absolute -top-1.5 w-3.5 h-3.5 bg-[#1e1f22] border-t border-l border-slate-700/80 rotate-45 z-20 pointer-events-none transition-all duration-75"
+            style={{ left: `${coords.arrowPos}px` }}
+          />
+        ) : (
+          <div 
+            className="absolute -left-1.5 w-3.5 h-3.5 bg-[#1e1f22] border-l border-b border-slate-700/80 rotate-45 z-20 pointer-events-none transition-all duration-75"
+            style={{ top: `${coords.arrowPos}px` }}
+          />
+        )}
+        
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 z-20 w-8 h-8 rounded-full bg-black/40 hover:bg-black/70 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
+          title="Đóng (Esc)"
+          className="absolute top-3 right-3 z-30 w-8 h-8 rounded-full bg-black/50 hover:bg-black/75 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
@@ -65,7 +228,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClos
             </div>
           )}
         </div>
-
+        
         {/* Profile Body with Overlapping Avatar */}
         <div className="px-4 pb-5 pt-12 relative bg-[#1e1f22]">
           {/* Avatar overlapping banner on the left */}
@@ -158,6 +321,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, onClos
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

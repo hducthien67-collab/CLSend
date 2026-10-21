@@ -31,7 +31,7 @@ import {
   RefreshCw,
   Plus
 } from 'lucide-react';
-import { UserDevice, AppSettings, AppUser } from '../types';
+import { UserDevice, AppSettings, AppUser } from './types';
 
 interface FullscreenDesignStudioProps {
   isOpen: boolean;

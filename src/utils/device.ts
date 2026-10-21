@@ -220,27 +220,59 @@ export function detectBrowserInfo(): string {
 
 // Global cached location variable
 let cachedSpecificLocation: string | null = typeof window !== 'undefined' ? localStorage.getItem('cloudsend_cached_location') : null;
+let cachedDetailedLocation: DetailedLocation | null = typeof window !== 'undefined' ? (() => {
+  try {
+    const raw = localStorage.getItem('cloudsend_detailed_location');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+})() : null;
 
-export async function fetchSpecificLocation(): Promise<string> {
-  if (cachedSpecificLocation && cachedSpecificLocation !== 'Đang xác định...') {
-    return cachedSpecificLocation;
+export interface DetailedLocation {
+  location: string;
+  latitude: number;
+  longitude: number;
+  city?: string;
+  region?: string;
+  country?: string;
+  isGps?: boolean;
+}
+
+export async function fetchDetailedLocation(): Promise<DetailedLocation> {
+  // Check cached
+  if (cachedDetailedLocation && cachedDetailedLocation.latitude && cachedDetailedLocation.longitude) {
+    return cachedDetailedLocation;
   }
 
+  // 1. Try server endpoint
   try {
-    // 1. Try server endpoint first
     const res = await fetch('/api/auth/detect-location', { signal: AbortSignal.timeout(3500) });
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.location) {
+        const detail: DetailedLocation = {
+          location: data.location,
+          latitude: typeof data.latitude === 'number' ? data.latitude : 12.6800,
+          longitude: typeof data.longitude === 'number' ? data.longitude : 108.0383,
+          city: data.city,
+          region: data.region,
+          country: data.country || 'Việt Nam',
+          isGps: false
+        };
         cachedSpecificLocation = data.location;
-        if (typeof window !== 'undefined') localStorage.setItem('cloudsend_cached_location', data.location);
-        return data.location;
+        cachedDetailedLocation = detail;
+        try {
+          localStorage.setItem('cloudsend_cached_location', data.location);
+          localStorage.setItem('cloudsend_detailed_location', JSON.stringify(detail));
+        } catch {}
+        return detail;
       }
     }
   } catch {}
 
+  // 2. Try direct ipwho.is client-side
   try {
-    // 2. Direct public client fetch fallback
     const res = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       const data = await res.json();
@@ -249,17 +281,45 @@ export async function fetchSpecificLocation(): Promise<string> {
         const region = data.region || '';
         const country = data.country || 'Việt Nam';
         const loc = city && region && city !== region ? `${city}, ${region}, ${country}` : city ? `${city}, ${country}` : country;
+        const detail: DetailedLocation = {
+          location: loc,
+          latitude: typeof data.latitude === 'number' ? data.latitude : 12.6800,
+          longitude: typeof data.longitude === 'number' ? data.longitude : 108.0383,
+          city,
+          region,
+          country,
+          isGps: false
+        };
         cachedSpecificLocation = loc;
-        if (typeof window !== 'undefined') localStorage.setItem('cloudsend_cached_location', loc);
-        return loc;
+        cachedDetailedLocation = detail;
+        try {
+          localStorage.setItem('cloudsend_cached_location', loc);
+          localStorage.setItem('cloudsend_detailed_location', JSON.stringify(detail));
+        } catch {}
+        return detail;
       }
     }
   } catch {}
 
-  // 3. Timezone resolution fallback
-  const fallback = detectLocationInfo();
-  cachedSpecificLocation = fallback;
-  return fallback;
+  // 3. Fallback
+  const fallbackLoc = detectLocationInfo();
+  const fallbackDetail: DetailedLocation = {
+    location: fallbackLoc,
+    latitude: 12.6800,
+    longitude: 108.0383,
+    country: 'Việt Nam',
+    isGps: false
+  };
+  return fallbackDetail;
+}
+
+export async function fetchSpecificLocation(): Promise<string> {
+  if (cachedSpecificLocation && cachedSpecificLocation !== 'Đang xác định...') {
+    return cachedSpecificLocation;
+  }
+
+  const detailed = await fetchDetailedLocation();
+  return detailed.location;
 }
 
 export function detectLocationInfo(): string {

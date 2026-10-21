@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { db } from '../firebase/config';
 import { collection, addDoc } from 'firebase/firestore';
-import { ChatMessage } from '../types';
+import { ChatMessage } from './types';
 import { Flag, X, AlertTriangle, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 interface ReportMessageModalProps {

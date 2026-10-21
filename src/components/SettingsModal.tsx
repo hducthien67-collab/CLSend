@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { auth } from '../firebase/config';
 import { 
   X, 
@@ -41,6 +42,7 @@ import {
   MonitorSmartphone,
   MapPin,
   Clock,
+  Navigation,
   EyeOff,
   Radio,
   Power,
@@ -48,13 +50,31 @@ import {
   FileText,
   Send,
   Inbox,
-  Camera
+  Camera,
+  Bot,
+  Video,
+  Music,
+  Headphones,
+  Edit3,
+  Save,
+  Plus,
+  Trash2,
+  FileUp,
+  Upload
 } from 'lucide-react';
-import { DeviceType, LoginSession } from '../types';
+import { DeviceType, LoginSession } from './types';
 import { AVATAR_COLORS, getDeviceTypeInfo, generateDefaultDeviceName } from '../utils/device';
 import { playReceiveSound } from '../utils/sound';
 import { isDevUser } from '../utils/devModeration';
 import { FullscreenDesignStudio } from './FullscreenDesignStudio';
+import { 
+  getAllBotsConfig, 
+  saveAllBotsConfig, 
+  testTelegramBot, 
+  parseBotsFromFileContent,
+  StorageBotInfo, 
+  BotSupportedTypes 
+} from '../utils/telegramStorage';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -100,9 +120,213 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     syncGoogleProfilePhoto,
     linkWithGoogleAccount
   } = useAuth();
+  const { t } = useLanguage();
   
   // Tab Management
   const [activeTab, setActiveTab] = useState<SettingsTab>('device');
+
+  // Telegram Bots Cluster state (Audio, Videos & Documents)
+  const [botsCluster, setBotsCluster] = useState<StorageBotInfo[]>([]);
+  const [testingBotId, setTestingBotId] = useState<string | null>(null);
+  const [botTestResults, setBotTestResults] = useState<{ [id: string]: { ok: boolean; message: string } }>({});
+  const [isTestingAllBots, setIsTestingAllBots] = useState(false);
+  const [showAddBotModal, setShowAddBotModal] = useState(false);
+  const [newBotName, setNewBotName] = useState('Bot Âm Thanh CLSend 03');
+  const [newBotToken, setNewBotToken] = useState('');
+  const [newBotChatId, setNewBotChatId] = useState('@ClsendStorage');
+  const [newBotType, setNewBotType] = useState<BotSupportedTypes>('audio');
+  const [isTestingNewBot, setIsTestingNewBot] = useState(false);
+  const [newBotTestResult, setNewBotTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Inline editing state for existing bots
+  const [editingBotId, setEditingBotId] = useState<string | null>(null);
+  const [editBotName, setEditBotName] = useState('');
+  const [editBotToken, setEditBotToken] = useState('');
+  const [editBotChatId, setEditBotChatId] = useState('');
+  const [editBotType, setEditBotType] = useState<BotSupportedTypes>('audio');
+
+  useEffect(() => {
+    if (isOpen) {
+      setBotsCluster(getAllBotsConfig());
+    }
+  }, [isOpen]);
+
+  const handleTestBot = async (bot: StorageBotInfo) => {
+    setTestingBotId(bot.id);
+    const res = await testTelegramBot(bot.botToken);
+    if (res.ok) {
+      setBotTestResults(prev => ({
+        ...prev,
+        [bot.id]: { ok: true, message: `Hoạt động tốt! @${res.username || bot.username || 'bot'}` }
+      }));
+    } else {
+      setBotTestResults(prev => ({
+        ...prev,
+        [bot.id]: { ok: false, message: res.error || 'Không thể kết nối' }
+      }));
+    }
+    setTestingBotId(null);
+  };
+
+  const handleTestAllBots = async () => {
+    setIsTestingAllBots(true);
+    for (const b of botsCluster) {
+      if (!b.enabled || !b.botToken) continue;
+      const res = await testTelegramBot(b.botToken);
+      setBotTestResults(prev => ({
+        ...prev,
+        [b.id]: {
+          ok: res.ok,
+          message: res.ok ? `Hoạt động! @${res.username || b.username || 'bot'}` : (res.error || 'Lỗi kết nối')
+        }
+      }));
+    }
+    setIsTestingAllBots(false);
+  };
+
+  const handleToggleBot = (botId: string) => {
+    const updated = botsCluster.map(b => b.id === botId ? { ...b, enabled: !b.enabled } : b);
+    setBotsCluster(updated);
+    saveAllBotsConfig(updated);
+  };
+
+  const handleTestNewBot = async () => {
+    if (!newBotToken.trim()) {
+      setNewBotTestResult({ ok: false, message: 'Vui lòng nhập Token Bot trước khi kiểm tra' });
+      return;
+    }
+    setIsTestingNewBot(true);
+    const res = await testTelegramBot(newBotToken);
+    if (res.ok) {
+      setNewBotTestResult({ ok: true, message: `Kết nối thành công! Tên: ${res.name || ''} (@${res.username || ''})` });
+    } else {
+      setNewBotTestResult({ ok: false, message: res.error || 'Không thể kết nối đến Bot Telegram' });
+    }
+    setIsTestingNewBot(false);
+  };
+
+  const handleAddCustomBot = () => {
+    if (!newBotToken.trim()) return;
+    const newBot: StorageBotInfo = {
+      id: `custom-bot-${Date.now()}`,
+      name: newBotName.trim() || 'Bot Tùy Chỉnh',
+      username: newBotName.trim().replace(/\s+/g, '_'),
+      botToken: newBotToken.trim(),
+      chatId: newBotChatId.trim() || '@ClsendStorage',
+      enabled: true,
+      facility: 'sub',
+      supportedTypes: newBotType,
+      description: `Bot phụ trách tệp ${newBotType === 'audio' ? 'Âm thanh (Sound)' : newBotType === 'video' ? 'Video' : newBotType === 'document' ? 'Tài liệu' : 'Đa năng'}`
+    };
+    const updated = [...botsCluster, newBot];
+    setBotsCluster(updated);
+    saveAllBotsConfig(updated);
+    setNewBotName('Bot Âm Thanh CLSend 03');
+    setNewBotToken('');
+    setNewBotTestResult(null);
+    setShowAddBotModal(false);
+  };
+
+  const handleStartEditBot = (bot: StorageBotInfo) => {
+    setEditingBotId(bot.id);
+    setEditBotName(bot.name);
+    setEditBotToken(bot.botToken || '');
+    setEditBotChatId(bot.chatId || '@ClsendStorage');
+    setEditBotType(bot.supportedTypes || 'all');
+  };
+
+  const handleCancelEditBot = () => {
+    setEditingBotId(null);
+  };
+
+  const handleSaveEditBot = (botId: string) => {
+    const updated = botsCluster.map(b => {
+      if (b.id !== botId) return b;
+      return {
+        ...b,
+        name: editBotName.trim() || b.name,
+        botToken: editBotToken.trim(),
+        chatId: editBotChatId.trim() || '@ClsendStorage',
+        supportedTypes: editBotType,
+        enabled: editBotToken.trim().length > 0 ? true : b.enabled
+      };
+    });
+    setBotsCluster(updated);
+    saveAllBotsConfig(updated);
+    setEditingBotId(null);
+  };
+
+  const handleDeleteCustomBot = (botId: string) => {
+    const updated = botsCluster.filter(b => b.id !== botId);
+    setBotsCluster(updated);
+    saveAllBotsConfig(updated);
+  };
+
+  // Import bots from file (.txt, .json) or raw text
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importFileType, setImportFileType] = useState<BotSupportedTypes>('audio');
+  const [importStatusMessage, setImportStatusMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [botCategoryFilter, setBotCategoryFilter] = useState<'all' | 'audio' | 'video' | 'document'>('all');
+
+  const handleFileUploadForImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setImportText(content);
+        const preview = parseBotsFromFileContent(content, importFileType);
+        if (preview.length > 0) {
+          setImportStatusMessage({
+            type: 'success',
+            message: `Tìm thấy ${preview.length} Bot từ tệp "${file.name}"! Nhấn "Xác nhận nhập" để lưu.`
+          });
+        } else {
+          setImportStatusMessage({
+            type: 'error',
+            message: `Không tìm thấy token hợp lệ trong tệp "${file.name}". Hãy kiểm tra lại định dạng.`
+          });
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = () => {
+    if (!importText.trim()) return;
+    const imported = parseBotsFromFileContent(importText, importFileType);
+    if (imported.length === 0) {
+      setImportStatusMessage({
+        type: 'error',
+        message: 'Không tìm thấy token Bot hợp lệ (Token có dạng: 123456789:ABCdef...).'
+      });
+      return;
+    }
+
+    const current = [...botsCluster];
+    let addedCount = 0;
+    for (const b of imported) {
+      if (!current.some(c => c.botToken === b.botToken)) {
+        current.push(b);
+        addedCount++;
+      }
+    }
+
+    setBotsCluster(current);
+    saveAllBotsConfig(current);
+    setImportStatusMessage({
+      type: 'success',
+      message: `Đã nạp thành công ${addedCount} Bot vào cụm lưu trữ!`
+    });
+    setImportText('');
+    setTimeout(() => {
+      setShowImportModal(false);
+      setImportStatusMessage(null);
+    }, 1800);
+  };
+
 
   // Form states
   const [deviceName, setDeviceName] = useState(settings.deviceName);
@@ -339,6 +563,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       fetchSessions();
     }
   }, [isOpen, activeTab]);
+
 
   if (!isOpen) return null;
 
@@ -642,14 +867,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <h2 className="text-xs sm:text-sm font-bold tracking-tight text-white truncate">
-                  Cài Đặt Hệ Thống & Tùy Biến
+                  {t('settings.title')}
                 </h2>
                 <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 shrink-0">
                   v2.5
                 </span>
               </div>
               <p className="text-[10.5px] text-slate-400 truncate hidden sm:block">
-                Quản lý tài khoản, phiên đăng nhập, phần cứng và tùy biến
+                {t('settings.subtitle')}
               </p>
             </div>
           </div>
@@ -658,7 +883,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             id="close-settings-btn"
             onClick={onClose}
             className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors flex items-center justify-center min-h-[30px] min-w-[30px] active:scale-95 shrink-0"
-            title="Đóng cửa sổ"
+            title={t('settings.close')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -680,7 +905,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }`}
             >
               <Cpu className="w-3.5 h-3.5" />
-              <span>Thiết Bị & Mạng</span>
+              <span>{t('settings.tab_device')}</span>
             </button>
 
             {/* TAB 3: KHUNG TỰ THIẾT KẾ (DESIGN STUDIO & CANVAS) */}
@@ -694,7 +919,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }`}
             >
               <Palette className="w-3.5 h-3.5" />
-              <span>Khung Thiết Kế</span>
+              <span>{t('settings.tab_design')}</span>
             </button>
 
             {/* TAB 4: TÀI KHOẢN & PHIÊN ĐĂNG NHẬP */}
@@ -708,7 +933,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               }`}
             >
               <UserCheck className="w-3.5 h-3.5" />
-              <span>Tài Khoản & Phiên</span>
+              <span>{t('settings.tab_account')}</span>
             </button>
           </div>
         </div>
@@ -729,7 +954,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-[11px] sm:text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5 min-w-0">
                     <Cpu className="w-3.5 h-3.5 shrink-0" />
-                    <span>Định danh thiết bị</span>
+                    <span>{t('settings.device_id')}</span>
                   </h3>
                   <button
                     type="button"
@@ -738,18 +963,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     title="Tạo tên ngẫu nhiên vui nhộn"
                   >
                     <Shuffle className="w-3 h-3" />
-                    <span>Tên ngẫu nhiên</span>
+                    <span>{t('settings.random_name')}</span>
                   </button>
                 </div>
 
                 <div>
                   <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
                     <label className="text-[11px] text-slate-300 font-medium min-w-0">
-                      Tên thiết bị hiển thị trong mạng
+                      {t('settings.device_name_label')}
                     </label>
                     <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-1 shrink-0">
                       <RefreshCw className="w-2.5 h-2.5 text-emerald-400" />
-                      <span>Đồng bộ mạng</span>
+                      <span>{t('settings.network_sync')}</span>
                     </span>
                   </div>
                   <div className="relative">
@@ -772,11 +997,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <div className="flex flex-wrap items-center justify-between mb-1 gap-1">
                     <label className="text-[11px] text-slate-300 font-medium flex items-center gap-1 min-w-0">
-                      <span>Loại phần cứng đã nhận diện</span>
+                      <span>{t('settings.device_type_label')}</span>
                     </label>
                     <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.2 rounded-full border border-emerald-500/25 shrink-0">
                       <Lock className="w-2.5 h-2.5" />
-                      Khóa phần cứng
+                      {t('settings.hardware_lock')}
                     </span>
                   </div>
                   
@@ -790,7 +1015,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           {deviceInfo.label}
                         </span>
                         <span className="text-[9px] font-mono text-emerald-400 bg-slate-950 px-1.5 py-0.2 rounded border border-slate-800 shrink-0">
-                          Auto-detected
+                          {t('settings.hardware_auto')}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-2">
@@ -801,29 +1026,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+
               {/* 2. MÁY CHỦ TRUNG GIAN & TRẠNG THÁI RELAY */}
               <div className="bg-slate-950/60 border border-slate-800/90 rounded-xl p-3 sm:p-3.5 space-y-2.5">
                 <h3 className="text-[11px] sm:text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                   <Server className="w-3.5 h-3.5" />
-                  Máy chủ trung gian & Hạ tầng Relay
+                  {t('settings.relay_title')}
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
                   <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <div className="text-[10px] text-slate-400">Trạng thái kết nối</div>
+                    <div className="text-[10px] text-slate-400">{t('settings.relay_status')}</div>
                     <div className="text-[11px] font-bold text-emerald-400 mt-0.5 flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      Trực tuyến 24/7
+                      {t('settings.relay_online')}
                     </div>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <div className="text-[10px] text-slate-400">Hạ tầng Cloud</div>
+                    <div className="text-[10px] text-slate-400">{t('settings.cloud_infra')}</div>
                     <div className="text-[11px] font-semibold text-white mt-0.5">
                       Firestore Cloud Relay
                     </div>
                   </div>
                   <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
-                    <div className="text-[10px] text-slate-400">Giao thức bảo mật</div>
+                    <div className="text-[10px] text-slate-400">{t('settings.security_protocol')}</div>
                     <div className="text-[11px] font-semibold text-slate-200 mt-0.5 font-mono">
                       TLS 1.3 End-to-End
                     </div>
@@ -835,14 +1061,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="bg-slate-950/60 border border-slate-800/90 rounded-xl p-3 sm:p-3.5 space-y-2.5">
                 <h3 className="text-[11px] sm:text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
                   <DownloadCloud className="w-3.5 h-3.5" />
-                  Tùy chọn nhận tệp & Âm thanh
+                  {t('settings.transfer_options')}
                 </h3>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <label className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors">
                     <div className="pr-2">
-                      <div className="text-xs font-semibold text-white">Tự động nhận tệp (Quick Save)</div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">Tự động chấp nhận tệp từ bạn bè mà không cần duyệt</div>
+                      <div className="text-xs font-semibold text-white">{t('settings.quick_save')}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{t('settings.quick_save_desc')}</div>
                     </div>
                     <input
                       type="checkbox"
@@ -856,9 +1082,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="pr-2">
                       <div className="text-xs font-semibold text-white flex items-center gap-1.5">
                         {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
-                        Âm thanh thông báo
+                        {t('settings.sound_notif')}
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">Chuông nhẹ khi gửi/nhận tệp & tin nhắn</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{t('settings.sound_notif_desc')}</div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
@@ -866,7 +1092,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={handleTestSound}
                         className="px-2 py-0.5 text-[11px] rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
                       >
-                        Thử chuông
+                        {t('settings.test_sound')}
                       </button>
                       <input
                         type="checkbox"
@@ -878,6 +1104,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
               </div>
+
+
             </div>
           )}
 
@@ -894,11 +1122,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <UserCheck className="w-4 h-4 text-emerald-400" />
                     </span>
                     <h3 className="text-sm font-bold text-white tracking-tight">
-                      Tùy Biến Hồ Sơ & Giao Diện (User Profile)
+                      {t('settings.profile_title')}
                     </h3>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Cá nhân hóa ảnh đại diện, ảnh bìa, tiểu sử và huy hiệu hiển thị của bạn trong phòng chat và danh sách thành viên.
+                    {t('settings.profile_sub')}
                   </p>
                 </div>
               </div>
@@ -938,7 +1166,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                         <Flame className="w-4 h-4 text-emerald-400" />
-                        <span>Hình Ảnh Đại Diện (Avatar)</span>
+                        <span>{t('settings.avatar_label')}</span>
                       </label>
                       <div className="flex items-center gap-2">
                         <input 
@@ -954,7 +1182,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer"
                         >
                           <Camera className="w-3.5 h-3.5" />
-                          <span>Tải ảnh lên</span>
+                          <span>{t('settings.upload_photo')}</span>
                         </button>
                         {customAvatarUrl && (
                           <button
@@ -965,17 +1193,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             }}
                             className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
                           >
-                            Xóa ảnh
+                            {t('settings.delete_photo')}
                           </button>
                         )}
                       </div>
                     </div>
                     <p className="text-[10px] text-slate-400">
-                      💡 Bạn có thể kéo thả trực tiếp file ảnh đại diện vào ô này!
+                      {t('settings.avatar_drag_hint')}
                     </p>
                     {/* Màu sắc avatar fallback */}
                     <div className="flex items-center gap-2 flex-wrap pt-1">
-                      <span className="text-[11px] text-slate-400">Hoặc chọn màu mặc định:</span>
+                      <span className="text-[11px] text-slate-400">{t('settings.default_color')}</span>
                       {AVATAR_COLORS.map((col) => (
                         <button
                           key={col}
@@ -1027,7 +1255,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                         <Palette className="w-4 h-4 text-emerald-400" />
-                        <span>Ảnh Bìa / Banner (Profile Cover)</span>
+                        <span>{t('settings.banner_label')}</span>
                       </label>
                       <div className="flex items-center gap-2">
                         <input 
@@ -1043,7 +1271,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all cursor-pointer"
                         >
                           <Camera className="w-3.5 h-3.5" />
-                          <span>Đổi ảnh bìa</span>
+                          <span>{t('settings.change_banner')}</span>
                         </button>
                         {customBannerUrl && (
                           <button
@@ -1054,13 +1282,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             }}
                             className="text-xs text-rose-400 hover:text-rose-300 font-semibold px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer"
                           >
-                            Xóa ảnh bìa
+                            {t('settings.delete_banner')}
                           </button>
                         )}
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Ảnh bìa sẽ hiển thị ở phần trên cùng trong thẻ thông tin cá nhân (Profile Card) chuẩn Discord của bạn. Bạn cũng có thể kéo thả trực tiếp ảnh bìa vào đây!
+                      {t('settings.banner_hint')}
                     </p>
                   </div>
 
@@ -1068,7 +1296,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-200 mb-1">
-                        Huy hiệu hiển thị (Custom Badge)
+                        {t('settings.badge_label')}
                       </label>
                       <input
                         type="text"
@@ -1081,7 +1309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-slate-200 mb-1">
-                        Tiểu sử / Lời chào (Bio Status)
+                        {t('settings.bio_label')}
                       </label>
                       <textarea
                         rows={2}
@@ -1099,14 +1327,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                         <Lock className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Tính năng mở rộng (Sắp ra mắt)</span>
+                        <span>{t('settings.future_features')}</span>
                       </span>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        Đang phát triển
+                        {t('settings.in_development')}
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Nơi đây sẽ chứa thêm các tùy chọn nâng cao như: hiệu ứng khung viền avatar động, huy hiệu đặc quyền, và chủ đề trang cá nhân.
+                      {t('settings.future_desc')}
                     </p>
                   </div>
                 </div>
@@ -1117,7 +1345,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                       <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                         <Eye className="w-4 h-4 text-emerald-400" />
-                        <span>Xem Trước Thẻ Profile (Discord Style)</span>
+                        <span>{t('settings.preview_card')}</span>
                       </span>
                     </div>
 
@@ -1172,7 +1400,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                           <div className="bg-[#2b2d31]/70 p-3 rounded-xl border border-slate-700/40 space-y-2">
                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                              Giới thiệu
+                              {t('settings.bio_heading')}
                             </span>
                             <p className="text-xs text-slate-300 italic leading-snug">
                               "{customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.'}"
@@ -1183,7 +1411,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
 
                     <div className="text-[11px] text-slate-400 text-center italic">
-                      * Thẻ này sẽ hiển thị khi người khác bấm vào ảnh đại diện của bạn trong phòng chat.
+                      {t('settings.preview_footer')}
                     </div>
                   </div>
                 </div>
@@ -1198,14 +1426,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <h3 className="text-xs sm:text-sm font-bold text-teal-400 uppercase tracking-wider flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5" />
-                    Tài Khoản & Phiên Đăng Nhập
+                    {t('settings.account_title')}
                   </h3>
                   <p className="text-[10.5px] text-slate-400 mt-0.2">
-                    Quản lý danh tính, bảo mật và đăng xuất từ xa
+                    {t('settings.account_sub')}
                   </p>
                 </div>
                 <span className="text-[10px] text-teal-300 font-mono bg-teal-500/10 px-2 py-0.5 rounded-full border border-teal-500/20 font-bold">
-                  Account Center
+                  {t('settings.account_center')}
                 </span>
               </div>
 
@@ -1221,16 +1449,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-xs font-bold text-white">
-                          1. Tên Đăng Nhập
+                          {t('settings.username_label')}
                         </h4>
                         <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold shrink-0">
-                          {isGoogleUser ? 'Gmail' : isLinkedEmail ? 'Email' : userProfile?.username ? 'CloudSend' : 'Tự Do'}
+                          {isGoogleUser ? t('settings.account_type_gmail') : isLinkedEmail ? t('settings.account_type_email') : userProfile?.username ? t('settings.account_type_cloud') : t('settings.account_type_free')}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.2 truncate">
                         {isGoogleUser 
-                          ? 'Địa chỉ Gmail dùng để đăng nhập' 
-                          : 'Tên tài khoản duy nhất của bạn'}
+                          ? t('settings.gmail_login') 
+                          : t('settings.username_sub')}
                       </p>
                     </div>
                   </div>
@@ -1244,12 +1472,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {copiedUsername ? (
                       <>
                         <Check className="w-3 h-3 text-emerald-400 stroke-[3]" />
-                        <span className="text-emerald-400 font-bold">Đã chép</span>
+                        <span className="text-emerald-400 font-bold">{t('settings.copied')}</span>
                       </>
                     ) : (
                       <>
                         <Copy className="w-3 h-3 text-teal-400" />
-                        <span>Sao chép</span>
+                        <span>{t('settings.copy')}</span>
                       </>
                     )}
                   </button>
@@ -1277,14 +1505,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-white flex items-center gap-1.5 flex-wrap">
-                          <span>2. Tên Hiển Thị & Định Danh Thiết Bị</span>
+                          <span>{t('settings.display_name_section')}</span>
                           <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-0.5">
                             <Check className="w-2.5 h-2.5 text-emerald-400" />
-                            Cho phép sửa
+                            {t('settings.display_name_badge')}
                           </span>
                         </h4>
                         <p className="text-[10px] text-slate-400 mt-0.2">
-                          Tên hiển thị với mọi người trong phòng trò chuyện và danh sách thiết bị.
+                          {t('settings.display_name_desc')}
                         </p>
                       </div>
                     </div>
@@ -1314,7 +1542,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             setEditDisplayName(val);
                             setDeviceName(val);
                           }}
-                          placeholder="Nhập tên hiển thị / tên thiết bị của bạn"
+                          placeholder={t('settings.display_name_placeholder')}
                           className="w-full px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 font-medium"
                         />
                       </div>
@@ -1325,7 +1553,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="w-full sm:w-auto px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1 disabled:opacity-40 shrink-0 cursor-pointer"
                       >
                         {isUpdatingDisplayName ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3 stroke-[3]" />}
-                        <span>Lưu Tên</span>
+                        <span>{t('settings.save_name')}</span>
                       </button>
                     </form>
                   </div>
@@ -1339,15 +1567,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <h4 className="text-xs font-bold text-white">
-                            3. Trạng Thái Xác Thực Google
+                            {t('settings.google_auth_title')}
                           </h4>
                           <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 inline-flex items-center gap-0.5 font-bold shrink-0">
                             <Check className="w-2.5 h-2.5 text-emerald-400 stroke-[3]" />
-                            Bảo mật Google
+                            {t('settings.google_auth_badge')}
                           </span>
                         </div>
                         <p className="text-[10px] text-slate-400 mt-0.2 leading-snug">
-                          Tài khoản được bảo vệ trực tiếp bởi Google OAuth.
+                          {t('settings.google_auth_desc')}
                         </p>
                       </div>
                     </div>
@@ -1367,12 +1595,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <div className="text-[10px] text-slate-400">Tài khoản Google đã đăng nhập:</div>
+                            <div className="text-[10px] text-slate-400">{t('settings.google_logged_in')}</div>
                             <div className="text-xs font-bold text-white font-mono mt-0.2 flex items-center gap-1.5 flex-wrap">
                               <span className="truncate max-w-[190px] sm:max-w-xs">{currentUser?.email}</span>
                               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 inline-flex items-center gap-1 shrink-0 whitespace-nowrap">
                                 <Check className="w-2.5 h-2.5 text-emerald-400" />
-                                Đã bảo mật
+                                {t('settings.google_secured')}
                               </span>
                             </div>
                           </div>
@@ -1380,7 +1608,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                         <div className="text-left sm:text-right shrink-0">
                           <span className="text-[10px] text-slate-400 font-mono">
-                            Trạng thái: <strong className="text-emerald-400">Hoạt động</strong>
+                            {t('settings.status_label')} <strong className="text-emerald-400">{t('settings.active_status')}</strong>
                           </span>
                         </div>
                       </div>
@@ -1795,14 +2023,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <h4 className="text-xs font-bold text-white">
-                          {isGoogleUser ? '3. Thiết Bị Đã Đăng Nhập' : '5. Thiết Bị Đã Đăng Nhập'}
+                          {isGoogleUser ? t('settings.sessions_title_3') : t('settings.sessions_title_5')}
                         </h4>
                         <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0 font-bold">
-                          {sessions.length} phiên
+                          {sessions.length} {t('settings.sessions_count_label')}
                         </span>
                       </div>
                       <p className="text-[10px] text-slate-400 mt-0.2 truncate">
-                        Theo dõi thiết bị và thời gian đăng nhập
+                        {t('settings.sessions_desc')}
                       </p>
                     </div>
                   </div>
@@ -1812,10 +2040,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClick={fetchSessions}
                     disabled={isLoadingSessions}
                     className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-purple-500/40 text-slate-300 hover:text-white text-[10.5px] transition-colors shrink-0"
-                    title="Làm mới"
+                    title={t('settings.refresh')}
                   >
                     <RefreshCw className={`w-3 h-3 text-purple-400 ${isLoadingSessions ? 'animate-spin' : ''}`} />
-                    <span>Làm mới</span>
+                    <span>{t('settings.refresh')}</span>
                   </button>
                 </div>
 
@@ -1842,7 +2070,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </span>
                             {sess.isCurrent && (
                               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                Hiện tại
+                                {t('settings.current_device')}
                               </span>
                             )}
                           </div>
@@ -1877,7 +2105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             className="px-2 py-0.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[10.5px] font-semibold transition-colors flex items-center gap-1"
                           >
                             <Power className="w-3 h-3" />
-                            <span>Đăng xuất</span>
+                            <span>{t('settings.logout_session')}</span>
                           </button>
                         )}
                       </div>
@@ -1886,7 +2114,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   {sessions.length === 0 && !isLoadingSessions && (
                     <div className="text-center py-2 text-xs text-slate-500 italic">
-                      Chưa có dữ liệu phiên. Nhấn "Làm mới" để tải.
+                      {t('settings.no_sessions')}
                     </div>
                   )}
                 </div>
@@ -1902,10 +2130,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                   <div>
                     <h4 className="text-xs font-bold text-white">
-                      {isGoogleUser ? '4. Đăng Xuất & Quản Lý Phiên' : '6. Đăng Xuất & Quản Lý Phiên'}
+                      {isGoogleUser ? t('settings.logout_manage_title_4') : t('settings.logout_manage_title_6')}
                     </h4>
                     <p className="text-[10px] text-slate-400 mt-0.2">
-                      Đăng xuất thiết bị hiện tại hoặc tất cả các thiết bị
+                      {t('settings.logout_manage_desc')}
                     </p>
                   </div>
                 </div>
@@ -1916,7 +2144,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-start gap-1.5">
                       <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                       <div className="text-[11px] text-rose-200 leading-snug">
-                        <strong>Xác nhận:</strong> Toàn bộ các phiên làm việc trên các máy tính, điện thoại, tivi khác sẽ bị đăng xuất ngay lập tức.
+                        <strong>{t('settings.logout_all_confirm_title')}</strong> {t('settings.logout_all_confirm_desc')}
                       </div>
                     </div>
                     <div className="flex items-center justify-end gap-2 pt-0.5">
@@ -1925,7 +2153,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onClick={() => setShowLogoutAllConfirm(false)}
                         className="px-2.5 py-1 rounded text-[11px] font-medium text-slate-300 hover:text-white bg-slate-900 border border-slate-700"
                       >
-                        Hủy
+                        {t('settings.cancel')}
                       </button>
                       <button
                         type="button"
@@ -1934,7 +2162,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="px-3 py-1 rounded text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-500 shadow-sm transition-all flex items-center gap-1"
                       >
                         {isLoggingOutAll ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
-                        <span>Đăng Xuất Tất Cả</span>
+                        <span>{t('settings.logout_all_btn')}</span>
                       </button>
                     </div>
                   </div>
@@ -1954,7 +2182,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ) : (
                       <LogOut className="w-3.5 h-3.5 text-rose-400" />
                     )}
-                    <span>Đăng Xuất Thiết Bị Này</span>
+                    <span>{t('settings.logout_this_btn')}</span>
                   </button>
 
                   <button
@@ -1965,7 +2193,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-gradient-to-r from-rose-700 via-rose-600 to-rose-700 hover:from-rose-600 hover:to-rose-500 text-white font-bold text-xs transition-all shadow-sm border border-rose-400/40 active:scale-[0.99]"
                   >
                     <Power className="w-3.5 h-3.5 text-white" />
-                    <span>Đăng Xuất Tất Cả</span>
+                    <span>{t('settings.logout_all_btn')}</span>
                   </button>
                 </div>
               </div>
@@ -1982,10 +2210,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                       <div>
                         <div className="text-xs font-bold text-white">
-                          Nội Quy & Điều Khoản CloudSend
+                          {t('settings.rules_card_title')}
                         </div>
                         <div className="text-[10.5px] text-slate-400 leading-snug">
-                          Quy định an toàn mạng, cấm phát tán nội dung xấu độc và chế tài xử lý.
+                          {t('settings.rules_card_desc')}
                         </div>
                       </div>
                     </div>
@@ -1999,7 +2227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="w-full sm:w-auto px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-bold flex items-center justify-center gap-1 transition-all shrink-0 cursor-pointer"
                     >
                       <Scale className="w-3 h-3" />
-                      <span>Xem Nội Quy</span>
+                      <span>{t('settings.view_rules')}</span>
                     </button>
                   </div>
                 </div>
@@ -2012,10 +2240,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div>
                       <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
                         <Database className="w-3.5 h-3.5 text-emerald-400" />
-                        Quyền hạn DEV: Datastore
+                        {t('settings.dev_console_title')}
                       </div>
                       <div className="text-[10.5px] text-slate-400">
-                        Quản trị cơ sở dữ liệu Firestore trực tiếp (Tương thích 100% cả Điện thoại & Máy tính).
+                        {t('settings.dev_console_desc')}
                       </div>
                     </div>
 
@@ -2033,13 +2261,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
                       >
                         <Database className="w-3.5 h-3.5" />
-                        <span>Mở Datastore</span>
+                        <span>{t('settings.open_datastore')}</span>
                       </button>
                     </div>
                   </div>
                   <div className="text-[9.5px] text-emerald-400/90 italic flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 shrink-0 text-emerald-400" />
-                    <span>Hỗ trợ đầy đủ giao diện đáp ứng (responsive) trên mọi kích thước màn hình.</span>
+                    <span>{t('settings.dev_responsive_note')}</span>
                   </div>
                 </div>
               )}
@@ -2054,7 +2282,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="text-xs text-slate-400 min-h-[16px] flex items-center">
             {savedSuccess && (
               <span className="text-emerald-400 font-bold flex items-center gap-1 text-[11px] animate-in fade-in">
-                <Check className="w-3.5 h-3.5 stroke-[3]" /> Đã lưu cài đặt thành công!
+                <Check className="w-3.5 h-3.5 stroke-[3]" /> {t('settings.save_success_toast')}
               </span>
             )}
           </div>
@@ -2064,7 +2292,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={onClose}
               className="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-medium text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer text-center"
             >
-              Đóng
+              {t('settings.close_btn')}
             </button>
             <button
               id="save-settings-btn"
@@ -2074,7 +2302,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="flex-1 sm:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 border border-emerald-400/30 active:scale-[0.99] cursor-pointer"
             >
               {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-              <span>Lưu thay đổi</span>
+              <span>{t('settings.save_changes_btn')}</span>
             </button>
           </div>
         </div>

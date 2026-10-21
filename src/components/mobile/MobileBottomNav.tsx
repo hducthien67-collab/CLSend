@@ -1,5 +1,6 @@
 import React from 'react';
 import { Send, Download, MessageSquareText, Cloud, Settings } from 'lucide-react';
+import { useLanguage } from '../../context/LanguageContext';
 
 interface MobileBottomNavProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -16,28 +17,30 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   incomingCount,
   unreadChatCount
 }) => {
+  const { t } = useLanguage();
+
   const navItems = [
     {
       id: 'send' as const,
-      label: 'Gửi',
+      label: t('nav.mobile_send', 'Gửi'),
       icon: Send,
       badge: 0
     },
     {
       id: 'receive' as const,
-      label: 'Nhận',
+      label: t('nav.mobile_receive', 'Nhận'),
       icon: Download,
       badge: incomingCount
     },
     {
       id: 'chat' as const,
-      label: 'Phòng Chat',
+      label: t('nav.mobile_chat', 'Chat'),
       icon: MessageSquareText,
       badge: unreadChatCount
     },
     {
       id: 'drive' as const,
-      label: 'Kho Cloud',
+      label: t('nav.mobile_drive', 'Kho Cloud'),
       icon: Cloud,
       badge: 0
     }
@@ -89,8 +92,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <button
           type="button"
           onClick={onOpenSettings}
-          title="Cài đặt"
-          className="flex items-center justify-center flex-1 h-9 rounded-xl text-slate-400 hover:text-slate-200 transition-all active:scale-90"
+          title={t('nav.mobile_settings', 'Cài đặt')}
+          className="flex items-center justify-center flex-1 h-9 rounded-xl text-slate-400 hover:text-slate-200 transition-all active:scale-95"
         >
           <div className="flex items-center justify-center w-10 h-7 rounded-full hover:bg-slate-800/60">
             <Settings className="w-4 h-4 stroke-2" />

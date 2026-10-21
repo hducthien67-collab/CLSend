@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChatMessage } from '../types';
+import { ChatMessage } from './types';
 import { Flame, X, Clock, ShieldAlert, Trash2 } from 'lucide-react';
 import { playDestructSound } from '../utils/sound';
 

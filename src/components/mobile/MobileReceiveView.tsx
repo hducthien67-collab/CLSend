@@ -32,9 +32,11 @@ import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { renderClickableText } from '../../utils/textFormat';
+import { useLanguage } from '../../context/LanguageContext';
 
 export const MobileReceiveView: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
+  const { t } = useLanguage();
   const [transfers, setTransfers] = useState<DirectTransfer[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -122,12 +124,12 @@ export const MobileReceiveView: React.FC = () => {
       <div className="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2.5 shadow-md">
         <div>
           <h2 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-            <span>Hộp Nhận Tệp Tin</span>
+            <span>{t('receive.history_title')}</span>
             <span className="text-[10.5px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono">
-              {transfers.length} mục
+              {transfers.length}
             </span>
           </h2>
-          <p className="text-[10.5px] text-slate-400">Tự động nhận tệp gửi qua điện thoại</p>
+          <p className="text-[10.5px] text-slate-400">{t('receive.history_sub')}</p>
         </div>
 
         {transfers.length > 0 && (
@@ -137,7 +139,7 @@ export const MobileReceiveView: React.FC = () => {
             className="px-2 py-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10.5px] font-semibold flex items-center gap-1 active:scale-95 transition-all"
           >
             <Trash2 className="w-3 h-3" />
-            <span>Xóa hết</span>
+            <span>{t('receive.clear_all')}</span>
           </button>
         )}
       </div>
@@ -148,9 +150,9 @@ export const MobileReceiveView: React.FC = () => {
           <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
             <Inbox className="w-5 h-5" />
           </div>
-          <p className="text-xs font-bold text-slate-300">Chưa có tệp tin nào được gửi tới</p>
+          <p className="text-xs font-bold text-slate-300">{t('receive.empty_title')}</p>
           <p className="text-[11px] text-slate-500 max-w-[240px]">
-            Khi có máy tính hoặc điện thoại khác gửi ảnh, video hoặc tệp, chúng sẽ xuất hiện tại đây ngay lập tức.
+            {t('receive.empty_sub')}
           </p>
         </div>
       ) : (
@@ -211,12 +213,12 @@ export const MobileReceiveView: React.FC = () => {
                         {copiedId === item.id ? (
                           <>
                             <CheckCheck className="w-3 h-3" />
-                            <span>Đã sao chép!</span>
+                            <span>{t('receive.copied')}</span>
                           </>
                         ) : (
                           <>
                             <Copy className="w-3 h-3" />
-                            <span>Sao chép văn bản</span>
+                            <span>{t('receive.copy_text')}</span>
                           </>
                         )}
                       </button>
@@ -256,7 +258,7 @@ export const MobileReceiveView: React.FC = () => {
                           className="flex-1 py-1 px-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
                         >
                           <Download className="w-3 h-3" />
-                          <span>Tải về máy</span>
+                          <span>{t('receive.download')}</span>
                         </button>
 
                         {!isCompleted && (
@@ -264,10 +266,10 @@ export const MobileReceiveView: React.FC = () => {
                             type="button"
                             onClick={() => handleDeleteTransfer(item.id)}
                             className="py-1 px-2 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 border border-slate-700 font-semibold text-[10.5px] flex items-center justify-center gap-1 active:scale-95 transition-all"
-                            title="Từ chối và xóa tệp"
+                            title={t('receive.reject')}
                           >
                             <X className="w-3 h-3 text-rose-400" />
-                            <span>Từ chối</span>
+                            <span>{t('receive.reject')}</span>
                           </button>
                         )}
 

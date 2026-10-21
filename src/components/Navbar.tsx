@@ -18,10 +18,14 @@ import {
   Tv,
   Scale,
   Palette,
-  Sparkles
+  Sparkles,
+  Users,
+  LogOut,
+  Check,
+  ChevronLeft
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
-import { GpsLocationBadge } from './GpsLocationBadge';
+import { useLanguage, LanguageCode } from '../context/LanguageContext';
 
 interface NavbarProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -48,8 +52,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   unreadMessagesCount = 0,
   onOpenDesignStudio,
 }) => {
-  const { currentUser, settings, userProfile } = useAuth();
+  const { currentUser, settings, userProfile, logout } = useAuth();
+  const { currentLang, setLanguage, t, languages } = useLanguage();
+  const [isAvatarMenuOpen, setIsAvatarMenuOpen] = React.useState(false);
+  const [isLangSubMenuOpen, setIsLangSubMenuOpen] = React.useState(false);
   const isDev = isDevUser(currentUser?.email);
+
+  const handleSelectLanguage = (langCode: LanguageCode) => {
+    setLanguage(langCode);
+    setIsLangSubMenuOpen(false);
+    setIsAvatarMenuOpen(false);
+  };
 
   const activeAvatarUrl = settings.customAvatarUrl || userProfile?.customAvatarUrl || currentUser?.photoURL;
 
@@ -82,7 +95,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 truncate hidden xl:block">
-                Truyền tệp siêu tốc & phòng trò chuyện tức thì
+                {t('nav.subtitle')}
               </p>
             </div>
           </div>
@@ -100,7 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Gửi</span>
+              <span>{t('nav.send')}</span>
             </button>
 
             <button
@@ -114,7 +127,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Nhận</span>
+              <span>{t('nav.receive')}</span>
               {incomingCount > 0 && (
                 <span className="w-4 h-4 rounded-full bg-emerald-500 text-slate-950 font-bold text-[10px] flex items-center justify-center animate-bounce">
                   {incomingCount}
@@ -133,7 +146,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <MessagesSquare className="w-3.5 h-3.5" />
-              <span>Phòng Chat</span>
+              <span>{t('nav.chat')}</span>
               {unreadMessagesCount > 0 && (
                 <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
               )}
@@ -150,7 +163,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               <Cloud className="w-3.5 h-3.5" />
-              <span>Kho Cloud</span>
+              <span>{t('nav.drive')}</span>
             </button>
           </nav>
         </div>
@@ -227,8 +240,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
             </button>
           )}
-          {/* Real-Time GPS Location Badge */}
-          <GpsLocationBadge />
 
           {/* Rules / Nội quy Button */}
           {onOpenRules && (
@@ -240,41 +251,165 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-amber-400 border border-slate-700/80 hover:border-amber-500/40 text-xs font-semibold transition-all shadow-sm group"
             >
               <Scale className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
-              <span className="hidden md:inline">Nội quy</span>
+              <span className="hidden md:inline">{t('nav.rules')}</span>
             </button>
           )}
 
-          {/* Settings Button (Gear Logo) */}
-          <button
-            id="open-settings-btn"
-            type="button"
-            onClick={onOpenSettings}
-            title="Cài đặt (Settings)"
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/80 transition-all hover:rotate-45"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+          {/* User Avatar with Dropdown Menu Popup */}
+          <div className="relative">
+            <div
+              onClick={() => setIsAvatarMenuOpen(!isAvatarMenuOpen)}
+              title={`${currentUser?.displayName || 'Tài khoản'} - Nhấn để mở menu`}
+              className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold cursor-pointer ring-2 ring-emerald-500/40 hover:ring-emerald-400 transition-all shadow-md overflow-hidden relative"
+              style={{ backgroundColor: settings.avatarColor }}
+            >
+              {activeAvatarUrl ? (
+                <img 
+                  src={activeAvatarUrl} 
+                  alt={currentUser?.displayName || 'Avatar'} 
+                  className="w-full h-full object-cover" 
+                  referrerPolicy="no-referrer"
+                  crossOrigin="anonymous"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                (currentUser?.displayName || currentUser?.email || 'U')[0].toUpperCase()
+              )}
+            </div>
 
-          {/* User Avatar */}
-          <div
-            onClick={onOpenSettings}
-            title={`${currentUser?.displayName || 'Tài khoản'} - Nhấn để xem cài đặt`}
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold cursor-pointer ring-2 ring-emerald-500/40 hover:ring-emerald-400 transition-all shadow-md overflow-hidden relative"
-            style={{ backgroundColor: settings.avatarColor }}
-          >
-            {activeAvatarUrl ? (
-              <img 
-                src={activeAvatarUrl} 
-                alt={currentUser?.displayName || 'Avatar'} 
-                className="w-full h-full object-cover" 
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
-                onError={(e) => {
-                  (e.target as HTMLElement).style.display = 'none';
-                }}
-              />
-            ) : (
-              (currentUser?.displayName || currentUser?.email || 'U')[0].toUpperCase()
+            {/* Popup Dropdown Menu at bottom-left of avatar */}
+            {isAvatarMenuOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => {
+                    setIsAvatarMenuOpen(false);
+                    setIsLangSubMenuOpen(false);
+                  }} 
+                />
+                
+                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 py-2 border-b border-slate-800 mb-1">
+                    <p className="text-xs font-bold text-white truncate">
+                      {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Tài khoản'}
+                    </p>
+                    <p className="text-[10px] text-slate-400 truncate">
+                      {currentUser?.email || t('nav.connected')}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAvatarMenuOpen(false);
+                      setIsLangSubMenuOpen(false);
+                      onOpenSettings();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    <Settings className="w-4 h-4 text-emerald-400" />
+                    <span>{t('nav.settings')}</span>
+                  </button>
+
+                  {/* Nút Ngôn ngữ có bản nhỏ mở ra bên cạnh */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsLangSubMenuOpen(!isLangSubMenuOpen);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
+                        isLangSubMenuOpen
+                          ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                          : 'text-slate-200 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Globe className="w-4 h-4 text-sky-400" />
+                        <span>{t('nav.language')}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-[11px] text-slate-400">
+                        <span>{languages.find(l => l.code === currentLang)?.flag || '🌐'}</span>
+                        <ChevronLeft className={`w-3.5 h-3.5 transition-transform duration-200 ${isLangSubMenuOpen ? 'rotate-180' : ''}`} />
+                      </div>
+                    </button>
+
+                    {/* Bảng nhỏ bên cạnh chứa ngôn ngữ trên thế giới */}
+                    {isLangSubMenuOpen && (
+                      <div 
+                        translate="no"
+                        onClick={(e) => e.stopPropagation()}
+                        className="notranslate absolute right-full top-0 mr-2 w-56 rounded-2xl bg-slate-900/98 backdrop-blur-xl border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in slide-in-from-right-3 duration-200"
+                      >
+                        <div className="px-2.5 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between mb-1">
+                          <span className="flex items-center gap-1">
+                            <Globe className="w-3 h-3 text-sky-400" />
+                            {t('nav.world_languages')}
+                          </span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {languages.length}
+                          </span>
+                        </div>
+
+                        <div className="max-h-64 overflow-y-auto scrollbar-thin space-y-0.5 pr-0.5">
+                          {languages.map((lang) => {
+                            const isSelected = currentLang === lang.code;
+                            return (
+                              <button
+                                key={lang.code}
+                                type="button"
+                                onClick={() => handleSelectLanguage(lang.code)}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs transition-all ${
+                                  isSelected
+                                    ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40 shadow-sm'
+                                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80 font-medium'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="text-base leading-none">{lang.flag}</span>
+                                  <span className="truncate">{lang.name}</span>
+                                </div>
+                                {isSelected && (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 stroke-[2.5]" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setIsAvatarMenuOpen(false);
+                      await logout();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors"
+                  >
+                    <Users className="w-4 h-4 text-amber-400" />
+                    <span>{t('nav.switch_account')}</span>
+                  </button>
+
+                  <div className="border-t border-slate-800 my-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setIsAvatarMenuOpen(false);
+                        await logout();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/15 transition-colors"
+                    >
+                      <LogOut className="w-4 h-4 text-rose-400" />
+                      <span>{t('nav.logout')}</span>
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -294,7 +429,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <Send className="w-5 h-5 mb-0.5" />
-            <span className="text-[11px]">Gửi</span>
+            <span className="text-[11px]">{t('nav.send')}</span>
           </button>
 
           <button
@@ -315,7 +450,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </span>
               )}
             </div>
-            <span className="text-[11px]">Nhận</span>
+            <span className="text-[11px]">{t('nav.receive')}</span>
           </button>
 
           <button
@@ -334,7 +469,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-teal-400 animate-ping" />
               )}
             </div>
-            <span className="text-[11px]">Phòng Chat</span>
+            <span className="text-[11px]">{t('nav.chat')}</span>
           </button>
 
           <button
@@ -348,7 +483,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <Cloud className="w-5 h-5 mb-0.5" />
-            <span className="text-[11px]">Kho Cloud</span>
+            <span className="text-[11px]">{t('nav.drive')}</span>
           </button>
 
           <button
@@ -358,7 +493,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex-1 flex flex-col items-center justify-center py-1.5 px-2 rounded-xl text-slate-400 hover:text-slate-200 transition-all"
           >
             <Settings className="w-5 h-5 mb-0.5" />
-            <span className="text-[11px]">Cài đặt</span>
+            <span className="text-[11px]">{t('nav.settings')}</span>
           </button>
         </div>
       </div>

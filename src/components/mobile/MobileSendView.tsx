@@ -36,9 +36,11 @@ import {
 import { MobileBottomSheet } from './MobileBottomSheet';
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { CloudDrivePickerModal } from '../CloudDrivePickerModal';
+import { useLanguage } from '../../context/LanguageContext';
 
 export const MobileSendView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
+  const { t } = useLanguage();
   const [onlineDevices, setOnlineDevices] = useState<PresenceDevice[]>([]);
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedTargetDevice, setSelectedTargetDevice] = useState<PresenceDevice | null>(null);
@@ -105,7 +107,7 @@ export const MobileSendView: React.FC = () => {
   const handleSendFiles = async (files: FileList | null, targetDev?: PresenceDevice | null) => {
     const target = targetDev || selectedTargetDevice;
     if (!files || files.length === 0 || !target || !currentUser) {
-      showToast('Vui lòng chọn thiết bị nhận trước!', 'error');
+      showToast(t('mobile_send.select_device_error'), 'error');
       return;
     }
 
@@ -142,10 +144,10 @@ export const MobileSendView: React.FC = () => {
 
         await addDoc(collection(db, 'transfers'), {
           senderId: currentUser.uid,
-          senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Thiết bị di động',
-          senderDevice: settings?.deviceName || 'Điện thoại',
+          senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || t('mobile_send.device_mobile'),
+          senderDevice: settings?.deviceName || t('mobile_send.phone'),
           receiverId: target.uid,
-          receiverName: target.displayName || target.deviceName || 'Thiết bị nhận',
+          receiverName: target.displayName || target.deviceName || t('mobile_send.receiver'),
           fileName: file.name,
           fileSize: file.size,
           fileType: file.type || 'application/octet-stream',
@@ -156,10 +158,10 @@ export const MobileSendView: React.FC = () => {
         });
       }
 
-      showToast(`Đã gửi ${files.length} tệp tới ${target.displayName || target.deviceName}!`, 'success');
+      showToast(t('mobile_send.send_files_success').replace('{count}', String(files.length)).replace('{name}', target.displayName || target.deviceName || ''), 'success');
     } catch (err: any) {
       console.error('Send file error:', err);
-      showToast(err.message || 'Lỗi khi gửi tệp. Vui lòng thử lại.', 'error');
+      showToast(err.message || t('mobile_send.send_files_error'), 'error');
     } finally {
       setIsSending(false);
       setSendProgress(null);
@@ -179,20 +181,20 @@ export const MobileSendView: React.FC = () => {
     try {
       await addDoc(collection(db, 'transfers'), {
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Thiết bị di động',
-        senderDevice: settings?.deviceName || 'Điện thoại',
+        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || t('mobile_send.device_mobile'),
+        senderDevice: settings?.deviceName || t('mobile_send.phone'),
         receiverId: selectedTargetDevice.uid,
-        receiverName: selectedTargetDevice.displayName || selectedTargetDevice.deviceName || 'Thiết bị nhận',
+        receiverName: selectedTargetDevice.displayName || selectedTargetDevice.deviceName || t('mobile_send.receiver'),
         textContent: textMessage.trim(),
         status: 'pending',
         createdAt: new Date().toISOString()
       });
 
-      showToast(`Đã gửi văn bản tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`, 'success');
+      showToast(t('mobile_send.send_text_success').replace('{name}', selectedTargetDevice.displayName || selectedTargetDevice.deviceName || ''), 'success');
       setTextMessage('');
     } catch (err: any) {
       console.error('Send text error:', err);
-      showToast('Không thể gửi văn bản. Vui lòng thử lại.', 'error');
+      showToast(t('mobile_send.send_text_error'), 'error');
     } finally {
       setIsSending(false);
     }
@@ -336,7 +338,7 @@ export const MobileSendView: React.FC = () => {
       {/* Quick Action Matrix (6 Compact Cards) */}
       <div className="space-y-1">
         <h2 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider px-1">
-          Hành Động Nhanh
+          {t('mobile_send.quick_actions')}
         </h2>
 
         <div className="grid grid-cols-3 gap-1.5">
@@ -345,7 +347,7 @@ export const MobileSendView: React.FC = () => {
             type="button"
             onClick={() => {
               if (onlineDevices.length === 0) {
-                showToast('Chưa có thiết bị nào đang online để gửi tới.', 'info');
+                showToast(t('mobile_send.no_device_online'), 'info');
               }
               cameraInputRef.current?.click();
             }}
@@ -355,7 +357,7 @@ export const MobileSendView: React.FC = () => {
               <Camera className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Chụp ảnh
+              {t('send.camera')}
             </span>
           </button>
 
@@ -369,7 +371,7 @@ export const MobileSendView: React.FC = () => {
               <ImageIcon className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Thư viện ảnh
+              {t('send.gallery')}
             </span>
           </button>
 
@@ -383,7 +385,7 @@ export const MobileSendView: React.FC = () => {
               <FileText className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Tập tin
+              {t('send.file')}
             </span>
           </button>
 
@@ -402,7 +404,7 @@ export const MobileSendView: React.FC = () => {
               <AlignLeft className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Văn bản
+              {t('send.text')}
             </span>
           </button>
 
@@ -416,7 +418,7 @@ export const MobileSendView: React.FC = () => {
               <Clipboard className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Dán
+              {t('send.paste')}
             </span>
           </button>
 
@@ -430,7 +432,7 @@ export const MobileSendView: React.FC = () => {
               <Cloud className="w-4 h-4" />
             </div>
             <span className="text-[10px] font-bold text-slate-200 tracking-tight text-center">
-              Kho Cloud
+              {t('send.cloud_pick')}
             </span>
           </button>
         </div>
@@ -441,7 +443,7 @@ export const MobileSendView: React.FC = () => {
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
             <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Thiết Bị Xung Quanh ({onlineDevices.length})
+              {t('send.nearby_title')} ({onlineDevices.length})
             </h2>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           </div>
@@ -450,7 +452,7 @@ export const MobileSendView: React.FC = () => {
             <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Tìm máy..."
+              placeholder={t('mobile_send.find_device')}
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               className="w-28 bg-slate-900 border border-slate-800 rounded-lg pl-6 pr-2 py-0.5 text-[11px] text-slate-300 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
@@ -463,16 +465,16 @@ export const MobileSendView: React.FC = () => {
             <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-500">
               <RefreshCw className="w-6 h-6 animate-spin duration-3000" />
             </div>
-            <p className="text-xs font-bold text-slate-300">Đang quét tìm thiết bị khác...</p>
+            <p className="text-xs font-bold text-slate-300">{t('mobile_send.scanning')}</p>
             <p className="text-[11px] text-slate-500 max-w-[240px]">
-              Mở CLSend trên máy tính, điện thoại hoặc Smart TV khác trong cùng mạng để gửi tệp tức thì.
+              {t('mobile_send.instructions')}
             </p>
           </div>
         ) : (
           <div className="space-y-2">
             {filteredDevices.map((device) => {
               const devName = device.displayName || device.deviceName || 'Thiết bị';
-              const devTypeLabel = device.deviceType === 'mobile' ? 'Điện thoại' : device.deviceType === 'laptop' ? 'Laptop' : device.deviceType === 'tv' ? 'Smart TV' : 'Máy tính';
+              const devTypeLabel = device.deviceType === 'mobile' ? t('mobile_send.device_type_mobile') : device.deviceType === 'laptop' ? t('mobile_send.device_type_laptop') : device.deviceType === 'tv' ? t('mobile_send.device_type_tv') : t('mobile_send.device_type_pc');
 
               return (
                 <div
@@ -502,7 +504,7 @@ export const MobileSendView: React.FC = () => {
                     type="button"
                     className="px-3.5 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-slate-950 font-bold text-xs flex items-center gap-1 transition-colors shrink-0 shadow-sm"
                   >
-                    <span>Gửi</span>
+                    <span>{t('mobile_send.send')}</span>
                     <Send className="w-3 h-3" />
                   </button>
                 </div>
@@ -516,8 +518,8 @@ export const MobileSendView: React.FC = () => {
       <MobileBottomSheet
         isOpen={isActionSheetOpen}
         onClose={() => setIsActionSheetOpen(false)}
-        title={selectedTargetDevice?.displayName || selectedTargetDevice?.deviceName || 'Chọn nội dung gửi'}
-        subtitle="Chọn loại tệp hoặc văn bản bạn muốn truyền siêu tốc:"
+        title={selectedTargetDevice?.displayName || selectedTargetDevice?.deviceName || t('mobile_send.select_content')}
+        subtitle={t('mobile_send.instruction_sheet')}
         icon={getDeviceIcon(selectedTargetDevice?.deviceType)}
       >
         <div className="grid grid-cols-2 gap-2.5 pt-1">
@@ -532,7 +534,7 @@ export const MobileSendView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
               <Camera className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Chụp ảnh / Video</span>
+            <span className="text-xs font-bold text-white">{t('mobile_send.capture_photo_video')}</span>
           </button>
 
           <button
@@ -546,7 +548,7 @@ export const MobileSendView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
               <ImageIcon className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Thư viện ảnh</span>
+            <span className="text-xs font-bold text-white">{t('mobile_send.photo_library')}</span>
           </button>
 
           <button
@@ -560,7 +562,7 @@ export const MobileSendView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
               <FileText className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Tập tin / File</span>
+            <span className="text-xs font-bold text-white">{t('mobile_send.file_upload')}</span>
           </button>
 
           <button
@@ -574,7 +576,7 @@ export const MobileSendView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center">
               <AlignLeft className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Văn bản / Tin nhắn</span>
+            <span className="text-xs font-bold text-white">{t('mobile_send.text_message')}</span>
           </button>
         </div>
 
@@ -587,7 +589,7 @@ export const MobileSendView: React.FC = () => {
           className="w-full py-2.5 px-4 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-300 font-bold text-xs flex items-center justify-center gap-2 transition-all active:scale-98"
         >
           <Cloud className="w-4 h-4 text-sky-400" />
-          <span>Chọn từ Kho Cloud Drive Cá Nhân</span>
+          <span>{t('mobile_send.cloud_drive_picker')}</span>
         </button>
       </MobileBottomSheet>
 
@@ -595,7 +597,7 @@ export const MobileSendView: React.FC = () => {
       <MobileBottomSheet
         isOpen={isTextSheetOpen}
         onClose={() => setIsTextSheetOpen(false)}
-        title="Gửi Tin Nhắn / Văn Bản"
+        title={t('mobile_send.text_message_title')}
         subtitle={selectedTargetDevice ? `Tới: ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}` : 'Nhập nội dung cần gửi:'}
         icon={<AlignLeft className="w-5 h-5 text-sky-400" />}
       >

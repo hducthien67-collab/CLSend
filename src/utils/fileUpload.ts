@@ -32,9 +32,9 @@ export interface UploadedFileInfo {
   isHeic?: boolean;
 }
 
-// 250 MB limit for high-speed local & cloud transfers
-export const MAX_FILE_SIZE = 250 * 1024 * 1024;
-export const MAX_FILE_SIZE_LABEL = '250 MB';
+// 10 GB limit for high-speed local & cloud transfers (unlimited feel)
+export const MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024;
+export const MAX_FILE_SIZE_LABEL = '10 GB';
 
 /**
  * Checks if a file is an image based on mimeType or common extensions
@@ -488,7 +488,7 @@ export async function uploadFileToServer(
           size: file.size,
           type: file.type || 'application/octet-stream',
           url: tgRes.downloadUrl,
-          viewUrl: tgRes.downloadUrl,
+          viewUrl: tgRes.viewUrl || tgRes.downloadUrl,
           thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
         });
       }

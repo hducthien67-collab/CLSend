@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { db } from '../firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { CloudDriveFile } from '../types';
+import { CloudDriveFile } from './types';
 import { useAuth } from '../context/AuthContext';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { formatFileSize, isImageFile } from '../utils/fileUpload';

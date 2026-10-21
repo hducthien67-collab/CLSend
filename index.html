@@ -2,17 +2,36 @@
 <html lang="vi">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Gracefully ignore Vite HMR WebSocket closing errors in AI Studio sandbox iframe
+      window.addEventListener('error', function(event) {
+        if (event && (
+          (event.message && (event.message.includes('WebSocket') || event.message.includes('@vite/client'))) ||
+          (event.filename && event.filename.includes('@vite/client'))
+        )) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+          return true;
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event && event.reason && String(event.reason).includes('WebSocket')) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+      });
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <meta name="theme-color" content="#020617" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>CLSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến</title>
     <meta name="description" content="CLSend - Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị phong cách tối giản, an toàn và bảo mật cao." />
     <meta name="keywords" content="clsend, CLSend, clsend web, truyền tệp siêu tốc, chia sẻ tệp, gửi file qua mạng, phòng chat trực tuyến, chuyển file không dây, gửi ảnh chất lượng cao" />
     <meta name="author" content="CLSend" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <meta name="google-site-verification" content="google3033a8e47e81fe27.html" />
-    <link rel="canonical" href="https://cloudsend-bw7z.onrender.com/" />
+    <link rel="canonical" href="https://clsend.app/" />
 
     <!-- Mobile Web App Capable -->
     <meta name="mobile-web-app-capable" content="yes" />
@@ -24,7 +43,7 @@
     <!-- Open Graph / Facebook Social Cards -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="CLSend" />
-    <meta property="og:url" content="https://cloudsend-bw7z.onrender.com/" />
+    <meta property="og:url" content="https://clsend.app/" />
     <meta property="og:title" content="CLSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến" />
     <meta property="og:description" content="Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị phong cách tối giản, an toàn và bảo mật cao." />
     <meta property="og:locale" content="vi_VN" />
@@ -41,19 +60,19 @@
       "@graph": [
         {
           "@type": "WebSite",
-          "@id": "https://cloudsend-bw7z.onrender.com/#website",
+          "@id": "https://clsend.app/#website",
           "name": "CLSend",
           "alternateName": ["CLSend Transfer", "CLSend Relay", "CLSend Web"],
-          "url": "https://cloudsend-bw7z.onrender.com/",
+          "url": "https://clsend.app/",
           "description": "Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị phong cách tối giản, an toàn và bảo mật cao.",
           "inLanguage": "vi"
         },
         {
           "@type": "WebApplication",
-          "@id": "https://cloudsend-bw7z.onrender.com/#webapp",
+          "@id": "https://clsend.app/#webapp",
           "name": "CLSend",
           "alternateName": ["CLSend Transfer", "CLSend Relay"],
-          "url": "https://cloudsend-bw7z.onrender.com/",
+          "url": "https://clsend.app/",
           "applicationCategory": "UtilitiesApplication",
           "operatingSystem": "All, Android, iOS, Windows, macOS, Linux",
           "description": "Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị.",

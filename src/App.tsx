@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { AuthModal } from './components/AuthModal';
+import { LanguageProvider } from './context/LanguageContext';
+import { AuthModal } from './components/auth/AuthModal';
 import { Navbar } from './components/Navbar';
 import { SendView } from './components/SendView';
 import { ReceiveView } from './components/ReceiveView';
@@ -15,7 +16,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { DevCloudConsoleModal } from './components/DevCloudConsoleModal';
 import { DevDatastorePage } from './components/DevDatastorePage';
 import { RulesModal } from './components/RulesModal';
-import { GoogleDisplayNameModal } from './components/GoogleDisplayNameModal';
+import { GoogleDisplayNameModal } from './components/auth/GoogleDisplayNameModal';
 import { RobloxModerationModal } from './components/RobloxModerationModal';
 import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
@@ -797,9 +798,11 @@ import { AppHealthCheck } from './components/AppHealthCheck';
 export default function App() {
   return (
     <AppHealthCheck>
-      <AuthProvider>
-        <MainApp />
-      </AuthProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <MainApp />
+        </AuthProvider>
+      </LanguageProvider>
     </AppHealthCheck>
   );
 }

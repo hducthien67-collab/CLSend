@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/telegram/download",
+      "destination": "/api/telegram/download"
+    },
+    {
+      "source": "/api/telegram/(.*)",
+      "destination": "/api/telegram/$1"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

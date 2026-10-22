@@ -104,10 +104,21 @@ export async function downloadFileSafely(
     let resolvedSource = source;
     let telegramOriginalUrl = '';
 
-    // If source is a Telegram URL, save original for direct CDN fallback
-    if (resolvedSource.includes('api.telegram.org/file/bot')) {
-      telegramOriginalUrl = resolvedSource;
-      resolvedSource = `/api/telegram/download?url=${encodeURIComponent(resolvedSource)}&name=${encodeURIComponent(safeFileName)}`;
+    // Accurately extract raw Telegram CDN URL if present in source or query
+    if (source.startsWith('https://api.telegram.org/file/bot')) {
+      telegramOriginalUrl = source;
+      resolvedSource = `/api/telegram/download?url=${encodeURIComponent(source)}&name=${encodeURIComponent(safeFileName)}`;
+    } else if (source.includes('api.telegram.org/file/bot')) {
+      try {
+        const match = source.match(/url=([^&]+)/);
+        if (match && match[1]) {
+          const decoded = decodeURIComponent(match[1]);
+          if (decoded.startsWith('https://api.telegram.org/file/bot')) {
+            telegramOriginalUrl = decoded;
+          }
+        }
+      } catch {}
+      resolvedSource = source;
     }
 
     // Check IndexedDB cache first (works 100% offline and on static GitHub pages)
@@ -151,18 +162,47 @@ export async function downloadFileSafely(
             cache: 'no-cache'
           });
 
-          // If backend proxy failed (e.g. 404 on static hosting / GitHub Pages), fallback to direct Telegram CDN
-          if (!res.ok && telegramOriginalUrl) {
-            console.warn('Backend proxy download failed, falling back to direct Telegram CDN URL:', telegramOriginalUrl);
-            res = await fetch(telegramOriginalUrl, {
-              method: 'GET',
-              mode: 'cors',
-              cache: 'no-cache'
-            });
+          if (!res.ok) {
+            let errorMsg = `Máy chủ trả về mã HTTP ${res.status}`;
+            try {
+              const errJson = await res.json();
+              if (errJson?.message) errorMsg = errJson.message;
+            } catch {}
+
+            // If proxy returned 404/error (e.g. on Vercel deployment where serverless is not yet active)
+            // Directly download from Telegram CDN via top-level browser navigation!
+            if (telegramOriginalUrl) {
+              console.log('Proxy unavailable, triggering direct browser download from Telegram CDN:', telegramOriginalUrl);
+              const a = document.createElement('a');
+              a.href = telegramOriginalUrl;
+              a.download = safeFileName;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(() => {
+                try { document.body.removeChild(a); } catch {}
+              }, 1500);
+
+              try {
+                window.open(telegramOriginalUrl, '_blank');
+              } catch {}
+
+              if (onProgress) onProgress('completed');
+              notifyDownload(`Đang tải về "${safeFileName}" trực tiếp từ Telegram!`, 'success');
+              return true;
+            }
+
+            throw new Error(errorMsg);
           }
 
-          if (!res.ok) {
-            throw new Error(`Máy chủ trả về mã HTTP ${res.status}`);
+          // Check if response is JSON error returned with 200 OK
+          const contentType = res.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const errData = await res.json();
+            if (errData?.error || errData?.success === false) {
+              throw new Error(errData?.message || errData?.error || 'Lỗi khi tải tệp từ Telegram.');
+            }
           }
 
           const blob = await res.blob();
@@ -171,6 +211,12 @@ export async function downloadFileSafely(
           if (blob.type.includes('text/html') || blob.size < 2000) {
             const textCheck = await blob.text().catch(() => '');
             if (textCheck.startsWith('<') || textCheck.includes('<!DOCTYPE') || textCheck.includes('<html') || textCheck.includes('Cannot GET') || textCheck.includes('404 Not Found')) {
+              if (telegramOriginalUrl) {
+                window.open(telegramOriginalUrl, '_blank');
+                if (onProgress) onProgress('completed');
+                notifyDownload(`Đang mở tải về trực tiếp "${safeFileName}"...`, 'info');
+                return true;
+              }
               throw new Error('Máy chủ trả về trang lỗi HTML thay vì tệp dữ liệu thực tế.');
             }
           }
@@ -183,21 +229,26 @@ export async function downloadFileSafely(
           blobUrl = URL.createObjectURL(blob);
           createdBlobUrl = true;
         } catch (fetchErr) {
-          console.warn('Fetch fallback, trying direct anchor fallback:', fetchErr);
+          console.warn('Fetch fallback, trying direct Telegram/anchor download:', fetchErr);
           
           const targetUrl = telegramOriginalUrl || fetchUrl;
           const a = document.createElement('a');
           a.href = targetUrl;
           a.download = safeFileName;
-          a.target = '_self';
+          a.target = '_blank';
           a.rel = 'noopener noreferrer';
-          a.style.display = 'none';
           document.body.appendChild(a);
           a.click();
           
           setTimeout(() => {
             try { document.body.removeChild(a); } catch {}
           }, 1500);
+
+          if (telegramOriginalUrl) {
+            try {
+              window.open(telegramOriginalUrl, '_blank');
+            } catch {}
+          }
 
           if (onProgress) onProgress('completed');
           notifyDownload(`Đã bắt đầu tải xuống "${safeFileName}"!`, 'success');

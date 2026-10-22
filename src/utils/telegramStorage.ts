@@ -247,6 +247,7 @@ const AUDIO_BOTS_KEY = 'cloudsend_audio_bots';
 let videoBotRoundRobinIndex = 0;
 let docBotRoundRobinIndex = 0;
 let audioBotRoundRobinIndex = 0;
+let imageBotRoundRobinIndex = 0;
 let generalBotRoundRobinIndex = 0;
 
 /**
@@ -377,6 +378,20 @@ export function isDocumentFile(fileName: string, mimeType?: string): boolean {
 }
 
 /**
+ * Checks if a file is an image based on extension or mime
+ */
+export function isImageFile(fileName: string, mimeType?: string): boolean {
+  const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+  const imgExts = [
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'tiff', 'tif',
+    'heic', 'heif', 'avif', 'psd', 'ai', 'raw', 'cr2', 'nef'
+  ];
+  if (imgExts.includes(ext)) return true;
+  if (mimeType && mimeType.toLowerCase().startsWith('image/')) return true;
+  return false;
+}
+
+/**
  * Selects the optimal bot config based on file type:
  * - Audio: loads from audio-capable bots cluster via round-robin
  * - Videos: loads from video-capable bots cluster via round-robin
@@ -387,6 +402,7 @@ export function getBotForFile(fileName: string, mimeType?: string): TelegramStor
   const isAud = isAudioFile(fileName, mimeType);
   const isVid = isVideoFile(fileName, mimeType);
   const isDoc = isDocumentFile(fileName, mimeType);
+  const isImg = isImageFile(fileName, mimeType);
 
   if (isAud) {
     const audioBots = getAudioBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
@@ -406,6 +422,19 @@ export function getBotForFile(fileName: string, mimeType?: string): TelegramStor
     if (videoBots.length > 0) {
       const bot = videoBots[videoBotRoundRobinIndex % videoBots.length];
       videoBotRoundRobinIndex++;
+      return {
+        enabled: true,
+        botToken: bot.botToken,
+        chatId: bot.chatId
+      };
+    }
+  }
+
+  if (isImg) {
+    const imgBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId && (b.supportedTypes === 'image' || b.supportedTypes === 'all'));
+    if (imgBots.length > 0) {
+      const bot = imgBots[imageBotRoundRobinIndex % imgBots.length];
+      imageBotRoundRobinIndex++;
       return {
         enabled: true,
         botToken: bot.botToken,
@@ -463,6 +492,7 @@ export function buildTelegramDownloadUrl(fileId: string, botToken: string, fileN
 
 export interface TelegramUploadResult {
   fileId: string;
+  botToken?: string;
   downloadUrl: string;
   viewUrl: string;
   rawTelegramUrl: string;
@@ -470,6 +500,7 @@ export interface TelegramUploadResult {
   fileName: string;
   isAudio?: boolean;
   isVideo?: boolean;
+  isImage?: boolean;
   mimeType?: string;
 }
 
@@ -494,6 +525,7 @@ export async function uploadToTelegram(
   const isAud = isAudioFile(file.name, file.type);
   const isVid = isVideoFile(file.name, file.type);
   const isDoc = isDocumentFile(file.name, file.type);
+  const isImg = isImageFile(file.name, file.type);
 
   // Determine list of candidate configs to attempt
   const candidateConfigs: TelegramStorageConfig[] = [];
@@ -535,6 +567,23 @@ export async function uploadToTelegram(
       const mainConfig = getTelegramConfig();
       if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
         candidateConfigs.push(mainConfig);
+      }
+    } else if (isImg) {
+      // Prioritize image-capable bots in round-robin order
+      const imageBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'image');
+      const startIdx = imageBotRoundRobinIndex % (imageBots.length || 1);
+      imageBotRoundRobinIndex++;
+
+      for (let i = 0; i < imageBots.length; i++) {
+        const b = imageBots[(startIdx + i) % imageBots.length];
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+      }
+
+      // Add other active bots as fallback
+      for (const b of allBots) {
+        if (!candidateConfigs.some(c => c.botToken === b.botToken)) {
+          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        }
       }
     } else if (isDoc) {
       // Prioritize document bots
@@ -634,7 +683,7 @@ export async function uploadToTelegram(
         const formData = new FormData();
         formData.append('chat_id', config.chatId.trim());
         formData.append('document', file);
-        const icon = isAud ? '🎵' : isVid ? '🎬' : isDoc ? '📄' : '📁';
+        const icon = isAud ? '🎵' : isVid ? '🎬' : isImg ? '🖼️' : isDoc ? '📄' : '📁';
         formData.append('caption', `${icon} CloudSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
 
         const sendRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
@@ -673,13 +722,15 @@ export async function uploadToTelegram(
         throw new Error('Telegram Bot không thể tạo liên kết tải về cho tệp này.');
       }
 
-      // Create streaming proxy URL. 
-      // We encode the rawTelegramUrl so the proxy can re-fetch it if needed.
-      const downloadProxyUrl = `/api/telegram/download-dynamic?url=${encodeURIComponent(rawTelegramUrl)}&name=${encodeURIComponent(file.name)}`;
-      const viewProxyUrl = `/api/telegram/download-dynamic?url=${encodeURIComponent(rawTelegramUrl)}&name=${encodeURIComponent(file.name)}&inline=true`;
+      // Create streaming proxy URL that binds the EXACT botToken and fileId to ensure:
+      // 1. Correct bot gets the file (Lỗi 1 fixed)
+      // 2. Link can be refreshed on-the-fly when expired after 1 hour (Lỗi 4 fixed)
+      const downloadProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(config.botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}`;
+      const viewProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(config.botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}&inline=true`;
 
       return {
         fileId,
+        botToken: config.botToken.trim(),
         downloadUrl: downloadProxyUrl,
         viewUrl: viewProxyUrl,
         rawTelegramUrl,
@@ -687,6 +738,7 @@ export async function uploadToTelegram(
         fileName: file.name,
         isAudio: isAud,
         isVideo: isVid,
+        isImage: isImg,
         mimeType: file.type
       };
     } catch (err: any) {

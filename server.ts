@@ -619,36 +619,72 @@ async function startServer() {
 
   // Telegram Cloud Storage Download & Media Streaming Proxy (Bypasses CORS, supports audio/video inline streaming & range requests)
   // Supports dynamic token and fileId to handle Telegram link expiration and bot-specific constraints.
-  app.get('/api/telegram/download', async (req, res) => {
+  const handleTelegramDownload = async (req: express.Request, res: express.Response) => {
     try {
-      const fileId = req.query.fileId as string;
-      const botToken = req.query.botToken as string;
+      let fileUrl = (req.query.url as string) || '';
+      const fileId = (req.query.fileId as string) || '';
+      const botToken = (req.query.botToken as string) || '';
       const originalName = sanitizeServerFilename((req.query.name as string) || 'telegram-file');
       const isInline = req.query.inline === 'true' || req.query.view === 'true';
 
-      if (!fileId || !botToken) {
-        return res.status(400).send('Thiếu fileId hoặc botToken để xử lý tải tệp.');
+      // Extract effective bot token: either from query param or from fileUrl
+      let effectiveBotToken = (botToken || '').trim();
+      if (!effectiveBotToken && fileUrl) {
+        const tokenMatch = fileUrl.match(/\/file\/bot([^/]+)\//);
+        if (tokenMatch && tokenMatch[1]) {
+          effectiveBotToken = tokenMatch[1];
+        }
       }
 
-      // 1. Fetch fresh file path from Telegram using the correct bot
-      const getFileRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/getFile?file_id=${fileId}`);
-      const getFileData = await getFileRes.json();
-      
-      if (!getFileData.ok || !getFileData.result?.file_path) {
-        return res.status(400).send('Không thể lấy liên kết tải từ Telegram (Token có thể sai hoặc file_id đã hết hạn).');
+      // If fileUrl is missing but fileId and botToken are available, fetch fresh file_path from Telegram
+      if (!fileUrl && fileId && effectiveBotToken) {
+        try {
+          const getFileRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${fileId}`);
+          const getFileData: any = await getFileRes.json();
+          if (getFileData.ok && getFileData.result?.file_path) {
+            fileUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${getFileData.result.file_path}`;
+          }
+        } catch (e) {
+          console.warn('Could not fetch file_path from Telegram:', e);
+        }
       }
 
-      const fileUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${getFileData.result.file_path}`;
+      if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
+        return res.status(400).json({ success: false, error: 'URL Telegram không hợp lệ hoặc thiếu fileId/botToken.' });
+      }
 
-      // 2. Forward range request if requested by audio/video players
+      // Forward range request if requested by audio/video players
       const headers: Record<string, string> = {};
       if (req.headers.range) {
         headers['range'] = req.headers.range;
       }
 
-      const upstreamRes = await fetch(fileUrl, { headers });
+      let upstreamRes = await fetch(fileUrl, { headers });
+
+      // If the URL returned 404 (Telegram expired temporary link after 1 hour)
+      // AND we have fileId + effectiveBotToken, refresh it automatically with the exact bot!
+      if (!upstreamRes.ok && upstreamRes.status === 404 && fileId && effectiveBotToken) {
+        console.log(`Telegram URL expired for ${originalName}, refreshing with bot token...`);
+        try {
+          const refreshRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${fileId}`);
+          const refreshData: any = await refreshRes.json();
+          if (refreshData.ok && refreshData.result?.file_path) {
+            fileUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${refreshData.result.file_path}`;
+            upstreamRes = await fetch(fileUrl, { headers });
+          }
+        } catch (refreshErr) {
+          console.warn('Failed to refresh expired Telegram link:', refreshErr);
+        }
+      }
+
       if (!upstreamRes.ok && upstreamRes.status !== 206) {
-        return res.status(upstreamRes.status).send('Không thể lấy tệp từ máy chủ Telegram.');
+        return res.status(upstreamRes.status).json({
+          success: false,
+          error: upstreamRes.status === 404 ? 'telegram_link_expired' : 'telegram_fetch_failed',
+          message: upstreamRes.status === 404 
+            ? 'Đường dẫn Telegram tạm thời đã hết hạn sau 60 phút.' 
+            : 'Không thể lấy tệp từ máy chủ Telegram.'
+        });
       }
 
       let mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
@@ -657,6 +693,10 @@ async function startServer() {
         mimeType = ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' ? 'audio/ogg' : `audio/${ext}`;
       } else if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) {
         mimeType = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : `video/${ext}`;
+      } else if (ext === 'zip') {
+        mimeType = 'application/zip';
+      } else if (ext === 'pdf') {
+        mimeType = 'application/pdf';
       }
 
       const contentLength = upstreamRes.headers.get('content-length');
@@ -689,18 +729,12 @@ async function startServer() {
       return res.send(Buffer.from(arrayBuffer));
     } catch (err: any) {
       console.error('Telegram proxy download error:', err);
-      return res.status(500).send('Lỗi khi tải tệp từ Telegram.');
+      return res.status(500).json({ success: false, error: 'Lỗi khi tải tệp từ Telegram.' });
     }
-  });
+  };
 
-  // Dynamic Telegram download proxy (for files with expiring URLs)
-  app.get('/api/telegram/download-dynamic', async (req, res) => {
-    // Reuse the exact logic as /api/telegram/download
-    // We just map this new endpoint to the same logic
-    return (req as any).app._router.stack
-      .find((r: any) => r.route?.path === '/api/telegram/download')
-      ?.route?.stack[0]?.handle(req, res);
-  });
+  app.get('/api/telegram/download', handleTelegramDownload);
+  app.get('/api/telegram/download-dynamic', handleTelegramDownload);
 
   // File Inline View Endpoint (For image/video preview in browser, with sandbox CSP for safety)
   app.get('/api/files/view/:id', async (req, res) => {

@@ -269,6 +269,9 @@ export const CloudDriveView: React.FC = () => {
         let fileViewUrl = '';
         let fileThumbnail = clientThumb || null;
 
+        let tgFileId: string | undefined = undefined;
+        let tgBotToken: string | undefined = undefined;
+
         // 1. Check if Telegram Cloud Storage is available (files <= 20MB)
         if (file.size <= 20 * 1024 * 1024) {
           try {
@@ -276,6 +279,8 @@ export const CloudDriveView: React.FC = () => {
             if (tgRes.downloadUrl) {
               fileUrl = tgRes.downloadUrl;
               fileViewUrl = tgRes.viewUrl || tgRes.downloadUrl;
+              tgFileId = tgRes.fileId;
+              tgBotToken = tgRes.botToken;
             }
           } catch (tgErr: any) {
             console.warn(`Telegram upload notice for "${file.name}", using high-speed CLSend storage:`, tgErr?.message || tgErr);
@@ -326,7 +331,7 @@ export const CloudDriveView: React.FC = () => {
 
         // Save metadata into Firestore
         const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        await setDoc(doc(db, 'cloud_files', docId), {
+        const docData: any = {
           id: docId,
           userId: currentUser.uid,
           userEmail: currentUser.email || '',
@@ -340,7 +345,12 @@ export const CloudDriveView: React.FC = () => {
           category: category,
           isFavorite: false,
           createdAt: new Date().toISOString()
-        });
+        };
+
+        if (tgFileId) docData.telegramFileId = tgFileId;
+        if (tgBotToken) docData.telegramBotToken = tgBotToken;
+
+        await setDoc(doc(db, 'cloud_files', docId), docData);
 
         // Cache file in local P2P Community Swarm for instant peer acceleration
         cacheFileInCommunitySwarm(docId, file, file.name).catch(() => {});

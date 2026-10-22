@@ -68,6 +68,11 @@ service cloud.firestore {
     match /cloud_files/{fileId} {
       allow read, write: if true;
     }
+
+    // Universal catch-all for testing and any auxiliary collections/subcollections
+    match /{document=**} {
+      allow read, write: if true;
+    }
   }
 }
 

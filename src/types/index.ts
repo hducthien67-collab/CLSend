@@ -165,6 +165,8 @@ export interface CloudDriveFile {
   category?: 'image' | 'video' | 'audio' | 'document' | 'other';
   isFavorite?: boolean;
   createdAt: string;
+  telegramFileId?: string;
+  telegramBotToken?: string;
 }
 
 export type DpiScaleMode = 'auto' | 'compact' | 'standard' | 'large' | 'xlarge' | 'tv_125' | 'tv_150' | 'tv_175' | 'tv_200';

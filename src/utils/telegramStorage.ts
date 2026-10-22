@@ -660,7 +660,7 @@ export async function uploadToTelegram(
         throw new Error('Không nhận được file_id từ Telegram.');
       }
 
-      // 4. Query file path to construct direct CDN download URL
+      // 4. Always fetch file path dynamically at the moment of download to ensure fresh URL
       const getFileRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/getFile?file_id=${fileId}`);
       const getFileData = await getFileRes.json();
       
@@ -673,9 +673,10 @@ export async function uploadToTelegram(
         throw new Error('Telegram Bot không thể tạo liên kết tải về cho tệp này.');
       }
 
-      // Create streaming proxy URL for high performance inline audio/video playback and downloads
-      const downloadProxyUrl = buildTelegramProxyUrl(rawTelegramUrl, file.name, false);
-      const viewProxyUrl = buildTelegramProxyUrl(rawTelegramUrl, file.name, true);
+      // Create streaming proxy URL. 
+      // We encode the rawTelegramUrl so the proxy can re-fetch it if needed.
+      const downloadProxyUrl = `/api/telegram/download-dynamic?url=${encodeURIComponent(rawTelegramUrl)}&name=${encodeURIComponent(file.name)}`;
+      const viewProxyUrl = `/api/telegram/download-dynamic?url=${encodeURIComponent(rawTelegramUrl)}&name=${encodeURIComponent(file.name)}&inline=true`;
 
       return {
         fileId,

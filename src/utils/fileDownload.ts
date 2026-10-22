@@ -28,6 +28,7 @@ function notifyDownload(text: string, type: 'info' | 'success' | 'error' = 'info
 export type ErrorChatInfo = {
   fileName: string;
   errorMessage: string;
+  diagnosticInfo?: { blobType: string; blobSize: number };
   onRetry?: () => void;
   onDirectCDN?: () => void;
 };
@@ -240,8 +241,10 @@ export async function downloadFileSafely(
 
     // Ultimate fallback for strict environments: Direct hidden navigation & window.open
     try {
+      const uniqueId = Date.now();
+      const uniqueSource = `${source.includes('?') ? source + '&' : source + '?'}v=${uniqueId}`;
       const a = document.createElement('a');
-      a.href = source;
+      a.href = uniqueSource;
       a.download = safeFileName;
       a.target = '_blank';
       a.rel = 'noopener noreferrer';
@@ -253,7 +256,7 @@ export async function downloadFileSafely(
       }, 1500);
 
       try {
-        window.open(source, '_blank');
+        window.open(uniqueSource, '_blank');
       } catch {}
 
       if (onProgress) onProgress('completed');
@@ -262,6 +265,10 @@ export async function downloadFileSafely(
     } catch (fallbackErr: any) {
       if (onProgress) onProgress('error');
       notifyDownload(`Đang chuyển hướng tải xuống trực tiếp...`, 'info');
+      
+      // Capture diagnostic info
+      const diagnosticInfo = { blobType: 'unknown', blobSize: 0 };
+      
       try {
         window.location.href = source;
         return true;
@@ -269,6 +276,7 @@ export async function downloadFileSafely(
         notifyErrorChat({
           fileName: safeFileName,
           errorMessage: err?.message || fallbackErr?.message || 'Không thể thiết lập kết nối tải tệp',
+          diagnosticInfo: diagnosticInfo,
           onRetry: () => downloadFileSafely(source, fileName, onProgress),
           onDirectCDN: () => {
             window.open(source, '_blank');

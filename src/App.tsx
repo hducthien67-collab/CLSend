@@ -784,6 +784,7 @@ function MainApp() {
         <ErrorChatAssistantModal
           fileName={errorChatInfo.fileName}
           errorMessage={errorChatInfo.errorMessage}
+          diagnosticInfo={errorChatInfo.diagnosticInfo}
           onRetry={errorChatInfo.onRetry}
           onDirectCDN={errorChatInfo.onDirectCDN}
           onClose={() => setErrorChatInfo(null)}

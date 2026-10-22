@@ -681,6 +681,15 @@ async function startServer() {
     }
   });
 
+  // Dynamic Telegram download proxy (for files with expiring URLs)
+  app.get('/api/telegram/download-dynamic', async (req, res) => {
+    // Reuse the exact logic as /api/telegram/download
+    // We just map this new endpoint to the same logic
+    return (req as any).app._router.stack
+      .find((r: any) => r.route?.path === '/api/telegram/download')
+      ?.route?.stack[0]?.handle(req, res);
+  });
+
   // File Inline View Endpoint (For image/video preview in browser, with sandbox CSP for safety)
   app.get('/api/files/view/:id', async (req, res) => {
     try {

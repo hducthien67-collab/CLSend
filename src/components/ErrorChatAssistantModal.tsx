@@ -4,6 +4,7 @@ import { Sparkles, RefreshCw, Download, AlertTriangle, X, Send, Bot, CheckCircle
 interface ErrorChatAssistantModalProps {
   fileName: string;
   errorMessage: string;
+  diagnosticInfo?: { blobType: string; blobSize: number };
   onRetry?: () => void;
   onDirectCDN?: () => void;
   onClose: () => void;
@@ -12,10 +13,17 @@ interface ErrorChatAssistantModalProps {
 export const ErrorChatAssistantModal: React.FC<ErrorChatAssistantModalProps> = ({
   fileName,
   errorMessage,
+  diagnosticInfo,
   onRetry,
   onDirectCDN,
   onClose
 }) => {
+  React.useEffect(() => {
+    if (diagnosticInfo) {
+      console.log('[Download Diagnostic] Blob Info:', diagnosticInfo);
+    }
+  }, [diagnosticInfo]);
+
   const [messages, setMessages] = useState<Array<{ sender: 'bot' | 'user'; text: string }>>([
     {
       sender: 'bot',
@@ -152,6 +160,7 @@ export const ErrorChatAssistantModal: React.FC<ErrorChatAssistantModalProps> = (
               onClick={() => {
                 setIsResolved(true);
                 onDirectCDN();
+                onClose();
               }}
               className="flex-1 min-w-[140px] py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white font-medium text-xs flex items-center justify-center gap-2 border border-slate-700 transition-all active:scale-95"
             >

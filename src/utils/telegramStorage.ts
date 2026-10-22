@@ -456,9 +456,9 @@ export async function testTelegramBot(botToken: string): Promise<{ ok: boolean; 
 /**
  * Converts a direct Telegram CDN file URL into our secure, high-speed, CORS-free streaming proxy URL
  */
-export function buildTelegramProxyUrl(rawUrl: string, fileName: string, inline: boolean = true): string {
-  if (!rawUrl) return '';
-  return `/api/telegram/download?url=${encodeURIComponent(rawUrl)}&name=${encodeURIComponent(fileName)}${inline ? '&inline=true' : ''}`;
+export function buildTelegramDownloadUrl(fileId: string, botToken: string, fileName: string, inline: boolean = true): string {
+  if (!fileId || !botToken) return '';
+  return `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken)}&name=${encodeURIComponent(fileName)}${inline ? '&inline=true' : ''}`;
 }
 
 export interface TelegramUploadResult {

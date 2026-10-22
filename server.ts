@@ -618,17 +618,29 @@ async function startServer() {
   });
 
   // Telegram Cloud Storage Download & Media Streaming Proxy (Bypasses CORS, supports audio/video inline streaming & range requests)
+  // Supports dynamic token and fileId to handle Telegram link expiration and bot-specific constraints.
   app.get('/api/telegram/download', async (req, res) => {
     try {
-      const fileUrl = req.query.url as string;
+      const fileId = req.query.fileId as string;
+      const botToken = req.query.botToken as string;
       const originalName = sanitizeServerFilename((req.query.name as string) || 'telegram-file');
       const isInline = req.query.inline === 'true' || req.query.view === 'true';
 
-      if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
-        return res.status(400).send('URL Telegram không hợp lệ');
+      if (!fileId || !botToken) {
+        return res.status(400).send('Thiếu fileId hoặc botToken để xử lý tải tệp.');
       }
 
-      // Forward range request if requested by audio/video players
+      // 1. Fetch fresh file path from Telegram using the correct bot
+      const getFileRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/getFile?file_id=${fileId}`);
+      const getFileData = await getFileRes.json();
+      
+      if (!getFileData.ok || !getFileData.result?.file_path) {
+        return res.status(400).send('Không thể lấy liên kết tải từ Telegram (Token có thể sai hoặc file_id đã hết hạn).');
+      }
+
+      const fileUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${getFileData.result.file_path}`;
+
+      // 2. Forward range request if requested by audio/video players
       const headers: Record<string, string> = {};
       if (req.headers.range) {
         headers['range'] = req.headers.range;

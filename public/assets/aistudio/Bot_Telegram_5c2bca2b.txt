@@ -1,0 +1,184 @@
+- Bot File
++ bot 1 
+Done! Congratulations on your new bot. You will find it at t.me/clsend_storage_bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8981117370:AAFyTRr8_7TJXRmwpvvzXvWLiOVFWQst9A0
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 2
+Done! Congratulations on your new bot. You will find it at t.me/CLsendStorage02Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8865945373:AAFJ-kh5_uFlQ7PPA-2AJ5E39kJvuxorGKI
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 3
+Done! Congratulations on your new bot. You will find it at t.me/CLsendStorage03Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8916004893:AAHcdnUb-uMo8j8wf-6vWbghn_ONR5P9i6I
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 4
+Done! Congratulations on your new bot. You will find it at t.me/CLsendStorage04Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8861167534:AAFv_I1hBtex4YhZlo6_ZqvMOM6VKKpo-cg
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 5
+Done! Congratulations on your new bot. You will find it at t.me/CLsendStorage05Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8979371401:AAGtMkSqJrUEcf1s7acpOS9TD2K5CSIqQyQ
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
+- Bot Images
++ bot 1
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageImages01Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8604013559:AAFFGF319kHmtDE-WHujtyYzA3O5O-y6npk
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 2
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageImages02Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8814406635:AAH-RLh5zysbOIS0eRxo0SwowODTpKrvJOo
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 3
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageImages03Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8325319018:AAEgCy6oQKCBObJ4K1psiX5oJjpI8L4gxK4
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 4
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageImages04Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8916441240:AAHK7okMFenaan5PuIpMQ9L0UoG75nECd5Y
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 5
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageImages05Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8960716268:AAHSr3vYPcUaWok_L69S4qNx3T7FPFXCUmg
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
+- Bot Videos
++ bot 1
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageVideo01Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8723278230:AAFNgOwsETRD0V2AZWjOxB804qYnDgSTVCA
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 2
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageVideo02Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8865581783:AAES5O8dQ0wnKG-24lUNzoSlo3M_MWh3anY
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 3
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageVideo03Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8824325576:AAGev7fxc4hS6orcqbOw03naP-0Tmk7BBeo
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 4
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageVideo04Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8965972564:AAHrxAgdKJdxupywAlI87zxvGqkuhb1BaVQ
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 5
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageVideo05Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8775626995:AAGmiBqh7fsSeBhx3qyb3RA4U0sghXaKOfk
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
+- Bot Sounds
++ bot 1
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageSound01Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8684241811:AAH2cautwZ4RUCjfev1n8HJXX_HJVy-MrBs
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 2
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageSound02Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8860706681:AAGuyXe9wVdfdfRPW5QeU8CRUJWPX_WaM4Q
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 3
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageSound03Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8783207618:AAGwR1MT3v2uadtwWrsU1JCk_6MgRAGH_A0
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 4
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageSound04Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8603369577:AAHEXYTeTztwomVH91zRM0pyxCPQR1QidSQ
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+
++ bot 5
+Done! Congratulations on your new bot. You will find it at t.me/CLSendStorageSound05Bot. You can now add a description, about section and profile picture for your bot, see /help for a list of commands. By the way, when you've finished creating your cool bot, ping our Bot Support if you want a better username for it. Just make sure the bot is fully operational before you do this.
+
+Use this token to access the HTTP API:
+8993081888:AAEYHdNDFKEBeMDzAbm9NztKSi9BPBUcvVE
+Keep your token secure and store it safely, it can be used by anyone to control your bot.
+
+For a description of the Bot API, see this page: https://core.telegram.org/bots/api
+

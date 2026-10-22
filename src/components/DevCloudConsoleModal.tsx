@@ -935,7 +935,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
                         Người dùng này chưa gửi tin nhắn nào trong các phòng chat.
                       </div>
                     ) : (
-                      selectedUser.messages.map(msg => {
+                      selectedUser.messages.map((msg, index) => {
                         const hasImages = msg.attachments?.filter(a => a.type?.startsWith('image/') || a.data?.startsWith('data:image/')) || [];
                         const otherFiles = msg.attachments?.filter(a => !a.type?.startsWith('image/') && !a.data?.startsWith('data:image/')) || [];
                         
@@ -946,7 +946,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
 
                         return (
                           <div 
-                            key={msg.id}
+                            key={msg.id ? `${msg.id}_${index}` : index}
                             className={`p-3.5 rounded-2xl border transition-all space-y-2 ${
                               hasProfanity || isCensoredInChat
                                 ? 'bg-rose-950/20 border-rose-500/50 hover:border-rose-500/80' 
@@ -1111,9 +1111,9 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
                     Chưa có tin nhắn nào trong phòng này.
                   </div>
                 ) : (
-                  (allMessagesByRoom[selectedRoomId] || []).map(msg => (
+                  (allMessagesByRoom[selectedRoomId] || []).map((msg, index) => (
                     <div 
-                      key={msg.id}
+                      key={msg.id ? `${msg.id}_${index}` : index}
                       className="p-3.5 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2"
                     >
                       <div className="flex items-center justify-between gap-2">

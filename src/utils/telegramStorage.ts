@@ -54,6 +54,51 @@ export function saveTelegramConfig(config: TelegramStorageConfig): void {
   }
 }
 
+/**
+ * CẤU HÌNH 4 CƠ SỞ DỮ LIỆU TỆP RIÊNG BIỆT (CHANNELS)
+ * Phân chia luồng lưu trữ theo từng loại tệp: Âm Thanh, Video, Hình Ảnh, Tài Liệu
+ */
+export interface FacilityChannelsConfig {
+  audio: string;    // Cơ Sở 1: Âm Thanh
+  video: string;    // Cơ Sở 2: Video & Phim Ảnh
+  image: string;    // Cơ Sở 3: Hình Ảnh
+  document: string; // Cơ Sở 4: Tài Liệu & Nén
+  default: string;  // Kênh tổng dự phòng
+}
+
+export const DEFAULT_FACILITY_CHANNELS: FacilityChannelsConfig = {
+  audio: '@CLSSSound',
+  video: '@CLSSVideo',
+  image: '@CLSSImages',
+  document: '@ClsendStorage',
+  default: '@ClsendStorage'
+};
+
+const FACILITY_CHANNELS_KEY = 'cloudsend_facility_channels';
+
+export function getFacilityChannels(): FacilityChannelsConfig {
+  try {
+    const raw = localStorage.getItem(FACILITY_CHANNELS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return { ...DEFAULT_FACILITY_CHANNELS, ...parsed };
+    }
+  } catch (err) {
+    console.warn('Failed to parse facility channels:', err);
+  }
+  return DEFAULT_FACILITY_CHANNELS;
+}
+
+export function saveFacilityChannels(channels: Partial<FacilityChannelsConfig>): void {
+  try {
+    const current = getFacilityChannels();
+    const updated = { ...current, ...channels };
+    localStorage.setItem(FACILITY_CHANNELS_KEY, JSON.stringify(updated));
+  } catch (err) {
+    console.warn('Failed to save facility channels:', err);
+  }
+}
+
 export type BotSupportedTypes = 'all' | 'video' | 'audio' | 'document' | 'image';
 
 export interface StorageBotInfo {
@@ -63,8 +108,8 @@ export interface StorageBotInfo {
   botToken: string;
   chatId: string;
   enabled: boolean;
-  facility: 'main' | 'sub'; // 'main': Cơ sở chính, 'sub': Cơ sở phụ
-  supportedTypes?: BotSupportedTypes; // Loại tệp hỗ trợ: audio, video, document hoặc all
+  facility: 'main' | 'sub';
+  supportedTypes?: BotSupportedTypes;
   description?: string;
 }
 
@@ -74,63 +119,236 @@ export type VideoBotInfo = StorageBotInfo;
 export type AudioBotInfo = StorageBotInfo;
 
 /**
- * MASTER BOTS CLUSTER (Tất cả bot đều trực tuyến & hỗ trợ tải tệp Âm thanh/Sound + Video + Tài liệu)
+ * MASTER BOTS CLUSTER (20 Bot cho 4 Cơ Sở Dữ Liệu Tệp)
+ * - Tương ứng với 4 kênh: @ClsendStorage, @CLSSImages, @CLSSVideo, @CLSSSound
  */
 export const MASTER_BOTS_CLUSTER: StorageBotInfo[] = [
+  // --- 1. CƠ SỞ TỆP & TÀI LIỆU (@ClsendStorage) ---
   {
     id: 'master-bot-01',
-    name: 'Cơ Sở Chính - Master Storage Bot',
+    name: 'Cơ Sở Tệp - Bot 01',
     username: 'clsend_storage_bot',
     botToken: '8981117370:AAFyTRr8_7TJXRmwpvvzXvWLiOVFWQst9A0',
     chatId: '@ClsendStorage',
     enabled: true,
     facility: 'main',
-    supportedTypes: 'all',
-    description: 'Điều phối viên máy chủ chính, hỗ trợ tất cả định dạng'
+    supportedTypes: 'document',
+    description: 'Cơ Sở Tệp & Tài Liệu - Bot chính'
   },
   {
     id: 'bot-02',
-    name: 'Cơ Sở Phụ - Bot 02 (Video & Doc)',
+    name: 'Cơ Sở Tệp - Bot 02',
     username: 'CLsendStorage02Bot',
-    botToken: '8865945373:AAFJ-kh5_uFIQ7PPA-2AJ5E39kJvuxorGKI',
+    botToken: '8865945373:AAFJ-kh5_uFlQ7PPA-2AJ5E39kJvuxorGKI',
     chatId: '@ClsendStorage',
     enabled: true,
     facility: 'sub',
-    supportedTypes: 'all',
-    description: 'Chuyên trách tải video streaming và tài liệu'
+    supportedTypes: 'document',
+    description: 'Cơ Sở Tệp & Tài Liệu - Bot 02'
   },
   {
     id: 'bot-03',
-    name: 'Cơ Sở Phụ - Bot 03 (Video & Doc)',
+    name: 'Cơ Sở Tệp - Bot 03',
     username: 'CLsendStorage03Bot',
     botToken: '8916004893:AAHcdnUb-uMo8j8wf-6vWbghn_ONR5P9i6I',
     chatId: '@ClsendStorage',
     enabled: true,
     facility: 'sub',
-    supportedTypes: 'all',
-    description: 'Chuyên trách tải video streaming và tài liệu'
+    supportedTypes: 'document',
+    description: 'Cơ Sở Tệp & Tài Liệu - Bot 03'
   },
   {
     id: 'bot-04',
-    name: 'Cơ Sở Phụ - Bot 04 (Video & Doc)',
+    name: 'Cơ Sở Tệp - Bot 04',
     username: 'CLsendStorage04Bot',
-    botToken: '8861167534:AAFv_l1hBtex4YhZlo6_ZqvMOM6VKKpo-cg',
+    botToken: '8861167534:AAFv_I1hBtex4YhZlo6_ZqvMOM6VKKpo-cg',
     chatId: '@ClsendStorage',
     enabled: true,
     facility: 'sub',
-    supportedTypes: 'all',
-    description: 'Cân bằng tải cụm tài liệu & đa phương tiện'
+    supportedTypes: 'document',
+    description: 'Cơ Sở Tệp & Tài Liệu - Bot 04'
   },
   {
     id: 'bot-05',
-    name: 'Cơ Sở Phụ - Bot 05 (Video & Doc)',
+    name: 'Cơ Sở Tệp - Bot 05',
     username: 'CLsendStorage05Bot',
     botToken: '8979371401:AAGtMkSqJrUEcf1s7acpOS9TD2K5CSIqQyQ',
     chatId: '@ClsendStorage',
     enabled: true,
     facility: 'sub',
-    supportedTypes: 'all',
-    description: 'Cân bằng tải cụm tài liệu & đa phương tiện'
+    supportedTypes: 'document',
+    description: 'Cơ Sở Tệp & Tài Liệu - Bot 05'
+  },
+
+  // --- 2. CƠ SỞ HÌNH ẢNH (@CLSSImages) ---
+  {
+    id: 'bot-06',
+    name: 'Cơ Sở Hình Ảnh - Bot 01',
+    username: 'CLSendStorageImages01Bot',
+    botToken: '8604013559:AAFFGF319kHmtDE-WHujtyYzA3O5O-y6npk',
+    chatId: '@CLSSImages',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'image',
+    description: 'Cơ Sở Hình Ảnh - Bot 01'
+  },
+  {
+    id: 'bot-07',
+    name: 'Cơ Sở Hình Ảnh - Bot 02',
+    username: 'CLSendStorageImages02Bot',
+    botToken: '8814406635:AAH-RLh5zysbOIS0eRxo0SwowODTpKrvJOo',
+    chatId: '@CLSSImages',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'image',
+    description: 'Cơ Sở Hình Ảnh - Bot 02'
+  },
+  {
+    id: 'bot-08',
+    name: 'Cơ Sở Hình Ảnh - Bot 03',
+    username: 'CLSendStorageImages03Bot',
+    botToken: '8325319018:AAEgCy6oQKCBObJ4K1psiX5oJjpI8L4gxK4',
+    chatId: '@CLSSImages',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'image',
+    description: 'Cơ Sở Hình Ảnh - Bot 03'
+  },
+  {
+    id: 'bot-09',
+    name: 'Cơ Sở Hình Ảnh - Bot 04',
+    username: 'CLSendStorageImages04Bot',
+    botToken: '8916441240:AAHK7okMFenaan5PuIpMQ9L0UoG75nECd5Y',
+    chatId: '@CLSSImages',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'image',
+    description: 'Cơ Sở Hình Ảnh - Bot 04'
+  },
+  {
+    id: 'bot-10',
+    name: 'Cơ Sở Hình Ảnh - Bot 05',
+    username: 'CLSendStorageImages05Bot',
+    botToken: '8960716268:AAHSr3vYPcUaWok_L69S4qNx3T7FPFXCUmg',
+    chatId: '@CLSSImages',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'image',
+    description: 'Cơ Sở Hình Ảnh - Bot 05'
+  },
+
+  // --- 3. CƠ SỞ VIDEO (@CLSSVideo) ---
+  {
+    id: 'bot-11',
+    name: 'Cơ Sở Video - Bot 01',
+    username: 'CLSendStorageVideo01Bot',
+    botToken: '8723278230:AAFNgOwsETRD0V2AZWjOxB804qYnDgSTVCA',
+    chatId: '@CLSSVideo',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'video',
+    description: 'Cơ Sở Video - Bot 01'
+  },
+  {
+    id: 'bot-12',
+    name: 'Cơ Sở Video - Bot 02',
+    username: 'CLSendStorageVideo02Bot',
+    botToken: '8865581783:AAES5O8dQ0wnKG-24lUNzoSlo3M_MWh3anY',
+    chatId: '@CLSSVideo',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'video',
+    description: 'Cơ Sở Video - Bot 02'
+  },
+  {
+    id: 'bot-13',
+    name: 'Cơ Sở Video - Bot 03',
+    username: 'CLSendStorageVideo03Bot',
+    botToken: '8824325576:AAGev7fxc4hS6orcqbOw03naP-0Tmk7BBeo',
+    chatId: '@CLSSVideo',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'video',
+    description: 'Cơ Sở Video - Bot 03'
+  },
+  {
+    id: 'bot-14',
+    name: 'Cơ Sở Video - Bot 04',
+    username: 'CLSendStorageVideo04Bot',
+    botToken: '8965972564:AAHrxAgdKJdxupywAlI87zxvGqkuhb1BaVQ',
+    chatId: '@CLSSVideo',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'video',
+    description: 'Cơ Sở Video - Bot 04'
+  },
+  {
+    id: 'bot-15',
+    name: 'Cơ Sở Video - Bot 05',
+    username: 'CLSendStorageVideo05Bot',
+    botToken: '8775626995:AAGmiBqh7fsSeBhx3qyb3RA4U0sghXaKOfk',
+    chatId: '@CLSSVideo',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'video',
+    description: 'Cơ Sở Video - Bot 05'
+  },
+
+  // --- 4. CƠ SỞ ÂM THANH (@CLSSSound) ---
+  {
+    id: 'bot-16',
+    name: 'Cơ Sở Âm Thanh - Bot 01',
+    username: 'CLSendStorageSound01Bot',
+    botToken: '8684241811:AAH2cautwZ4RUCjfev1n8HJXX_HJVy-MrBs',
+    chatId: '@CLSSSound',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'audio',
+    description: 'Cơ Sở Âm Thanh - Bot 01'
+  },
+  {
+    id: 'bot-17',
+    name: 'Cơ Sở Âm Thanh - Bot 02',
+    username: 'CLSendStorageSound02Bot',
+    botToken: '8860706681:AAGuyXe9wVdfdfRPW5QeU8CRUJWPX_WaM4Q',
+    chatId: '@CLSSSound',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'audio',
+    description: 'Cơ Sở Âm Thanh - Bot 02'
+  },
+  {
+    id: 'bot-18',
+    name: 'Cơ Sở Âm Thanh - Bot 03',
+    username: 'CLSendStorageSound03Bot',
+    botToken: '8783207618:AAGwR1MT3v2uadtwWrsU1JCk_6MgRAGH_A0',
+    chatId: '@CLSSSound',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'audio',
+    description: 'Cơ Sở Âm Thanh - Bot 03'
+  },
+  {
+    id: 'bot-19',
+    name: 'Cơ Sở Âm Thanh - Bot 04',
+    username: 'CLSendStorageSound04Bot',
+    botToken: '8603369577:AAHEXYTeTztwomVH91zRM0pyxCPQR1QidSQ',
+    chatId: '@CLSSSound',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'audio',
+    description: 'Cơ Sở Âm Thanh - Bot 04'
+  },
+  {
+    id: 'bot-20',
+    name: 'Cơ Sở Âm Thanh - Bot 05',
+    username: 'CLSendStorageSound05Bot',
+    botToken: '8993081888:AAEYHdNDFKEBeMDzAbm9NztKSi9BPBUcvVE',
+    chatId: '@CLSSSound',
+    enabled: true,
+    facility: 'sub',
+    supportedTypes: 'audio',
+    description: 'Cơ Sở Âm Thanh - Bot 05'
   }
 ];
 
@@ -265,7 +483,10 @@ export function getAllBotsConfig(): StorageBotInfo[] {
           if (idx === -1) {
             merged.push(master);
           } else {
-            // Keep user updates if present, otherwise restore master defaults
+            // Keep master name updated to standardized 'Cơ Sở Dữ Liệu Tệp - Bot XX'
+            if (master.name && !merged[idx].id.startsWith('custom-bot')) {
+              merged[idx].name = master.name;
+            }
             if (master.botToken && (!merged[idx].botToken || merged[idx].botToken.trim() === '')) {
               merged[idx].botToken = master.botToken;
             }
@@ -534,6 +755,19 @@ export async function uploadToTelegram(
     candidateConfigs.push(customConfig);
   } else {
     const allBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
+    const facilityChannels = getFacilityChannels();
+
+    // Determine target facility channel based on file category
+    let targetFacilityChatId = facilityChannels.default || '@ClsendStorage';
+    if (isAud) {
+      targetFacilityChatId = facilityChannels.audio || targetFacilityChatId;
+    } else if (isVid) {
+      targetFacilityChatId = facilityChannels.video || targetFacilityChatId;
+    } else if (isImg) {
+      targetFacilityChatId = facilityChannels.image || targetFacilityChatId;
+    } else if (isDoc) {
+      targetFacilityChatId = facilityChannels.document || targetFacilityChatId;
+    }
 
     if (isAud) {
       // Prioritize audio-capable bots in round-robin order
@@ -543,13 +777,15 @@ export async function uploadToTelegram(
 
       for (let i = 0; i < audioBots.length; i++) {
         const b = audioBots[(startIdx + i) % audioBots.length];
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
       }
 
       // Add other active bots as fallback
       for (const b of allBots) {
         if (!candidateConfigs.some(c => c.botToken === b.botToken)) {
-          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+          const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
         }
       }
     } else if (isVid) {
@@ -560,13 +796,14 @@ export async function uploadToTelegram(
 
       for (let i = 0; i < videoBots.length; i++) {
         const b = videoBots[(startIdx + i) % videoBots.length];
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
       }
 
       // Add main config as fallback
       const mainConfig = getTelegramConfig();
       if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push(mainConfig);
+        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
       }
     } else if (isImg) {
       // Prioritize image-capable bots in round-robin order
@@ -576,13 +813,15 @@ export async function uploadToTelegram(
 
       for (let i = 0; i < imageBots.length; i++) {
         const b = imageBots[(startIdx + i) % imageBots.length];
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
       }
 
       // Add other active bots as fallback
       for (const b of allBots) {
         if (!candidateConfigs.some(c => c.botToken === b.botToken)) {
-          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+          const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
         }
       }
     } else if (isDoc) {
@@ -593,12 +832,13 @@ export async function uploadToTelegram(
 
       for (let i = 0; i < docBots.length; i++) {
         const b = docBots[(startIdx + i) % docBots.length];
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
       }
 
       const mainConfig = getTelegramConfig();
       if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push(mainConfig);
+        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
       }
     } else {
       // General file: use round-robin across all active bots
@@ -607,12 +847,13 @@ export async function uploadToTelegram(
 
       for (let i = 0; i < allBots.length; i++) {
         const b = allBots[(startIdx + i) % allBots.length];
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: b.chatId });
+        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
+        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
       }
 
       const mainConfig = getTelegramConfig();
       if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push(mainConfig);
+        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
       }
     }
   }
@@ -686,12 +927,30 @@ export async function uploadToTelegram(
         const icon = isAud ? '🎵' : isVid ? '🎬' : isImg ? '🖼️' : isDoc ? '📄' : '📁';
         formData.append('caption', `${icon} CloudSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
 
-        const sendRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
+        let sendRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
           method: 'POST',
           body: formData
         });
 
-        const sendData = await sendRes.json();
+        let sendData = await sendRes.json();
+        // Fallback: If sending to a specific facility channel failed (e.g., chat not found / bot not admin yet),
+        // automatically fallback to master channel @ClsendStorage to ensure 100% upload success!
+        if (!sendData.ok && config.chatId !== '@ClsendStorage') {
+          console.warn(`Gửi vào kênh ${config.chatId} chưa thành công (${sendData.description}), đang lưu tạm vào kênh tổng @ClsendStorage...`);
+          const fallbackForm = new FormData();
+          fallbackForm.append('chat_id', '@ClsendStorage');
+          fallbackForm.append('document', file);
+          fallbackForm.append('caption', `${icon} CloudSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
+          const fallbackRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
+            method: 'POST',
+            body: fallbackForm
+          });
+          const fallbackData = await fallbackRes.json();
+          if (fallbackData.ok) {
+            sendData = fallbackData;
+          }
+        }
+
         if (!sendData.ok) {
           throw new Error(sendData.description || 'Lỗi khi gửi tệp lên máy chủ Telegram.');
         }
@@ -748,4 +1007,30 @@ export async function uploadToTelegram(
   }
 
   throw lastError || new Error('Tất cả các Bot Telegram lưu trữ đều bận hoặc chưa được thêm vào kênh làm Quản trị viên.');
+}
+
+/**
+ * Tiện ích cập nhật nhanh hàng loạt Token cho 20 Bot thuộc 4 Cơ Sở Dữ Liệu Tệp
+ * Hỗ trợ truyền mảng token theo thứ tự hoặc đối tượng { 'bot-06': 'token...' }
+ */
+export function updateBotsTokens(tokens: { [idOrIndex: string]: string } | string[]): void {
+  const all = getAllBotsConfig();
+  if (Array.isArray(tokens)) {
+    tokens.forEach((tok, index) => {
+      if (all[index] && tok && tok.trim()) {
+        all[index].botToken = tok.trim();
+        all[index].enabled = true;
+      }
+    });
+  } else {
+    Object.entries(tokens).forEach(([key, tok]) => {
+      if (!tok || !tok.trim()) return;
+      const bot = all.find(b => b.id === key || b.name.toLowerCase().includes(key.toLowerCase()));
+      if (bot) {
+        bot.botToken = tok.trim();
+        bot.enabled = true;
+      }
+    });
+  }
+  saveAllBotsConfig(all);
 }

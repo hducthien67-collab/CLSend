@@ -74,6 +74,24 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 /**
+ * Convert Blob to Base64 Data URL format ("data:image/...;base64,...")
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Không thể chuyển đổi tệp sang Base64'));
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Main safe download function
  */
 export async function downloadFileSafely(
@@ -257,13 +275,33 @@ export async function downloadFileSafely(
       }
     }
 
-    if (!blobUrl) {
+    if (!blobUrl && !source.startsWith('data:')) {
       throw new Error('Không thể tạo liên kết tải về cho tệp.');
     }
 
-    // Trigger local download via invisible anchor tag
+    let finalHref = source.startsWith('data:') ? source : blobUrl;
+
+    if (!source.startsWith('data:') && blobUrl) {
+      try {
+        let targetBlob = localBlob;
+        if (!targetBlob && blobUrl.startsWith('blob:')) {
+          const resp = await fetch(blobUrl);
+          targetBlob = await resp.blob();
+        }
+        if (targetBlob) {
+          const base64Data = await blobToBase64(targetBlob);
+          if (base64Data) {
+            finalHref = base64Data;
+          }
+        }
+      } catch (e) {
+        console.warn('Base64 conversion fallback to blob URL:', e);
+      }
+    }
+
+    // Trigger local download via invisible anchor tag using Base64 Data URL mechanism
     const a = document.createElement('a');
-    a.href = blobUrl;
+    a.href = finalHref;
     a.download = safeFileName;
     a.rel = 'noopener noreferrer';
     a.style.display = 'none';

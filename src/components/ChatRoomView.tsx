@@ -1574,7 +1574,7 @@ export const ChatRoomView: React.FC = () => {
                   const otherAttachments = msgAttachments.filter(a => !isImageFile(a));
 
                   return (
-                    <React.Fragment key={msg.id}>
+                    <React.Fragment key={msg.id ? `${msg.id}_${index}` : index}>
                       {/* Group Date Timeline Divider */}
                       {showDateHeader && (
                         <div className="flex items-center justify-center my-3 select-none">

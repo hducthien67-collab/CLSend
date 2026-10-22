@@ -1251,7 +1251,7 @@ export const MobileChatView: React.FC = () => {
                 const showDateHeader = index === 0 || currentDateKey !== prevDateKey;
 
                 return (
-                  <React.Fragment key={msg.id}>
+                  <React.Fragment key={msg.id ? `${msg.id}_${index}` : index}>
                     {/* Group Date Timeline Divider */}
                     {showDateHeader && (
                       <div className="flex items-center justify-center my-2 select-none">

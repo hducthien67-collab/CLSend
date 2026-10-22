@@ -75,6 +75,7 @@ import {
   StorageBotInfo, 
   BotSupportedTypes 
 } from '../utils/telegramStorage';
+import { STORAGE_FACILITIES, FacilityAvatarCard, DataStorageAvatarsModal } from './DataStorageAvatars';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -124,6 +125,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   
   // Tab Management
   const [activeTab, setActiveTab] = useState<SettingsTab>('device');
+  const [isStorageAvatarsModalOpen, setIsStorageAvatarsModalOpen] = useState(false);
 
   // Telegram Bots Cluster state (Audio, Videos & Documents)
   const [botsCluster, setBotsCluster] = useState<StorageBotInfo[]>([]);
@@ -2235,19 +2237,33 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* SPECIAL DEV CONSOLE ACCESS (RESTRICTED TO DEVELOPER ONLY - FULLY COMPATIBLE ON MOBILE & PC) */}
               {isDevUser(currentUser?.email) && (
-                <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-emerald-900/20 border border-emerald-500/50 rounded-xl p-3 space-y-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="bg-gradient-to-r from-emerald-950/40 via-slate-900 to-emerald-900/20 border border-emerald-500/50 rounded-2xl p-3.5 space-y-3.5 shadow-xl">
+                  {/* Header Hàng Ngang: Tên, Mô tả & Nút Mở DataStore */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-emerald-500/25">
                     <div>
-                      <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
-                        <Database className="w-3.5 h-3.5 text-emerald-400" />
-                        {t('settings.dev_console_title')}
+                      <div className="text-xs sm:text-sm font-bold text-emerald-300 flex items-center gap-1.5">
+                        <Database className="w-4 h-4 text-emerald-400" />
+                        <span>{t('settings.dev_console_title')}</span>
+                        <span className="text-[9.5px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
+                          Dev Certified
+                        </span>
                       </div>
-                      <div className="text-[10.5px] text-slate-400">
+                      <div className="text-[11px] text-slate-400">
                         {t('settings.dev_console_desc')}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsStorageAvatarsModalOpen(true)}
+                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
+                        title="Mở toàn màn hình kho 4 Avatar DataStorage"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="hidden sm:inline">Phóng to Avatar</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -2258,14 +2274,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             window.location.href = '/?page=datastore';
                           }
                         }}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-950/60 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
                       >
                         <Database className="w-3.5 h-3.5" />
                         <span>{t('settings.open_datastore')}</span>
                       </button>
                     </div>
                   </div>
-                  <div className="text-[9.5px] text-emerald-400/90 italic flex items-center gap-1">
+
+                  {/* 4 ẢNH ĐẠI DIỆN KHÁC NHAU CỦA 4 CƠ SỞ DỮ LIỆU ĐẶT NGAY BÊN CẠNH DATASTORAGE ĐỂ DỄ TẢI VỀ */}
+                  <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Kho 4 Ảnh Đại Diện Kênh DataStorage (Hình ảnh, Tệp, Video, Âm thanh)</span>
+                      </div>
+                      <span className="text-[10.5px] text-emerald-400/90 font-medium">
+                        Icon vẽ riêng ở góc dưới • Tải PNG 512px & SVG
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      {STORAGE_FACILITIES.map((facility) => (
+                        <FacilityAvatarCard key={facility.id} facility={facility} />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="text-[9.5px] text-emerald-400/90 italic flex items-center gap-1 pt-1.5 border-t border-emerald-500/20">
                     <ShieldCheck className="w-3 h-3 shrink-0 text-emerald-400" />
                     <span>{t('settings.dev_responsive_note')}</span>
                   </div>
@@ -2350,6 +2386,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           setSavedSuccess(true);
           setTimeout(() => setSavedSuccess(false), 2500);
         }}
+      />
+
+      {/* MODAL PHÓNG TO KHO 4 AVATAR DATASTORAGE */}
+      <DataStorageAvatarsModal 
+        isOpen={isStorageAvatarsModalOpen} 
+        onClose={() => setIsStorageAvatarsModalOpen(false)} 
       />
     </div>
   );

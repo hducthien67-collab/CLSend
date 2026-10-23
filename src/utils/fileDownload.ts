@@ -59,7 +59,10 @@ function dataUrlToBlob(dataUrl: string): Blob {
   const base64 = dataUrl.substring(commaIndex + 1);
 
   const mimeMatch = header.match(/:(.*?);/);
-  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  let mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  if (mime === 'image/jpg') {
+    mime = 'image/jpeg';
+  }
 
   const binaryString = atob(base64);
   const len = binaryString.length;

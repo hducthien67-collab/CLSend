@@ -19,6 +19,7 @@ import { RulesModal } from './components/RulesModal';
 import { GoogleDisplayNameModal } from './components/auth/GoogleDisplayNameModal';
 import { RobloxModerationModal } from './components/RobloxModerationModal';
 import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
+import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
@@ -55,6 +56,38 @@ function MainApp() {
   const [chatNotification, setChatNotification] = useState<{ id: string; senderName: string; text: string } | null>(null);
   const [copiedNoticeText, setCopiedNoticeText] = useState(false);
   const [errorChatInfo, setErrorChatInfo] = useState<ErrorChatInfo | null>(null);
+  const [showDataChannelAvatars, setShowDataChannelAvatars] = useState(false);
+  const [isStorageAvatarsModalOpen, setIsStorageAvatarsModalOpen] = useState(false);
+
+  // Shortcut: Ctrl + Shift + A + S to reveal data channel avatars and open modal
+  useEffect(() => {
+    let pendingA = false;
+    let lastKeyTime = 0;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'a') {
+          pendingA = true;
+          lastKeyTime = Date.now();
+        } else if (key === 's' && (pendingA || Date.now() - lastKeyTime < 2500)) {
+          e.preventDefault();
+          setShowDataChannelAvatars(true);
+          setIsStorageAvatarsModalOpen(true);
+          pendingA = false;
+        } else if (key === 's' && !pendingA) {
+          e.preventDefault();
+          setShowDataChannelAvatars(true);
+          setIsStorageAvatarsModalOpen(true);
+        }
+      } else {
+        pendingA = false;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const unregister = registerErrorChatListener((info) => {
@@ -744,6 +777,13 @@ function MainApp() {
           window.history.pushState(null, '', '/?page=datastore');
           setIsDatastorePage(true);
         }}
+        showDataChannelAvatars={showDataChannelAvatars}
+      />
+
+      {/* Modal Kho 4 Avatar Kênh Lưu Trữ DataStorage */}
+      <DataStorageAvatarsModal
+        isOpen={isStorageAvatarsModalOpen}
+        onClose={() => setIsStorageAvatarsModalOpen(false)}
       />
 
       {/* DEV Cloud Audit & Progressive Moderation Modal */}

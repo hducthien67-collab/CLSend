@@ -83,6 +83,7 @@ interface SettingsModalProps {
   onOpenRules?: () => void;
   onOpenDevConsole?: () => void;
   onOpenDevPage?: () => void;
+  showDataChannelAvatars?: boolean;
 }
 
 type SettingsTab = 'device' | 'custom_design' | 'account_rules';
@@ -102,7 +103,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose, 
   onOpenRules, 
   onOpenDevConsole,
-  onOpenDevPage 
+  onOpenDevPage,
+  showDataChannelAvatars = false
 }) => {
   const { 
     currentUser, 
@@ -2256,16 +2258,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setIsStorageAvatarsModalOpen(true)}
-                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95"
-                        title="Mở toàn màn hình kho 4 Avatar DataStorage"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="hidden sm:inline">Phóng to Avatar</span>
-                      </button>
-
-                      <button
-                        type="button"
                         onClick={() => {
                           onClose();
                           if (onOpenDevPage) {
@@ -2279,25 +2271,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <Database className="w-3.5 h-3.5" />
                         <span>{t('settings.open_datastore')}</span>
                       </button>
-                    </div>
-                  </div>
-
-                  {/* 4 ẢNH ĐẠI DIỆN KHÁC NHAU CỦA 4 CƠ SỞ DỮ LIỆU ĐẶT NGAY BÊN CẠNH DATASTORAGE ĐỂ DỄ TẢI VỀ */}
-                  <div className="space-y-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Kho 4 Ảnh Đại Diện Kênh DataStorage (Hình ảnh, Tệp, Video, Âm thanh)</span>
-                      </div>
-                      <span className="text-[10.5px] text-emerald-400/90 font-medium">
-                        Icon vẽ riêng ở góc dưới • Tải PNG 512px & SVG
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                      {STORAGE_FACILITIES.map((facility) => (
-                        <FacilityAvatarCard key={facility.id} facility={facility} />
-                      ))}
                     </div>
                   </div>
 

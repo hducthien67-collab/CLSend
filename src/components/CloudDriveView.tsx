@@ -62,7 +62,8 @@ export const CloudDriveView: React.FC = () => {
   const [previewFile, setPreviewFile] = useState<CloudDriveFile | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
-  const [editFileName, setEditFileName] = useState('');
+  const [editFileBaseName, setEditFileBaseName] = useState('');
+  const [editFileExtension, setEditFileExtension] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
@@ -392,14 +393,18 @@ export const CloudDriveView: React.FC = () => {
   // Rename file
   const handleSaveRename = async (file: CloudDriveFile, e: React.FormEvent) => {
     e.preventDefault();
-    if (!editFileName.trim()) return;
+    const trimmedBase = editFileBaseName.trim();
+    if (!trimmedBase) return;
+    const finalName = `${trimmedBase}${editFileExtension}`;
     try {
       await updateDoc(doc(db, 'cloud_files', file.id), {
-        name: editFileName.trim()
+        name: finalName
       });
       setEditingFileId(null);
+      showBottomToast(`Đã đổi tên tệp thành "${finalName}"`);
     } catch (err) {
       console.error('Error renaming file:', err);
+      showBottomToast('Không thể đổi tên tệp. Vui lòng thử lại.', true);
     }
   };
 
@@ -945,20 +950,33 @@ export const CloudDriveView: React.FC = () => {
                   <form
                     onSubmit={(e) => handleSaveRename(file, e)}
                     onClick={(e) => e.stopPropagation()}
-                    className="flex items-center gap-1.5 mb-1"
+                    className="flex items-center gap-1 mb-1"
                   >
                     <input
                       type="text"
-                      value={editFileName}
+                      value={editFileBaseName}
                       autoFocus
-                      onChange={(e) => setEditFileName(e.target.value)}
+                      onChange={(e) => setEditFileBaseName(e.target.value)}
                       className="w-full bg-slate-950 border border-emerald-500 rounded px-2 py-0.5 text-xs text-white"
+                      placeholder="Tên tệp"
                     />
+                    {editFileExtension && (
+                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded shrink-0">
+                        {editFileExtension}
+                      </span>
+                    )}
                     <button
                       type="submit"
-                      className="px-2 py-0.5 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                      className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold shrink-0 cursor-pointer"
                     >
                       Lưu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingFileId(null)}
+                      className="p-0.5 text-slate-400 hover:text-white shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </form>
                 ) : (
@@ -975,7 +993,14 @@ export const CloudDriveView: React.FC = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingFileId(file.id);
-                        setEditFileName(file.name);
+                        const lastDot = file.name.lastIndexOf('.');
+                        if (lastDot !== -1 && lastDot > 0) {
+                          setEditFileBaseName(file.name.substring(0, lastDot));
+                          setEditFileExtension(file.name.substring(lastDot));
+                        } else {
+                          setEditFileBaseName(file.name);
+                          setEditFileExtension('');
+                        }
                       }}
                       className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-white transition-opacity p-0.5"
                     >

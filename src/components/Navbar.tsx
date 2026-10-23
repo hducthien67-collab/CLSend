@@ -26,7 +26,6 @@ import {
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
 import { useLanguage, LanguageCode } from '../context/LanguageContext';
-import { DataStorageAvatarsModal } from './DataStorageAvatars';
 
 interface NavbarProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -57,7 +56,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { currentLang, setLanguage, t, languages } = useLanguage();
   const [isAvatarMenuOpen, setIsAvatarMenuOpen] = React.useState(false);
   const [isLangSubMenuOpen, setIsLangSubMenuOpen] = React.useState(false);
-  const [isAvatarsModalOpen, setIsAvatarsModalOpen] = React.useState(false);
   const isDev = isDevUser(currentUser?.email);
 
   const handleSelectLanguage = (langCode: LanguageCode) => {
@@ -228,23 +226,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
               </div>
 
-              {/* Nút Kho 4 Avatar DataStorage đặt ngay bên cạnh DataStorage để tải về */}
-              <button
-                id="open-storage-avatars-navbar-btn"
-                type="button"
-                onClick={() => setIsAvatarsModalOpen(true)}
-                title="Kho 4 Avatar Kênh Lưu Trữ DataStorage (Hình ảnh, Tệp, Video, Âm thanh) - Tải về PNG 512px & SVG"
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600/25 via-teal-600/25 to-cyan-600/25 hover:from-emerald-600/45 hover:to-cyan-600/45 text-emerald-300 hover:text-white border border-emerald-500/40 hover:border-emerald-400 text-xs font-bold transition-all shadow-sm cursor-pointer group"
-              >
-                <div className="flex -space-x-1 items-center">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 border border-slate-900" title="Hình ảnh" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 border border-slate-900" title="Tài liệu" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-400 border border-slate-900" title="Video" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 border border-slate-900" title="Âm thanh" />
-                </div>
-                <span className="hidden sm:inline">Avatar 4 Kênh</span>
-                <Download className="w-3 h-3 text-emerald-400 group-hover:translate-y-0.5 transition-transform" />
-              </button>
+
             </div>
           )}
 
@@ -520,11 +502,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Modal Kho 4 Avatar Kênh Lưu Trữ DataStorage */}
-      <DataStorageAvatarsModal 
-        isOpen={isAvatarsModalOpen} 
-        onClose={() => setIsAvatarsModalOpen(false)} 
-      />
+
     </header>
   );
 };

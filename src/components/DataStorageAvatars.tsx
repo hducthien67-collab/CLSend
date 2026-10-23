@@ -677,17 +677,177 @@ export async function downloadFacilityPng(facility: StorageFacilityAvatar): Prom
   ctx.fillText('5 BOTS CLUSTER • DATASTORE RELAY', 256, 468);
   ctx.restore();
 
-  // Bottom-right badge circle
+  // Bottom-right custom badge (vòng tròn + icon đặc trưng vẽ trên canvas)
   ctx.save();
-  ctx.translate(395, 395);
+  ctx.translate(320, 320);
+
+  // Outer badge ring
   ctx.beginPath();
-  ctx.arc(0, 0, 56, 0, Math.PI * 2);
-  ctx.fillStyle = accentColor;
+  ctx.arc(75, 75, 68, 0, Math.PI * 2);
+  ctx.fillStyle = id === 'photos' ? '#022c22' : id === 'docs' ? '#451a03' : id === 'video' ? '#4c0519' : '#1e1b4b';
   ctx.fill();
   ctx.lineWidth = 6;
-  ctx.strokeStyle = id === 'photos' ? '#022c22' : id === 'docs' ? '#451a03' : id === 'video' ? '#4c0519' : '#1e1b4b';
+  ctx.strokeStyle = accentColor;
   ctx.stroke();
-  ctx.restore();
+
+  // Inner plate
+  ctx.beginPath();
+  ctx.arc(75, 75, 56, 0, Math.PI * 2);
+  const badgeGrad = ctx.createLinearGradient(75 - 56, 75 - 56, 75 + 56, 75 + 56);
+  if (id === 'photos') {
+    badgeGrad.addColorStop(0, '#10b981');
+    badgeGrad.addColorStop(0.5, '#14b8a6');
+    badgeGrad.addColorStop(1, '#06b6d4');
+  } else if (id === 'docs') {
+    badgeGrad.addColorStop(0, '#f59e0b');
+    badgeGrad.addColorStop(0.5, '#ea580c');
+    badgeGrad.addColorStop(1, '#d97706');
+  } else if (id === 'video') {
+    badgeGrad.addColorStop(0, '#f43f5e');
+    badgeGrad.addColorStop(0.5, '#ec4899');
+    badgeGrad.addColorStop(1, '#a855f7');
+  } else {
+    badgeGrad.addColorStop(0, '#6366f1');
+    badgeGrad.addColorStop(0.5, '#8b5cf6');
+    badgeGrad.addColorStop(1, '#38bdf8');
+  }
+  ctx.fillStyle = badgeGrad;
+  ctx.fill();
+
+  // Inner Icon translation (matching translate(42, 42) in SVG)
+  ctx.save();
+  ctx.translate(42, 42);
+
+  if (id === 'photos') {
+    ctx.fillStyle = '#042f2e';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    roundRect(ctx, 6, 8, 54, 46, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(20, 20, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#fef08a';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(12, 46);
+    ctx.lineTo(24, 32);
+    ctx.lineTo(34, 40);
+    ctx.lineTo(44, 28);
+    ctx.lineTo(54, 46);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  } else if (id === 'docs') {
+    ctx.fillStyle = '#291403';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(12, 6);
+    ctx.lineTo(42, 6);
+    ctx.lineTo(54, 18);
+    ctx.lineTo(54, 58);
+    ctx.lineTo(12, 58);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(42, 6);
+    ctx.lineTo(42, 18);
+    ctx.lineTo(54, 18);
+    ctx.closePath();
+    ctx.fillStyle = '#fbbf24';
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(20, 26); ctx.lineTo(38, 26);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#fde68a';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(20, 36); ctx.lineTo(46, 36);
+    ctx.moveTo(20, 46); ctx.lineTo(40, 46);
+    ctx.stroke();
+  } else if (id === 'video') {
+    ctx.fillStyle = '#1e050f';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    roundRect(ctx, 8, 16, 50, 42, 6);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath();
+    roundRect(ctx, 8, 10, 50, 14, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(16, 10); ctx.lineTo(24, 24);
+    ctx.moveTo(30, 10); ctx.lineTo(38, 24);
+    ctx.moveTo(44, 10); ctx.lineTo(52, 24);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(28, 28);
+    ctx.lineTo(44, 38);
+    ctx.lineTo(28, 48);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  } else {
+    ctx.save();
+    ctx.translate(22, 46);
+    ctx.rotate((-20 * Math.PI) / 180);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 8, 6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(46, 40);
+    ctx.rotate((-20 * Math.PI) / 180);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 8, 6, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(28, 44); ctx.lineTo(28, 16);
+    ctx.moveTo(52, 38); ctx.lineTo(52, 10);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(28, 16);
+    ctx.lineTo(52, 10);
+    ctx.lineTo(52, 18);
+    ctx.lineTo(28, 24);
+    ctx.closePath();
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
+
+  ctx.restore(); // restore inner icon
+  ctx.restore(); // restore badge container
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {

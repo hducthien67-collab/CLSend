@@ -1739,22 +1739,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
               </span>
             </div>
 
-            {/* Nút Xem & Tải 4 Avatar DataStorage đặt ngay bên cạnh DataStorage */}
-            <button
-              type="button"
-              onClick={() => setShowStorageAvatarsModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-cyan-500/20 hover:from-emerald-500/35 hover:to-cyan-500/35 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer ml-1"
-              title="Kho 4 Avatar Kênh Lưu Trữ DataStorage (Hình ảnh, Tệp, Video, Âm thanh) - Tải về PNG 512px & SVG"
-            >
-              <div className="flex -space-x-1 items-center">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 border border-slate-900" title="Hình ảnh" />
-                <span className="w-2 h-2 rounded-full bg-amber-400 border border-slate-900" title="Tệp & Tài liệu" />
-                <span className="w-2 h-2 rounded-full bg-rose-400 border border-slate-900" title="Video" />
-                <span className="w-2 h-2 rounded-full bg-indigo-400 border border-slate-900" title="Âm thanh" />
-              </div>
-              <span className="hidden sm:inline">Avatar 4 Kênh</span>
-              <Download className="w-3 h-3 text-emerald-400" />
-            </button>
+
           </div>
         </div>
 

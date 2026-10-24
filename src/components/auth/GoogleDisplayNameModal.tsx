@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { db } from '../../firebase/config';
+import { doc, setDoc } from 'firebase/firestore';
 import { 
   UserCheck, 
   Sparkles, 
@@ -39,6 +41,10 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
       await updateDisplayName(cleanName);
       await updateSettings({ deviceName: cleanName });
       localStorage.setItem(`cloudsend_google_name_set_${currentUser.uid}`, 'true');
+      localStorage.setItem(`cloudsend_name_configured_${currentUser.uid}`, 'true');
+      if (currentUser?.uid) {
+        setDoc(doc(db, 'users', currentUser.uid), { hasSetName: true, displayName: cleanName }, { merge: true }).catch(() => {});
+      }
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Không thể lưu tên hiển thị. Vui lòng thử lại.');
@@ -58,6 +64,10 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
       // ignore
     }
     localStorage.setItem(`cloudsend_google_name_set_${currentUser.uid}`, 'true');
+    localStorage.setItem(`cloudsend_name_configured_${currentUser.uid}`, 'true');
+    if (currentUser?.uid) {
+      setDoc(doc(db, 'users', currentUser.uid), { hasSetName: true }, { merge: true }).catch(() => {});
+    }
     onClose();
   };
 

@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { db } from '../firebase/config';
 import { collection, addDoc } from 'firebase/firestore';
 import { ChatMessage } from './types';
-import { Flag, X, AlertTriangle, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Flag, X, CheckCircle2 } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
 
 interface ReportMessageModalProps {
   isOpen: boolean;
@@ -23,6 +24,9 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
   currentUserId,
   currentUserName
 }) => {
+  const { currentLang } = useLanguage();
+  const isEn = currentLang === 'en';
+
   const [category, setCategory] = useState<'profanity_bypass' | 'nsfw_18' | 'harassment' | 'spam' | 'other'>('profanity_bypass');
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -30,7 +34,33 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
 
   if (!isOpen || !message) return null;
 
-  const categories = [
+  const categories = isEn ? [
+    {
+      id: 'profanity_bypass',
+      title: 'Profanity Filter Bypass / Personal Insults',
+      desc: 'Using symbols, dots, or disguised slang to curse or insult users'
+    },
+    {
+      id: 'nsfw_18',
+      title: 'Explicit 18+ or Pornographic Media',
+      desc: 'Images, videos, or text containing explicit adult material'
+    },
+    {
+      id: 'harassment',
+      title: 'Harassment / Threats / Cyberbullying',
+      desc: 'Bullying, intimidating, or bothering other members'
+    },
+    {
+      id: 'spam',
+      title: 'Spam / Scam / Phishing Ads',
+      desc: 'Flooding messages, malicious links, or unwanted promotions'
+    },
+    {
+      id: 'other',
+      title: 'Other Community Violations',
+      desc: 'Any inappropriate behavior disrupting the chat experience'
+    }
+  ] : [
     {
       id: 'profanity_bypass',
       title: 'Lách luật chửi bậy / Xúc phạm',
@@ -56,7 +86,7 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
       title: 'Hành vi vi phạm khác',
       desc: 'Bất kỳ hành vi không lành mạnh nào ảnh hưởng đến phòng chat'
     }
-  ] as const;
+  ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,7 +95,7 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
     setSubmitting(true);
     try {
       const selectedCategoryObj = categories.find(c => c.id === category);
-      const categoryTitle = selectedCategoryObj ? selectedCategoryObj.title : 'Vi phạm quy tắc';
+      const categoryTitle = selectedCategoryObj ? selectedCategoryObj.title : (isEn ? 'Rule Violation' : 'Vi phạm quy tắc');
       const finalReason = details.trim() 
         ? `${categoryTitle} - ${details.trim()}`
         : categoryTitle;
@@ -83,7 +113,9 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
         reportedByName: currentUserName,
         reason: finalReason,
         category,
+        categoryTitle,
         status: 'pending',
+        type: 'message_report',
         createdAt: new Date().toISOString(),
         timestamp: Date.now()
       });
@@ -96,7 +128,7 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
       }, 2000);
     } catch (err) {
       console.error('Submit report error:', err);
-      alert('Không thể gửi báo cáo, vui lòng thử lại sau.');
+      alert(isEn ? 'Failed to submit report. Please try again.' : 'Không thể gửi báo cáo, vui lòng thử lại sau.');
       setSubmitting(false);
     }
   };
@@ -114,14 +146,19 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
               <Flag className="w-5 h-5 text-rose-400" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-100">Tố Cáo Vi Phạm Đến DEV</h3>
-              <p className="text-xs text-slate-400">Báo cáo tin nhắn lách luật hoặc có nội dung xấu</p>
+              <h3 className="font-bold text-base text-slate-100">
+                {isEn ? 'Report Violation to DEV' : 'Tố Cáo Vi Phạm Đến DEV'}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {isEn ? 'Report message bypassing rules or containing toxic content' : 'Báo cáo tin nhắn lách luật hoặc có nội dung xấu'}
+              </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            title={isEn ? 'Close' : 'Đóng'}
           >
             <X className="w-5 h-5" />
           </button>
@@ -133,9 +170,13 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
             <div className="w-14 h-14 mx-auto rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h4 className="text-lg font-bold text-white">Đã Gửi Báo Cáo Thành Công!</h4>
+            <h4 className="text-lg font-bold text-white">
+              {isEn ? 'Report Submitted Successfully!' : 'Đã Gửi Báo Cáo Thành Công!'}
+            </h4>
             <p className="text-sm text-slate-300 max-w-sm mx-auto leading-relaxed">
-              Cảm ơn bạn đã tố cáo. Nhà phát triển (DEV) sẽ căn cứ vào báo cáo này trong DataStore để kiểm tra nội dung gốc và xử phạt người vi phạm.
+              {isEn 
+                ? 'Thank you for reporting. The developer (DEV) will review this report in the DataStore to inspect original logs and enforce sanctions.'
+                : 'Cảm ơn bạn đã tố cáo. Nhà phát triển (DEV) sẽ căn cứ vào báo cáo này trong DataStore để kiểm tra nội dung gốc và xử phạt người vi phạm.'}
             </p>
           </div>
         ) : (
@@ -143,18 +184,20 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
             {/* Target message snippet */}
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="font-semibold text-slate-200">Người gửi: {message.senderName}</span>
+                <span className="font-semibold text-slate-200">
+                  {isEn ? `Sender: ${message.senderName}` : `Người gửi: ${message.senderName}`}
+                </span>
                 <span className="text-[11px] text-slate-500">{message.senderDevice}</span>
               </div>
               <p className="text-sm text-slate-300 italic line-clamp-3 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
-                "{message.rawText || message.text || '[Tệp tin đính kèm]'}"
+                "{message.rawText || message.text || (isEn ? '[Attachment file]' : '[Tệp tin đính kèm]')}"
               </p>
             </div>
 
             {/* Category Selection */}
             <div className="space-y-2">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
-                Chọn lý do tố cáo:
+                {isEn ? 'CHOOSE REPORT REASON:' : 'CHỌN LÝ DO TỐ CÁO:'}
               </label>
               <div className="space-y-2">
                 {categories.map((cat) => (
@@ -171,8 +214,8 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
                       name="report-category"
                       value={cat.id}
                       checked={category === cat.id}
-                      onChange={() => setCategory(cat.id)}
-                      className="mt-0.5 text-rose-500 focus:ring-rose-500"
+                      onChange={() => setCategory(cat.id as any)}
+                      className="mt-0.5 text-rose-500 focus:ring-rose-500 accent-rose-500 cursor-pointer"
                     />
                     <div className="flex-1">
                       <div className="text-sm font-semibold text-slate-100">{cat.title}</div>
@@ -186,12 +229,12 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
             {/* Additional Notes */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
-                Ghi chú thêm cho DEV (tùy chọn):
+                {isEn ? 'ADDITIONAL NOTES FOR DEV (OPTIONAL):' : 'GHI CHÚ THÊM CHO DEV (TÙY CHỌN):'}
               </label>
               <textarea
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
-                placeholder="Ví dụ: Người này liên tục chửi bậy bằng cách chèn dấu chấm để lách lọc..."
+                placeholder={isEn ? 'E.g.: This user is spamming profanities with dots to bypass the filter...' : 'Ví dụ: Người này liên tục chửi bậy bằng cách chèn dấu chấm để lách lọc...'}
                 rows={2}
                 className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors resize-none"
               />
@@ -202,17 +245,21 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
                 type="button"
                 onClick={onClose}
                 disabled={submitting}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors"
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 transition-colors cursor-pointer"
               >
-                Hủy
+                {isEn ? 'Cancel' : 'Hủy'}
               </button>
               <button
                 type="submit"
                 disabled={submitting}
-                className="flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all shadow-lg shadow-rose-950/50 disabled:opacity-50"
+                className="flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition-all shadow-lg shadow-rose-950/50 disabled:opacity-50 cursor-pointer"
               >
                 <Flag className="w-3.5 h-3.5" />
-                <span>{submitting ? 'Đang gửi...' : 'Gửi Tố Cáo Đến DEV'}</span>
+                <span>
+                  {submitting 
+                    ? (isEn ? 'Sending...' : 'Đang gửi...') 
+                    : (isEn ? 'Submit Report to DEV' : 'Gửi Tố Cáo Đến DEV')}
+                </span>
               </button>
             </div>
           </form>

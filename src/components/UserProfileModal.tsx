@@ -284,10 +284,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ user, anchor
             </p>
 
             <div className="space-y-2 pt-1 text-xs text-slate-300">
-              {user.email && (
+              {user.isDev && user.email ? (
                 <div className="flex items-center gap-2.5 truncate">
-                  <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="truncate text-slate-200">{user.email}</span>
+                  <Mail className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="truncate text-amber-300 font-mono text-[11px]">{user.email}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2.5 truncate text-slate-400">
+                  <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="truncate text-slate-300">Tài khoản bảo mật (Đã ẩn danh tính thật)</span>
                 </div>
               )}
 

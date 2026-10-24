@@ -23,6 +23,8 @@ export interface UserDevice {
   isEmailVerified?: boolean;
   linkedEmail?: string;
   emailVerifiedAt?: string;
+  acceptedRules?: boolean;
+  hasSetName?: boolean;
 }
 
 export interface EmailVerificationRecord {

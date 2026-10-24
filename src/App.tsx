@@ -23,7 +23,7 @@ import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
-import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { 
   Send, 
   Loader2, 
@@ -44,7 +44,7 @@ import { autoCalibrateAndApplyDpi } from './utils/dpi';
 import { renderClickableText } from './utils/textFormat';
 
 function MainApp() {
-  const { currentUser, loading, settings, verifyEmailCodeAndLink } = useAuth();
+  const { currentUser, loading, settings, verifyEmailCodeAndLink, userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>('send');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDevConsoleOpen, setIsDevConsoleOpen] = useState(false);
@@ -185,6 +185,41 @@ function MainApp() {
     };
   }, []);
 
+  // Global horizontal scroll handler: automatically scroll horizontal containers with vertical mouse wheel (no Shift key required)
+  useEffect(() => {
+    const handleGlobalWheel = (e: WheelEvent) => {
+      // If user is already holding Shift or moving horizontally on touchpad, let default handle it
+      if (e.shiftKey || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || e.deltaY === 0) return;
+
+      let el = e.target as HTMLElement | null;
+      while (el && el !== document.body && el !== document.documentElement) {
+        const style = window.getComputedStyle(el);
+        const hasHorizontalScroll = 
+          (style.overflowX === 'auto' || style.overflowX === 'scroll' || el.classList.contains('overflow-x-auto') || el.classList.contains('no-scrollbar')) &&
+          el.scrollWidth > el.clientWidth;
+        
+        // Element shouldn't be primarily a vertical scrolling container
+        const hasVerticalScroll = 
+          (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+          el.scrollHeight > el.clientHeight;
+
+        if (hasHorizontalScroll && !hasVerticalScroll) {
+          const canScrollLeft = e.deltaY < 0 && el.scrollLeft > 0;
+          const canScrollRight = e.deltaY > 0 && el.scrollLeft < el.scrollWidth - el.clientWidth;
+          if (canScrollLeft || canScrollRight) {
+            e.preventDefault();
+            el.scrollLeft += e.deltaY;
+            return;
+          }
+        }
+        el = el.parentElement;
+      }
+    };
+
+    window.addEventListener('wheel', handleGlobalWheel, { passive: false });
+    return () => window.removeEventListener('wheel', handleGlobalWheel);
+  }, []);
+
   // Active view mode: follows manual override if user explicitly clicked toggle during this screen size,
   // otherwise 100% automatically follows device DPI / viewport width
   const isMobileMode = manualViewOverride !== null ? (manualViewOverride === 'mobile') : isMobileScreen;
@@ -269,30 +304,52 @@ function MainApp() {
     }
   }, [currentUser, verifyEmailCodeAndLink]);
 
-  // Check if first-time login / register needs to accept community rules
+  // Check if first-time login / register needs to accept community rules & configure display name
   useEffect(() => {
     if (!currentUser) return;
+
+    // Track user login count in localStorage and check if returning user
+    const userLoginCountKey = `cloudsend_login_count_${currentUser.uid}`;
+    const prevCount = parseInt(localStorage.getItem(userLoginCountKey) || '0', 10);
+    const newCount = prevCount + 1;
+    localStorage.setItem(userLoginCountKey, String(newCount));
+
+    // Priority for users logging in more than once ("nếu người dùng đăng nhập trên 1 lần thì sẽ ko cần hiện cái bảng chấp nhận điều khoản và đặt tên nếu đã đặt tên hoặc ko thích đặt")
+    const isReturningUser = newCount > 1 || prevCount >= 1;
+
+    // 1. Mandatory rules modal:
     const userAccepted = localStorage.getItem(`cloudsend_rules_accepted_${currentUser.uid}`) === 'true';
     const globalAccepted = localStorage.getItem('cloudsend_rules_accepted') === 'true';
-    if (!userAccepted && !globalAccepted) {
+    const profileAccepted = Boolean(userProfile?.acceptedRules);
+
+    if (!isReturningUser && !userAccepted && !globalAccepted && !profileAccepted) {
       setIsMandatoryRules(true);
       setIsRulesOpen(true);
+    } else {
+      setIsMandatoryRules(false);
+      setIsRulesOpen(false);
     }
 
-    // Check if first-time Google login needs to configure display name
+    // 2. Google Display Name modal:
     const isGoogle = Boolean(
       auth.currentUser?.providerData?.some((p: any) => p.providerId === 'google.com') ||
       (currentUser.email && !currentUser.email.includes('@cloudsend.local') && !currentUser.email.startsWith('guest_') && Boolean(currentUser.photoURL))
     );
-    const googleNamePrompted = localStorage.getItem(`cloudsend_google_name_set_${currentUser.uid}`) === 'true';
-    if (isGoogle && !googleNamePrompted) {
+    const googleNamePrompted = localStorage.getItem(`cloudsend_google_name_set_${currentUser.uid}`) === 'true' ||
+      localStorage.getItem(`cloudsend_name_configured_${currentUser.uid}`) === 'true';
+    const hasSetName = Boolean(userProfile?.hasSetName || (userProfile?.displayName && userProfile.displayName !== currentUser.email?.split('@')[0]));
+
+    if (isGoogle && !googleNamePrompted && !isReturningUser && !hasSetName) {
       setIsGoogleDisplayNameOpen(true);
+    } else {
+      setIsGoogleDisplayNameOpen(false);
     }
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, userProfile?.hasSetName, userProfile?.acceptedRules]);
 
   const handleAcceptRules = () => {
     if (currentUser?.uid) {
       localStorage.setItem(`cloudsend_rules_accepted_${currentUser.uid}`, 'true');
+      setDoc(doc(db, 'users', currentUser.uid), { acceptedRules: true }, { merge: true }).catch(() => {});
     }
     localStorage.setItem('cloudsend_rules_accepted', 'true');
     setIsRulesOpen(false);

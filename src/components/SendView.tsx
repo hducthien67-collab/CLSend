@@ -149,10 +149,10 @@ export const SendView: React.FC = () => {
       setUrlModalValue('');
       setIsUrlModalOpen(false);
       setShowQuickChoiceModal(false);
-      setStatusMessage(`🔗 Đã thêm URL thành công: ${fileName}`);
+      setStatusMessage(currentLang === 'en' ? `🔗 Added URL successfully: ${fileName}` : `🔗 Đã thêm URL thành công: ${fileName}`);
       setTimeout(() => setStatusMessage(null), 3000);
     } catch {
-      setStatusMessage('⚠️ URL không hợp lệ. Vui lòng kiểm tra lại định dạng https://...');
+      setStatusMessage(currentLang === 'en' ? '⚠️ Invalid URL. Please check the format https://...' : '⚠️ URL không hợp lệ. Vui lòng kiểm tra lại định dạng https://...');
       setTimeout(() => setStatusMessage(null), 3000);
     }
   };
@@ -387,7 +387,9 @@ export const SendView: React.FC = () => {
           e.preventDefault();
           handleFilesAdded(e.clipboardData.files);
           setMode('file');
-          setStatusMessage(`📋 Đã nhận ${e.clipboardData.files.length} tệp từ phím tắt Ctrl+V.`);
+          setStatusMessage(currentLang === 'en'
+            ? `📋 Received ${e.clipboardData.files.length} file(s) from Ctrl+V.`
+            : `📋 Đã nhận ${e.clipboardData.files.length} tệp từ phím tắt Ctrl+V.`);
           setTimeout(() => setStatusMessage(null), 3500);
           return;
         }
@@ -398,7 +400,9 @@ export const SendView: React.FC = () => {
           e.preventDefault();
           setTextContent(text);
           setMode('text');
-          setStatusMessage('📋 Đã nhận văn bản từ phím tắt Ctrl+V.');
+          setStatusMessage(currentLang === 'en'
+            ? '📋 Received text from Ctrl+V.'
+            : '📋 Đã nhận văn bản từ phím tắt Ctrl+V.');
           setTimeout(() => setStatusMessage(null), 3500);
         }
       }
@@ -406,7 +410,7 @@ export const SendView: React.FC = () => {
 
     window.addEventListener('paste', handleGlobalPaste);
     return () => window.removeEventListener('paste', handleGlobalPaste);
-  }, []);
+  }, [currentLang]);
 
   // Global drag & drop handler for the entire window
   useEffect(() => {
@@ -423,7 +427,9 @@ export const SendView: React.FC = () => {
       if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
         handleFilesAdded(e.dataTransfer.files);
         setMode('file');
-        setStatusMessage(`📂 Đã nhận ${e.dataTransfer.files.length} tệp kéo thả vào vùng gửi.`);
+        setStatusMessage(currentLang === 'en'
+          ? `📂 Received ${e.dataTransfer.files.length} dropped file(s) in send area.`
+          : `📂 Đã nhận ${e.dataTransfer.files.length} tệp kéo thả vào vùng gửi.`);
         setTimeout(() => setStatusMessage(null), 3500);
       }
     };
@@ -435,7 +441,7 @@ export const SendView: React.FC = () => {
       window.removeEventListener('dragover', handleWindowDragOver);
       window.removeEventListener('drop', handleWindowDrop);
     };
-  }, []);
+  }, [currentLang]);
 
   // Handle file addition (supports multiple files from local disk with strict security checks)
   const handleFilesAdded = async (fileList: FileList | File[]) => {
@@ -452,14 +458,18 @@ export const SendView: React.FC = () => {
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        setStatusMessage(`Tệp "${f.name}" (${formatFileSize(f.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
+        setStatusMessage(currentLang === 'en'
+          ? `File "${f.name}" (${formatFileSize(f.size)}) exceeds maximum limit of ${MAX_FILE_SIZE_LABEL}.`
+          : `Tệp "${f.name}" (${formatFileSize(f.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
       } else {
         validFiles.push(f);
       }
     }
 
     if (blockedFiles.length > 0) {
-      setStatusMessage(`🚫 Đã từ chối ${blockedFiles.length} tệp [${blockedFiles.slice(0, 2).join(', ')}] vì chứa định dạng nguy hiểm.`);
+      setStatusMessage(currentLang === 'en'
+        ? `🚫 Rejected ${blockedFiles.length} file(s) [${blockedFiles.slice(0, 2).join(', ')}] due to unsafe file format.`
+        : `🚫 Đã từ chối ${blockedFiles.length} tệp [${blockedFiles.slice(0, 2).join(', ')}] vì chứa định dạng nguy hiểm.`);
     }
 
     if (validFiles.length === 0) return;
@@ -528,7 +538,9 @@ export const SendView: React.FC = () => {
       }
     }
     setFileThumbnails(prev => ({ ...prev, ...newThumbs }));
-    setStatusMessage(`Đã thêm ${newItems.length} tệp từ Kho Cloud vào danh sách gửi.`);
+    setStatusMessage(currentLang === 'en'
+      ? `Added ${newItems.length} file(s) from Cloud Drive to send list.`
+      : `Đã thêm ${newItems.length} tệp từ Kho Cloud vào danh sách gửi.`);
   };
 
   const handleRemoveFile = (index: number) => {
@@ -565,7 +577,9 @@ export const SendView: React.FC = () => {
   const handlePasteAction = async () => {
     // Check if Clipboard API is supported
     if (!navigator.clipboard) {
-      setStatusMessage('ℹ️ Trình duyệt chưa hỗ trợ đọc trực tiếp. Bạn hãy nhấn phím Ctrl + V để dán ngay.');
+      setStatusMessage(currentLang === 'en'
+        ? 'ℹ️ Browser does not support direct clipboard reading. Press Ctrl + V to paste.'
+        : 'ℹ️ Trình duyệt chưa hỗ trợ đọc trực tiếp. Bạn hãy nhấn phím Ctrl + V để dán ngay.');
       setTimeout(() => setStatusMessage(null), 4500);
       return;
     }
@@ -589,7 +603,9 @@ export const SendView: React.FC = () => {
           if (files.length > 0) {
             handleFilesAdded(files);
             setMode('file');
-            setStatusMessage(`📋 Đã dán thành công ${files.length} ảnh/tệp từ bộ nhớ tạm!`);
+            setStatusMessage(currentLang === 'en'
+              ? `📋 Successfully pasted ${files.length} image(s)/file(s) from clipboard!`
+              : `📋 Đã dán thành công ${files.length} ảnh/tệp từ bộ nhớ tạm!`);
             setTimeout(() => setStatusMessage(null), 3500);
             return;
           }
@@ -604,7 +620,9 @@ export const SendView: React.FC = () => {
         if (text && text.trim()) {
           setTextContent(text);
           setMode('text');
-          setStatusMessage('📋 Đã dán thành công nội dung văn bản từ bộ nhớ tạm!');
+          setStatusMessage(currentLang === 'en'
+            ? '📋 Successfully pasted text content from clipboard!'
+            : '📋 Đã dán thành công nội dung văn bản từ bộ nhớ tạm!');
           setTimeout(() => setStatusMessage(null), 3500);
           return;
         }
@@ -649,7 +667,9 @@ export const SendView: React.FC = () => {
       sendDirectTextToPeer(targetDeviceForQuickChoice, modalTextValue);
       setTargetDeviceForQuickChoice(null);
     } else if (clean) {
-      setStatusMessage('✓ Đã chuẩn bị tin nhắn văn bản. Chọn thiết bị bên dưới để gửi!');
+      setStatusMessage(currentLang === 'en'
+        ? '✓ Text message ready. Select a device below to send!'
+        : '✓ Đã chuẩn bị tin nhắn văn bản. Chọn thiết bị bên dưới để gửi!');
       setTimeout(() => setStatusMessage(null), 3500);
     }
   };
@@ -665,7 +685,7 @@ export const SendView: React.FC = () => {
     try {
       const payload: any = {
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || currentUser.displayName || 'Người dùng',
+        senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
         senderDevice: settings.deviceName,
         receiverId: target.uid,
         receiverName: target.displayName || target.deviceName,
@@ -680,12 +700,16 @@ export const SendView: React.FC = () => {
       }
 
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'success' }));
-      setStatusMessage(`Đã gửi tin nhắn thành công đến ${target.deviceName}!`);
+      setStatusMessage(currentLang === 'en'
+        ? `Message sent successfully to ${target.deviceName}!`
+        : `Đã gửi tin nhắn thành công đến ${target.deviceName}!`);
       setTimeout(() => setStatusMessage(null), 3500);
     } catch (err: any) {
       console.error('Send text error:', err);
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'error' }));
-      setStatusMessage('Lỗi khi gửi tin nhắn. Vui lòng thử lại.');
+      setStatusMessage(currentLang === 'en'
+        ? 'Error sending message. Please try again.'
+        : 'Lỗi khi gửi tin nhắn. Vui lòng thử lại.');
       setTimeout(() => setStatusMessage(null), 4000);
     } finally {
       setSendingTargetId(null);
@@ -716,7 +740,9 @@ export const SendView: React.FC = () => {
     const hasText = textContent.trim().length > 0;
 
     if (!hasFiles && !hasText) {
-      setStatusMessage('Vui lòng chọn tệp tin hoặc nhập văn bản cần gửi.');
+      setStatusMessage(currentLang === 'en'
+        ? 'Please select files or enter text to send.'
+        : 'Vui lòng chọn tệp tin hoặc nhập văn bản cần gửi.');
       return;
     }
 
@@ -731,7 +757,9 @@ export const SendView: React.FC = () => {
           const item = selectedFiles[i];
           const currentNumber = i + 1;
           setUploadProgress(Math.round((i / totalFiles) * 100) + 1);
-          setUploadProgressText(`Đang xử lý tệp ${currentNumber}/${totalFiles}: "${item.name}"...`);
+          setUploadProgressText(currentLang === 'en'
+            ? `Processing file ${currentNumber}/${totalFiles}: "${item.name}"...`
+            : `Đang xử lý tệp ${currentNumber}/${totalFiles}: "${item.name}"...`);
 
           let fileUrl = '';
           let serverThumbnail = fileThumbnails[item.name] || item.thumbnail || '';
@@ -742,7 +770,9 @@ export const SendView: React.FC = () => {
             const fileShare = 100 / totalFiles;
             const overall = Math.min(99, Math.round((i + 1) * fileShare));
             setUploadProgress(overall);
-            setUploadProgressText(`Đã chuẩn bị tệp Cloud ${currentNumber}/${totalFiles}: "${item.name}"...`);
+            setUploadProgressText(currentLang === 'en'
+              ? `Prepared cloud file ${currentNumber}/${totalFiles}: "${item.name}"...`
+              : `Đã chuẩn bị tệp Cloud ${currentNumber}/${totalFiles}: "${item.name}"...`);
           } else if (item.file) {
             // Local file: upload to server
             try {
@@ -750,7 +780,9 @@ export const SendView: React.FC = () => {
                 const fileShare = 100 / totalFiles;
                 const overall = Math.min(99, Math.round(i * fileShare + (pct / 100) * fileShare));
                 setUploadProgress(overall);
-                setUploadProgressText(`Đang gửi tệp ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`);
+                setUploadProgressText(currentLang === 'en'
+                  ? `Sending file ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`
+                  : `Đang gửi tệp ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`);
               });
               fileUrl = uploaded.url;
               if (uploaded.thumbnail) {
@@ -770,13 +802,15 @@ export const SendView: React.FC = () => {
 
           if (!safeUrl || !safeUrl.trim()) {
             console.error(`Không thể gửi tệp "${item.name}" do lỗi kết nối lưu trữ.`);
-            alert(`Không thể gửi tệp "${item.name}" do không thể kết nối lưu trữ lên máy chủ. Vui lòng thử lại.`);
+            alert(currentLang === 'en'
+              ? `Unable to send "${item.name}" due to storage upload failure. Please try again.`
+              : `Không thể gửi tệp "${item.name}" do không thể kết nối lưu trữ lên máy chủ. Vui lòng thử lại.`);
             continue;
           }
 
           const payload: any = {
             senderId: currentUser.uid,
-            senderName: userProfile?.displayName || currentUser.displayName || 'Người dùng',
+            senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
             senderDevice: settings.deviceName,
             receiverId: target.uid,
             receiverName: target.displayName || target.deviceName,
@@ -793,13 +827,15 @@ export const SendView: React.FC = () => {
         }
 
         setUploadProgress(100);
-        setUploadProgressText(`Hoàn tất gửi ${totalFiles} tệp!`);
+        setUploadProgressText(currentLang === 'en'
+          ? `Completed sending ${totalFiles} file(s)!`
+          : `Hoàn tất gửi ${totalFiles} tệp!`);
       }
 
       if (hasText) {
         const payload: any = {
           senderId: currentUser.uid,
-          senderName: userProfile?.displayName || currentUser.displayName || 'Người dùng',
+          senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
           senderDevice: settings.deviceName,
           receiverId: target.uid,
           receiverName: target.displayName || target.deviceName,
@@ -816,10 +852,16 @@ export const SendView: React.FC = () => {
 
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'success' }));
       const msgDesc = hasFiles && hasText
-        ? `Đã chuyển thành công ${selectedFiles.length} tệp & tin nhắn đến ${target.deviceName}!`
+        ? (currentLang === 'en'
+            ? `Transferred ${selectedFiles.length} file(s) & message to ${target.deviceName} successfully!`
+            : `Đã chuyển thành công ${selectedFiles.length} tệp & tin nhắn đến ${target.deviceName}!`)
         : hasFiles
-        ? `Đã chuyển thành công ${selectedFiles.length} tệp đến ${target.deviceName}!`
-        : `Đã gửi tin nhắn thành công đến ${target.deviceName}!`;
+        ? (currentLang === 'en'
+            ? `Transferred ${selectedFiles.length} file(s) to ${target.deviceName} successfully!`
+            : `Đã chuyển thành công ${selectedFiles.length} tệp đến ${target.deviceName}!`)
+        : (currentLang === 'en'
+            ? `Message sent to ${target.deviceName} successfully!`
+            : `Đã gửi tin nhắn thành công đến ${target.deviceName}!`);
       setStatusMessage(msgDesc);
 
       // Clear/Reset selection when sent successfully
@@ -839,7 +881,9 @@ export const SendView: React.FC = () => {
     } catch (error: any) {
       console.error('Send error:', error);
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'error' }));
-      setStatusMessage(error?.message || 'Lỗi khi tải hoặc gửi dữ liệu. Vui lòng thử lại.');
+      setStatusMessage(error?.message || (currentLang === 'en'
+        ? 'Error uploading or sending data. Please try again.'
+        : 'Lỗi khi tải hoặc gửi dữ liệu. Vui lòng thử lại.'));
       setSendingTargetId(null);
     }
   };
@@ -888,8 +932,12 @@ export const SendView: React.FC = () => {
       setOnlineDevices(liveDevices);
       setStatusMessage(
         liveDevices.length > 0 
-          ? `Đã cập nhật: Phát hiện ${liveDevices.length} thiết bị đang trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn ${toPurgeDocIds.length} thiết bị cũ)` : ''}.` 
-          : `Đã cập nhật: Hiện không có thiết bị nào khác trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn dẹp ${toPurgeDocIds.length} thiết bị cũ đã tắt)` : ''}.`
+          ? (currentLang === 'en'
+              ? `Updated: Detected ${liveDevices.length} device(s) online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`
+              : `Đã cập nhật: Phát hiện ${liveDevices.length} thiết bị đang trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn ${toPurgeDocIds.length} thiết bị cũ)` : ''}.`)
+          : (currentLang === 'en'
+              ? `Updated: No other devices currently online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`
+              : `Đã cập nhật: Hiện không có thiết bị nào khác trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn dẹp ${toPurgeDocIds.length} thiết bị cũ đã tắt)` : ''}.`)
       );
       setTimeout(() => setStatusMessage(null), 5000);
     } catch (err) {
@@ -938,7 +986,9 @@ export const SendView: React.FC = () => {
         if (prev.some(d => d.connectCode === 'CLSEND')) return prev;
         return [CLSEND_DEMO_DEVICE, ...prev];
       });
-      setStatusMessage(`Đã kết nối thành công với "CloudSend Official Relay" (Mã #CLSEND)! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`);
+      setStatusMessage(currentLang === 'en'
+        ? 'Connected successfully to "CloudSend Official Relay" (Code #CLSEND)! Click "Send to this device" below to transfer.'
+        : 'Đã kết nối thành công với "CloudSend Official Relay" (Mã #CLSEND)! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.');
       setTimeout(() => setStatusMessage(null), 6000);
       setIsSearchingCode(false);
       return;
@@ -956,13 +1006,17 @@ export const SendView: React.FC = () => {
       }
 
       if (snap.empty) {
-        setStatusMessage(`Không tìm thấy thiết bị nào với mã #${rawCode}. Vui lòng kiểm tra lại mã trên máy người nhận.`);
+        setStatusMessage(currentLang === 'en'
+          ? `No device found with code #${rawCode}. Please check code on receiver's screen.`
+          : `Không tìm thấy thiết bị nào với mã #${rawCode}. Vui lòng kiểm tra lại mã trên máy người nhận.`);
         setTimeout(() => setStatusMessage(null), 5000);
       } else {
         const foundDoc = snap.docs[0];
         const data = { id: foundDoc.id, ...foundDoc.data({ serverTimestamps: 'estimate' }) } as unknown as PresenceDevice;
         if (data.deviceId === getClientDeviceId()) {
-          setStatusMessage('Đây là mã ghép của chính thiết bị hiện tại của bạn!');
+          setStatusMessage(currentLang === 'en'
+            ? 'This is the pair code of your own current device!'
+            : 'Đây là mã ghép của chính thiết bị hiện tại của bạn!');
           setTimeout(() => setStatusMessage(null), 4000);
         } else {
           setOnlineDevices((prev) => {
@@ -971,7 +1025,9 @@ export const SendView: React.FC = () => {
             }
             return [data, ...prev];
           });
-          setStatusMessage(`Đã kết nối thành công với "${data.deviceName}" (${data.displayName})! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`);
+          setStatusMessage(currentLang === 'en'
+            ? `Connected successfully to "${data.deviceName}" (${data.displayName})! Click "Send to this device" below to transfer.`
+            : `Đã kết nối thành công với "${data.deviceName}" (${data.displayName})! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`);
           setTimeout(() => setStatusMessage(null), 6000);
         }
       }
@@ -1148,12 +1204,13 @@ export const SendView: React.FC = () => {
                     </div>
                     <div className="text-left">
                       <span className="text-xs sm:text-sm font-bold text-white block">
-                        Đã chọn {selectedFiles.length > 0 ? `${selectedFiles.length} tệp tin` : ''}
+                        {currentLang === 'en' ? 'Selected ' : 'Đã chọn '}
+                        {selectedFiles.length > 0 ? `${selectedFiles.length} ${currentLang === 'en' ? 'file(s)' : 'tệp tin'}` : ''}
                         {selectedFiles.length > 0 && textContent.trim() ? ' & ' : ''}
-                        {textContent.trim() ? '1 tin nhắn văn bản' : ''}
+                        {textContent.trim() ? (currentLang === 'en' ? '1 text message' : '1 tin nhắn văn bản') : ''}
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        {selectedFiles.length > 0 && `Tổng: ${formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))} • `}Sẵn sàng gửi
+                        {selectedFiles.length > 0 && `${currentLang === 'en' ? 'Total' : 'Tổng'}: ${formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))} • `}{currentLang === 'en' ? 'Ready to send' : 'Sẵn sàng gửi'}
                       </span>
                     </div>
                   </div>
@@ -1168,7 +1225,7 @@ export const SendView: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <AlignLeft className="w-3 h-3 text-emerald-400" />
-                      <span>{textContent.trim() ? 'Sửa văn bản' : 'Thêm văn bản'}</span>
+                      <span>{textContent.trim() ? (currentLang === 'en' ? 'Edit text' : 'Sửa văn bản') : (currentLang === 'en' ? 'Add text' : 'Thêm văn bản')}</span>
                     </button>
                     <button
                       type="button"
@@ -1179,7 +1236,7 @@ export const SendView: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <Plus className="w-3 h-3 text-emerald-400" />
-                      <span>Thêm tệp</span>
+                      <span>{currentLang === 'en' ? 'Add file' : 'Thêm tệp'}</span>
                     </button>
                     <button
                       type="button"
@@ -1190,7 +1247,7 @@ export const SendView: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <Trash2 className="w-3 h-3 text-rose-400" />
-                      <span>Xóa hết</span>
+                      <span>{currentLang === 'en' ? 'Clear all' : 'Xóa hết'}</span>
                     </button>
                   </div>
                 </div>
@@ -1204,9 +1261,9 @@ export const SendView: React.FC = () => {
                           <AlignLeft className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <span className="text-xs font-bold text-white block">Tin nhắn văn bản</span>
+                          <span className="text-xs font-bold text-white block">{currentLang === 'en' ? 'Text message' : 'Tin nhắn văn bản'}</span>
                           <span className="text-[10px] text-slate-400 block">
-                            {textContent.split(/\s+/).filter(Boolean).length} từ • {textContent.length} ký tự
+                            {textContent.split(/\s+/).filter(Boolean).length} {currentLang === 'en' ? 'words' : 'từ'} • {textContent.length} {currentLang === 'en' ? 'chars' : 'ký tự'}
                           </span>
                         </div>
                       </div>
@@ -1214,7 +1271,7 @@ export const SendView: React.FC = () => {
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          title="Chỉnh sửa tin nhắn này"
+                          title={currentLang === 'en' ? 'Edit this message' : 'Chỉnh sửa tin nhắn này'}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleOpenTextModal(textContent);
@@ -1222,11 +1279,11 @@ export const SendView: React.FC = () => {
                           className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-semibold flex items-center gap-1 transition-colors"
                         >
                           <Edit3 className="w-3 h-3 text-sky-400" />
-                          <span>Sửa</span>
+                          <span>{currentLang === 'en' ? 'Edit' : 'Sửa'}</span>
                         </button>
                         <button
                           type="button"
-                          title="Xóa tin nhắn này"
+                          title={currentLang === 'en' ? 'Delete this message' : 'Xóa tin nhắn này'}
                           onClick={(e) => {
                             e.stopPropagation();
                             setTextContent('');
@@ -1324,7 +1381,7 @@ export const SendView: React.FC = () => {
 
                           <button
                             type="button"
-                            title="Xóa tệp này"
+                            title={currentLang === 'en' ? 'Remove this file' : 'Xóa tệp này'}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleRemoveFile(idx);
@@ -1340,7 +1397,7 @@ export const SendView: React.FC = () => {
                 )}
 
                 <p className="text-[11px] text-emerald-400 font-medium text-center pt-0.5">
-                  ✓ Chọn thiết bị ở danh sách bên dưới để truyền ngay
+                  ✓ {currentLang === 'en' ? 'Select a device from the list below to send now' : 'Chọn thiết bị ở danh sách bên dưới để truyền ngay'}
                 </p>
               </div>
             ) : (
@@ -1550,19 +1607,6 @@ export const SendView: React.FC = () => {
                 {t('send.scanning_sub')}
               </p>
             </div>
-            
-            {/* School Network Tips */}
-            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 max-w-lg mx-auto text-left space-y-2 text-xs">
-              <div className="flex items-center gap-2 text-amber-300 font-semibold">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>{t('send.school_tip_title')}</span>
-              </div>
-              <ul className="text-slate-300 space-y-1 list-disc list-inside text-[11px] leading-relaxed">
-                <li>{t('send.school_tip_1')}</li>
-                <li>{t('send.school_tip_2')}</li>
-                <li>{t('send.school_tip_3')}</li>
-              </ul>
-            </div>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1667,9 +1711,9 @@ export const SendView: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <UploadCloud className="w-4 h-4 text-emerald-400" />
-              Lịch sử tệp bạn đã gửi ({sentTransfers.length})
+              {currentLang === 'en' ? `Sent files history (${sentTransfers.length})` : `Lịch sử tệp bạn đã gửi (${sentTransfers.length})`}
             </h3>
-            <span className="text-[11px] text-slate-400">Ảnh và tệp gần đây</span>
+            <span className="text-[11px] text-slate-400">{currentLang === 'en' ? 'Recent photos and files' : 'Ảnh và tệp gần đây'}</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1687,7 +1731,7 @@ export const SendView: React.FC = () => {
                       <div 
                         onClick={() => setViewingImage(item.fileData)}
                         className="relative group cursor-pointer w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0"
-                        title="Bấm để xem ảnh lớn"
+                        title={currentLang === 'en' ? 'Click to view full image' : 'Bấm để xem ảnh lớn'}
                       >
                         <img src={item.fileData} alt={item.fileName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                         <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -1706,15 +1750,15 @@ export const SendView: React.FC = () => {
                           <span>{item.fileName}</span>
                         ) : item.textContent ? (
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-slate-400 font-normal">Gửi:</span>
+                            <span className="text-slate-400 font-normal">{currentLang === 'en' ? 'Sent:' : 'Gửi:'}</span>
                             {renderClickableText(item.textContent, true, 'text-emerald-300 underline font-semibold hover:text-white inline-flex items-center gap-1')}
                           </div>
                         ) : (
-                          'Tệp tin'
+                          currentLang === 'en' ? 'File' : 'Tệp tin'
                         )}
                       </div>
                       <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                        Tới: <strong className="text-slate-300">{item.receiverName}</strong> • {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {currentLang === 'en' ? 'To:' : 'Tới:'} <strong className="text-slate-300">{item.receiverName}</strong> • {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                   </div>
@@ -1722,23 +1766,23 @@ export const SendView: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     {item.status === 'completed' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Đã nhận
+                        <CheckCircle2 className="w-3 h-3" /> {currentLang === 'en' ? 'Received' : 'Đã nhận'}
                       </span>
                     )}
                     {item.status === 'pending' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">
-                        Đang chờ
+                        {currentLang === 'en' ? 'Pending' : 'Đang chờ'}
                       </span>
                     )}
                     {item.status === 'declined' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20 font-semibold">
-                        Từ chối
+                        {currentLang === 'en' ? 'Declined' : 'Từ chối'}
                       </span>
                     )}
 
                     <button
                       type="button"
-                      title="Xóa bản ghi này"
+                      title={currentLang === 'en' ? 'Delete this record' : 'Xóa bản ghi này'}
                       onClick={() => handleDeleteSentItem(item.id)}
                       className="p-1 rounded text-slate-500 hover:text-rose-400 transition-colors"
                     >
@@ -1773,7 +1817,7 @@ export const SendView: React.FC = () => {
             >
               <X className="w-5 h-5" />
             </button>
-            <img src={viewingImage} alt="Xem trước" className="max-w-full max-h-[80vh] rounded-xl object-contain mx-auto shadow-2xl" />
+            <img src={viewingImage} alt={currentLang === 'en' ? 'Preview' : 'Xem trước'} className="max-w-full max-h-[80vh] rounded-xl object-contain mx-auto shadow-2xl" />
           </div>
         </div>
       )}
@@ -1797,8 +1841,12 @@ export const SendView: React.FC = () => {
                   <Send className="w-4 h-4" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="text-sm sm:text-base font-bold text-white truncate">Gửi tới {targetDeviceForQuickChoice.deviceName}</h3>
-                  <p className="text-[11px] text-slate-400">Chọn loại nội dung muốn gửi:</p>
+                  <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                    {currentLang === 'en' ? `Send to ${targetDeviceForQuickChoice.deviceName}` : `Gửi tới ${targetDeviceForQuickChoice.deviceName}`}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {currentLang === 'en' ? 'Select content type to send:' : 'Chọn loại nội dung muốn gửi:'}
+                  </p>
                 </div>
               </div>
               <button
@@ -1828,7 +1876,7 @@ export const SendView: React.FC = () => {
                   <FileText className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  Tập tin
+                  {currentLang === 'en' ? 'File' : 'Tập tin'}
                 </span>
               </button>
 
@@ -1845,7 +1893,7 @@ export const SendView: React.FC = () => {
                   <Folder className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  Thư mục
+                  {currentLang === 'en' ? 'Folder' : 'Thư mục'}
                 </span>
               </button>
 
@@ -1863,7 +1911,7 @@ export const SendView: React.FC = () => {
                   <AlignLeft className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  Văn bản
+                  {currentLang === 'en' ? 'Text' : 'Văn bản'}
                 </span>
               </button>
 
@@ -1880,7 +1928,7 @@ export const SendView: React.FC = () => {
                   <Clipboard className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  Dán
+                  {currentLang === 'en' ? 'Paste' : 'Dán'}
                 </span>
               </button>
               
@@ -1895,7 +1943,7 @@ export const SendView: React.FC = () => {
                 className="w-full py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
               >
                 <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                <span>Chọn từ Kho Cloud Drive</span>
+                <span>{currentLang === 'en' ? 'Select from Cloud Drive' : 'Chọn từ Kho Cloud Drive'}</span>
               </button>
             </div>
           </div>
@@ -1915,7 +1963,7 @@ export const SendView: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm sm:text-base font-bold text-white tracking-wide flex items-center gap-2">
                 <LinkIcon className="w-4 h-4 text-indigo-400" />
-                <span>Nhập URL / Liên kết</span>
+                <span>{currentLang === 'en' ? 'Enter URL / Link' : 'Nhập URL / Liên kết'}</span>
               </h3>
               <button
                 type="button"
@@ -1926,7 +1974,7 @@ export const SendView: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-slate-300">
-              Dán URL của hình ảnh, tài liệu, video hoặc liên kết web bạn muốn gửi:
+              {currentLang === 'en' ? 'Paste image, document, video URL or website link you want to send:' : 'Dán URL của hình ảnh, tài liệu, video hoặc liên kết web bạn muốn gửi:'}
             </p>
             <div className="rounded-xl overflow-hidden bg-[#242b3b] border border-slate-700/70 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20 transition-all p-2.5">
               <input
@@ -1939,7 +1987,7 @@ export const SendView: React.FC = () => {
                     handleUrlAdded();
                   }
                 }}
-                placeholder="https://example.com/file.png hoặc https://..."
+                placeholder={currentLang === 'en' ? 'https://example.com/file.png or https://...' : 'https://example.com/file.png hoặc https://...'}
                 className="w-full bg-transparent text-white text-xs sm:text-sm focus:outline-none placeholder:text-slate-500 font-mono"
                 autoFocus
               />
@@ -1950,14 +1998,14 @@ export const SendView: React.FC = () => {
                 onClick={() => setIsUrlModalOpen(false)}
                 className="px-3.5 py-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-slate-800"
               >
-                Thoát
+                {currentLang === 'en' ? 'Exit' : 'Thoát'}
               </button>
               <button
                 type="button"
                 onClick={() => handleUrlAdded()}
                 className="px-5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <span>Xác nhận thêm URL</span>
+                <span>{currentLang === 'en' ? 'Confirm add URL' : 'Xác nhận thêm URL'}</span>
               </button>
             </div>
           </div>

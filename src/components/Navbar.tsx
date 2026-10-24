@@ -251,7 +251,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="open-rules-navbar-btn"
               type="button"
               onClick={onOpenRules}
-              title="Bảng Nội Quy & Điều Khoản Sử Dụng (Căn cứ xử lý vi phạm)"
+              title={currentLang === 'en' ? "Terms of Use & Community Guidelines (Basis for violation handling)" : "Bảng Nội Quy & Điều Khoản Sử Dụng (Căn cứ xử lý vi phạm)"}
               className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-amber-400 border border-slate-700/80 hover:border-amber-500/40 text-xs font-semibold transition-all shadow-sm group"
             >
               <Scale className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />

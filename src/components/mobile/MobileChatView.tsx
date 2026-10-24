@@ -1593,7 +1593,7 @@ export const MobileChatView: React.FC = () => {
           roomId={activeRoomId}
           roomName={activeRoom.name}
           currentUserId={currentUser?.uid || ''}
-          currentUserName={userProfile?.displayName || currentUser?.displayName || settings?.deviceName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
         />
       )}
 

@@ -92,6 +92,7 @@ import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { SelfDestructViewerModal } from './SelfDestructViewerModal';
 import { RulesModal } from './RulesModal';
 import { ReportMessageModal } from './ReportMessageModal';
+import { ReportIncidentModal } from './ReportIncidentModal';
 import { RichChatInput, RichChatInputHandle } from './RichChatInput';
 import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
@@ -103,7 +104,7 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 
 export const ChatRoomView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
-  const { t } = useLanguage();
+  const { currentLang, t } = useLanguage();
   
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string>('public-relay-lounge');
@@ -196,6 +197,18 @@ export const ChatRoomView: React.FC = () => {
   const [showSelfDestructMenu, setShowSelfDestructMenu] = useState(false);
   const [activeDestructMessage, setActiveDestructMessage] = useState<ChatMessage | null>(null);
   const [showRules, setShowRules] = useState(false);
+  const [showRoomReportModal, setShowRoomReportModal] = useState(false);
+
+  // Restore draft when active room changes
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem(`cloudsend_chat_draft_${activeRoomId}`) || '';
+      setInputText(savedDraft);
+      richInputRef.current?.setText(savedDraft);
+    } catch {
+      // ignore
+    }
+  }, [activeRoomId]);
 
   // Formatting & anti-glitch text toolbar
   const richInputRef = useRef<RichChatInputHandle>(null);
@@ -975,6 +988,9 @@ export const ChatRoomView: React.FC = () => {
     setAttachments([]);
     setSelfDestructMode('off');
     setShowSelfDestructMenu(false);
+    try {
+      localStorage.removeItem(`cloudsend_chat_draft_${activeRoomId}`);
+    } catch {}
 
     // 2. Play send sound instantly
     if (settings.soundEnabled) {
@@ -998,7 +1014,7 @@ export const ChatRoomView: React.FC = () => {
     const messagePayload: any = {
       roomId: activeRoomId,
       senderId: currentUser.uid,
-      senderName: userProfile?.displayName || currentUser.displayName || 'Người dùng',
+      senderName: userProfile?.displayName || settings.deviceName || 'Người dùng',
       senderEmail: currentUser.email || userProfile?.email || '',
       senderDevice: settings.deviceName,
       senderAvatar: userProfile?.customAvatarUrl || settings.customAvatarUrl || currentUser.photoURL || '',
@@ -1433,29 +1449,16 @@ export const ChatRoomView: React.FC = () => {
               </div>
             </div>
 
-            {/* Action buttons: Reset Server, Rules & Info */}
+            {/* Action buttons: Report & Room Info */}
             <div className="flex items-center gap-2 shrink-0">
-              {/* DEV Server Reset Button */}
-              {isDevUser(currentUser?.email) && (
-                <button
-                  type="button"
-                  onClick={() => setShowResetServerModal(true)}
-                  title="Đặc quyền DEV: Reset máy chủ trò chuyện, dọn dẹp tin nhắn để máy chủ hết lag"
-                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-rose-300 border border-rose-500/40 hover:border-amber-500/50 flex items-center gap-1.5 shadow-sm active:scale-95 transition-all text-xs font-bold cursor-pointer"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                  <span className="hidden sm:inline">Reset Máy Chủ</span>
-                </button>
-              )}
-
               <button
-                id="room-rules-btn"
+                id="room-report-btn"
                 type="button"
-                onClick={() => setShowRules(true)}
-                title="Xem Bảng Nội Quy & Điều Khoản Sử Dụng (Căn cứ xử lý vi phạm trong phòng)"
-                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-400 border border-slate-700/80 hover:border-amber-500/40 flex items-center justify-center shadow-sm active:scale-95 transition-all group"
+                onClick={() => setShowRoomReportModal(true)}
+                title={currentLang === 'en' ? "Report room violation / Send report to DEV" : "Báo cáo vi phạm phòng chat / Gửi phản hồi tới DEV"}
+                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/80 hover:border-rose-500/40 flex items-center justify-center shadow-sm active:scale-95 transition-all group cursor-pointer"
               >
-                <Scale className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                <Flag className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
               </button>
 
               <button
@@ -2089,6 +2092,19 @@ export const ChatRoomView: React.FC = () => {
               </div>
             )}
 
+            {/* Auto-saved draft indicator */}
+            {inputText.trim() && (
+              <div className="flex items-center justify-between px-1 text-[10px] text-slate-400">
+                <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
+                  <Check className="w-3 h-3 text-emerald-400" />
+                  {currentLang === 'en' ? 'Draft auto-saved' : 'Đã tự động lưu tin nhắn đang soạn'}
+                </span>
+                <span className="text-slate-500 font-mono">
+                  {inputText.length} ký tự
+                </span>
+              </div>
+            )}
+
             <form onSubmit={handleSendMessage} className="flex items-end gap-1.5 sm:gap-2">
               {/* Hidden general file input (multiple enabled) */}
               <input
@@ -2139,6 +2155,13 @@ export const ChatRoomView: React.FC = () => {
                   value={inputText}
                   onChange={(md, _plain) => {
                     setInputText(md);
+                    try {
+                      if (md.trim()) {
+                        localStorage.setItem(`cloudsend_chat_draft_${activeRoomId}`, md);
+                      } else {
+                        localStorage.removeItem(`cloudsend_chat_draft_${activeRoomId}`);
+                      }
+                    } catch {}
                   }}
                   onSend={(text) => handleSendMessage(undefined, text)}
                   onPasteFiles={processAndAttachFiles}
@@ -2386,7 +2409,19 @@ export const ChatRoomView: React.FC = () => {
           roomId={activeRoom.id}
           roomName={activeRoom.name}
           currentUserId={currentUser.uid}
-          currentUserName={userProfile?.displayName || currentUser.displayName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
+        />
+      )}
+
+      {/* General Room Incident / Violation Report Modal */}
+      {showRoomReportModal && activeRoom && currentUser && (
+        <ReportIncidentModal
+          isOpen={showRoomReportModal}
+          onClose={() => setShowRoomReportModal(false)}
+          roomId={activeRoom.id}
+          roomName={activeRoom.name}
+          currentUserId={currentUser.uid}
+          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
         />
       )}
 

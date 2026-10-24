@@ -111,9 +111,9 @@ export const serializeNodeToMarkdown = (node: Node): string => {
 
 /**
  * Thanh nhập tin nhắn thông minh tích hợp:
- * 1. Con trỏ xanh lướt chuyển động siêu mượt & nhạy bén (Ultra-Fast Snappy Gliding Caret |)
- * 2. Định dạng WYSIWYG trực tiếp (In đậm chữ thật khi bôi đen + Ctrl+B, In nghiêng chữ thật khi Ctrl+I)
- *    Không để lộ các ký tự sao ** hoặc * trong ô gõ chữ.
+ * 1. Con trỏ xanh lướt chuyển động siêu nhạy & tức thì (Instant Synced Caret, không lệch khi gõ nhanh)
+ * 2. Thanh cuộn mỏng đẹp hiện đại bo tròn tự chuyển màu khi văn bản dài
+ * 3. Định dạng WYSIWYG trực tiếp (In đậm chữ thật khi bôi đen + Ctrl+B, In nghiêng chữ thật khi Ctrl+I)
  */
 export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>(({
   id = "chat-message-input",
@@ -137,12 +137,12 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  const [caretPos, setCaretPos] = useState<{ x: number; y: number }>({ x: 16, y: 12 });
+  const [caretPos, setCaretPos] = useState<{ x: number; y: number; visible: boolean }>({ x: 16, y: 12, visible: true });
   const [isFocused, setIsFocused] = useState(false);
-  const [isCaretMoving, setIsCaretMoving] = useState(false);
-  const movingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Tính toán vị trí con trỏ tức thì chuẩn theo pixel của text đang gõ
+  // Tính toán vị trí con trỏ tức thì chuẩn theo pixel của text đang gõ (chống nhảy lệch)
   const updateCaretPosition = useCallback(() => {
     if (!containerRef.current || !editorRef.current) return;
     const sel = window.getSelection();
@@ -154,26 +154,35 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
     range.collapse(false);
 
     const containerRect = containerRef.current.getBoundingClientRect();
-    const editorRect = editorRef.current.getBoundingClientRect();
-    const rect = range.getBoundingClientRect();
+    let rect = range.getBoundingClientRect();
 
-    let x = 16;
-    let y = 12;
-
-    if (rect.height > 0 && rect.top > 0) {
-      x = Math.max(14, rect.left - containerRect.left);
-      y = Math.max(8, rect.top - containerRect.top);
-    } else {
-      x = editorRect.left - containerRect.left + 16;
-      y = editorRect.top - containerRect.top + 12;
+    // Fix bug lệch vị trí: khi con trỏ ở cuối dòng hoặc text node rỗng, getBoundingClientRect trả về height = 0
+    // Chèn span tạm thời để lấy tọa độ pixel chính xác 100%
+    if (!rect || rect.height === 0 || rect.top === 0) {
+      try {
+        const dummy = document.createElement('span');
+        dummy.textContent = '\u200B';
+        const tempRange = range.cloneRange();
+        tempRange.insertNode(dummy);
+        rect = dummy.getBoundingClientRect();
+        dummy.parentNode?.removeChild(dummy);
+      } catch {
+        // fallback
+      }
     }
 
-    setCaretPos({ x, y });
-    setIsCaretMoving(true);
-    if (movingTimerRef.current) clearTimeout(movingTimerRef.current);
-    movingTimerRef.current = setTimeout(() => {
-      setIsCaretMoving(false);
-    }, 100);
+    if (rect && rect.height > 0 && rect.top > 0) {
+      const x = Math.max(14, rect.left - containerRect.left);
+      const y = Math.max(8, rect.top - containerRect.top);
+      setCaretPos({ x, y, visible: true });
+    }
+
+    // Khi đang gõ nhanh: Tắt transition để con trỏ dính chặt 0ms lag
+    setIsTyping(true);
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => {
+      setIsTyping(false);
+    }, 120);
   }, []);
 
   // Đồng bộ nội dung editor sang markdown & plainText
@@ -214,7 +223,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       editorRef.current.focus();
       document.execCommand('bold', false);
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
       onFormatNotice?.('✨ Đã in đậm văn bản trực tiếp (Ctrl+B)');
     },
     applyItalic: () => {
@@ -222,7 +231,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       editorRef.current.focus();
       document.execCommand('italic', false);
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
       onFormatNotice?.('✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)');
     },
     applyCode: () => {
@@ -241,7 +250,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
           range.insertNode(codeEl);
         }
         syncValue();
-        setTimeout(updateCaretPosition, 10);
+        updateCaretPosition();
         onFormatNotice?.('✨ Đã định dạng mã (Ctrl+E)');
       }
     },
@@ -256,13 +265,13 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
         .trim();
       editorRef.current.innerText = cleaned;
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
     },
     clear: () => {
       if (editorRef.current) {
         editorRef.current.innerHTML = '';
         syncValue();
-        setTimeout(updateCaretPosition, 10);
+        updateCaretPosition();
       }
     },
     focus: () => {
@@ -276,7 +285,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       if (!editorRef.current) return;
       editorRef.current.innerHTML = markdownToEditableHtml(text);
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
     }
   }));
 
@@ -305,7 +314,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
           e.preventDefault();
           document.execCommand('insertLineBreak');
           syncValue();
-          setTimeout(updateCaretPosition, 10);
+          updateCaretPosition();
           return;
         }
       } else {
@@ -326,7 +335,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       e.preventDefault();
       document.execCommand('bold', false);
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
       onFormatNotice?.('✨ Đã in đậm văn bản trực tiếp (Ctrl+B)');
       return;
     }
@@ -336,7 +345,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       e.preventDefault();
       document.execCommand('italic', false);
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
       onFormatNotice?.('✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)');
       return;
     }
@@ -357,13 +366,13 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
           range.insertNode(codeEl);
         }
         syncValue();
-        setTimeout(updateCaretPosition, 10);
+        updateCaretPosition();
         onFormatNotice?.('✨ Đã định dạng mã (Ctrl+E)');
       }
       return;
     }
 
-    // Đánh thức tính toán vị trí con trỏ sau khi phím nhả
+    // Cập nhật vị trí con trỏ tức thì
     setTimeout(updateCaretPosition, 0);
   };
 
@@ -410,11 +419,11 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       selection.addRange(range);
 
       syncValue();
-      setTimeout(updateCaretPosition, 10);
+      updateCaretPosition();
     }
   };
 
-  // Cập nhật kích thước khi cửa sổ thay đổi
+  // Cập nhật kích thước khi cửa sổ thay đổi hoặc khi editor cuộn
   useEffect(() => {
     const handleResize = () => updateCaretPosition();
     window.addEventListener('resize', handleResize, { passive: true });
@@ -433,19 +442,21 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
         </div>
       )}
 
-      {/* Custom Neon Glowing Gliding Caret | */}
-      {isFocused && (
+      {/* Custom Neon Glowing Caret | - 0ms lag khi gõ nhanh, không trễ hay lệch vị trí */}
+      {isFocused && caretPos.visible && (
         <div
-          className="absolute pointer-events-none w-[2.5px] h-[20px] bg-gradient-to-t from-emerald-500 via-teal-400 to-emerald-300 rounded-full shadow-[0_0_10px_#10b981,0_0_20px_rgba(52,211,153,0.9)] z-20 animate-pulse"
+          className={`absolute pointer-events-none w-[2.5px] h-[20px] bg-gradient-to-t from-emerald-500 via-teal-400 to-emerald-300 rounded-full shadow-[0_0_8px_#10b981,0_0_16px_rgba(52,211,153,0.9)] z-20 ${
+            isTyping ? 'opacity-100' : 'animate-pulse'
+          }`}
           style={{
             left: `${caretPos.x}px`,
             top: `${caretPos.y}px`,
-            transition: 'left 0.08s cubic-bezier(0.16, 1, 0.3, 1), top 0.08s cubic-bezier(0.16, 1, 0.3, 1)',
+            transition: isTyping ? 'none' : 'left 0.05s ease-out, top 0.05s ease-out',
           }}
         />
       )}
 
-      {/* Ô gõ tin nhắn trực tiếp WYSIWYG: Bôi đen & Ctrl+B ra chữ đậm thật, Ctrl+I ra chữ nghiêng thật */}
+      {/* Ô gõ tin nhắn trực tiếp WYSIWYG: Thanh cuộn mỏng đẹp bo tròn, chuyển sắc emerald khi cuộn */}
       <div
         ref={editorRef}
         id={id}
@@ -456,29 +467,38 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
         onInput={() => {
           syncValue();
           checkSelection();
+          updateCaretPosition();
+        }}
+        onScroll={() => {
+          updateCaretPosition();
         }}
         onKeyDown={handleKeyDown}
         onKeyUp={() => {
           checkSelection();
+          updateCaretPosition();
         }}
         onMouseUp={() => {
           checkSelection();
+          updateCaretPosition();
         }}
         onSelect={() => {
           checkSelection();
+          updateCaretPosition();
         }}
         onClick={() => {
           checkSelection();
+          updateCaretPosition();
         }}
         onFocus={() => {
           setIsFocused(true);
+          updateCaretPosition();
         }}
         onBlur={() => {
           setIsFocused(false);
           checkSelection();
         }}
         onPaste={handlePaste}
-        className="relative z-10 w-full px-4 py-2.5 min-h-[44px] max-h-32 overflow-y-auto scrollbar-thin text-sm text-white focus:outline-none font-sans leading-relaxed break-words [overflow-wrap:anywhere] transition-colors selection:bg-emerald-500/30 selection:text-white"
+        className="relative z-10 w-full px-4 py-2.5 min-h-[44px] max-h-32 overflow-y-auto text-sm text-white focus:outline-none font-sans leading-relaxed break-words [overflow-wrap:anywhere] transition-colors selection:bg-emerald-500/30 selection:text-white [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.5)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-emerald-500 active:[&::-webkit-scrollbar-thumb]:bg-emerald-400"
         style={{
           caretColor: 'transparent',
           wordBreak: 'break-word',

@@ -1,0 +1,6 @@
+{
+  "summary":  "Kế hoạch chi tiết triển khai ứng dụng Desktop cho ClSend:\n1. Tích hợp nút và hướng dẫn Cài đặt Desktop PWA trực tiếp 1-click trên trình duyệt (mở cửa sổ riêng biệt như ứng dụng Windows native).\n2. Xây dựng cấu hình Electron đầy đủ (electron/main.cjs, electron/preload.cjs) hỗ trợ khay hệ thống (System Tray), thu nhỏ khi đóng (minimize to tray), và thông báo Desktop Native Notification.\n3. Cấu hình build script electron-builder để đóng gói ra tệp ClSend-Setup.exe trên Windows.\n4. Thêm Modal \"Cài đặt ứng dụng máy tính\" (Desktop App Center) trực quan trong giao diện để người dùng có thể cài đặt ngay hoặc tải hướng dẫn tạo .exe.",
+  "updatedAt":  "2026-10-26T11:47:56.849851515Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

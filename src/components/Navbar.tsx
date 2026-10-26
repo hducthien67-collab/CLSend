@@ -38,6 +38,7 @@ interface NavbarProps {
   incomingCount?: number;
   unreadMessagesCount?: number;
   onOpenDesignStudio?: () => void;
+  onOpenDesktopInstall?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -51,6 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   incomingCount = 0,
   unreadMessagesCount = 0,
   onOpenDesignStudio,
+  onOpenDesktopInstall,
 }) => {
   const { currentUser, settings, userProfile, logout } = useAuth();
   const { currentLang, setLanguage, t, languages } = useLanguage();
@@ -252,6 +254,21 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
+          {/* Desktop App Download & Install Button */}
+          {onOpenDesktopInstall && (
+            <button
+              id="open-desktop-install-btn"
+              type="button"
+              onClick={onOpenDesktopInstall}
+              title="Cài đặt ứng dụng máy tính (Desktop App: PWA 1-Click & tệp .exe)"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 hover:text-white border border-emerald-500/40 hover:border-emerald-400 text-xs font-semibold transition-all shadow-sm group cursor-pointer"
+            >
+              <Monitor className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <span className="hidden sm:inline">Tải App</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            </button>
+          )}
+
           {/* Rules / Nội quy Button */}
           {onOpenRules && (
             <button
@@ -323,6 +340,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <Settings className="w-4 h-4 text-emerald-400" />
                     <span>{t('nav.settings')}</span>
                   </button>
+
+                  {/* Desktop App Center in Avatar Menu */}
+                  {onOpenDesktopInstall && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAvatarMenuOpen(false);
+                        setIsLangSubMenuOpen(false);
+                        onOpenDesktopInstall();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors"
+                    >
+                      <Monitor className="w-4 h-4 text-emerald-400" />
+                      <span>Tải app máy tính (.exe)</span>
+                    </button>
+                  )}
 
                   {/* Nút Ngôn ngữ có bản nhỏ mở ra bên cạnh */}
                   <div className="relative">

@@ -249,6 +249,10 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
       const uid = device.uid;
       if (!uid) return;
 
+      const seenTime = device.lastSeen ? new Date(device.lastSeen).getTime() : 0;
+      // Thời gian sống 3 phút (180.000ms) chuẩn Facebook: chỉ offline khi > 3 phút không phản hồi
+      const isAlive = seenTime > 0 ? (Date.now() - seenTime) <= 180000 && (device.status as string) !== 'offline' : false;
+
       if (!userMap.has(uid)) {
         userMap.set(uid, {
           uid,
@@ -256,7 +260,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
           displayName: device.displayName || 'Người dùng',
           deviceName: device.deviceName || 'Thiết bị',
           avatarColor: device.avatarColor || '#10b981',
-          isOnline: true,
+          isOnline: isAlive,
           lastActive: device.lastSeen ? new Date(device.lastSeen).toISOString() : new Date().toISOString(),
           messages: [],
           sanction: undefined,
@@ -270,7 +274,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
         });
       } else {
         const u = userMap.get(uid)!;
-        u.isOnline = true;
+        u.isOnline = isAlive;
         if (device.avatarColor) u.avatarColor = device.avatarColor;
         if (device.email && (!u.email || u.email.includes('@user.cloudsend'))) u.email = device.email;
         if (device.deviceName) u.deviceName = device.deviceName;

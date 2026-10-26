@@ -248,8 +248,10 @@ export const SendView: React.FC = () => {
 
       const diff = Math.abs(referenceTime - peerTime);
 
-      // Fast Heartbeat interval is 7s. If no heartbeat for > 25s, the device has closed the tab or disconnected -> OFFLINE!
-      if (diff > 25000) {
+      // Thời gian sống của web/thiết bị là 3 phút (180.000ms) chuẩn như Facebook
+      // Trong vòng 3 phút nếu client không có heartbeat phản hồi mới chấp nhận là offline!
+      const PRESENCE_LIFETIME_MS = 180000; // 3 phút = 180.000 ms
+      if (diff > PRESENCE_LIFETIME_MS) {
         toPurgeDocIds.push(docSnap.id);
         continue;
       }

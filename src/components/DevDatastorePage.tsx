@@ -430,12 +430,13 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     const now = Date.now();
     const diffSeconds = Math.floor((now - seenTime) / 1000);
 
-    // Dưới 90 giây = Đang online thật sự với tín hiệu ping sống
-    if (diffSeconds < 90 && status !== 'offline') {
+    // Thời gian sống của web/phiên là 3 phút (180 giây) chuẩn như Facebook
+    // Trong vòng 3 phút nếu không có tín hiệu phản hồi mới chấp nhận là ngoại tuyến (offline)
+    if (diffSeconds <= 180 && status !== 'offline') {
       return {
         isOnline: true,
-        badgeText: '🟢 Đang Online thật sự',
-        detailText: `Tín hiệu Ping sống (${diffSeconds}s trước)`,
+        badgeText: '🟢 Đang Online (Thời gian sống 3p)',
+        detailText: diffSeconds < 60 ? `Tín hiệu sống (${diffSeconds}s trước)` : `Tín hiệu sống (${Math.floor(diffSeconds / 60)}p trước)`,
         color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
       };
     } else if (diffSeconds < 600) {

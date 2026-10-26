@@ -86,7 +86,7 @@ export const MobileChatView: React.FC = () => {
   // Message state: today & yesterday loaded by default, older messages loaded when scrolling up
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
   const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([]);
-  const [memberMetaMap, setMemberMetaMap] = useState<Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }>>({});
+  const [memberMetaMap, setMemberMetaMap] = useState<Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean; isOnline?: boolean; lastSeen?: string }>>({});
 
   const messages = React.useMemo(() => {
     const map = new Map<string, ChatMessage>();
@@ -156,7 +156,8 @@ export const MobileChatView: React.FC = () => {
     const presenceRef = collection(db, 'presence');
     const unsubPresence = onSnapshot(presenceRef, (snapshot) => {
       const names: Record<string, string> = {};
-      const meta: Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }> = {};
+      const meta: Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean; isOnline?: boolean; lastSeen?: string }> = {};
+      const now = Date.now();
       snapshot.docs.forEach((docSnap) => {
         const data = docSnap.data();
         const displayName = data.displayName || data.deviceName;
@@ -164,8 +165,15 @@ export const MobileChatView: React.FC = () => {
         const avatarColor = data.avatarColor || '#10b981';
         const isDev = Boolean(data.isDev || isDevUser(data.email));
 
+        const peerTime = data.lastSeenServer?.toMillis?.() || 
+          (data.lastSeenServer?.seconds ? data.lastSeenServer.seconds * 1000 : 0) || 
+          data.lastSeenMs || 
+          (data.lastSeen ? new Date(data.lastSeen).getTime() : 0);
+        // Thời gian sống 3 phút (180.000ms) chuẩn Facebook: chỉ offline khi > 3 phút không phản hồi
+        const isOnline = peerTime > 0 && Math.abs(now - peerTime) <= 180000 && data.status !== 'offline';
+
         if (displayName) {
-          const item = { displayName, avatarUrl, avatarColor, isDev };
+          const item = { displayName, avatarUrl, avatarColor, isDev, isOnline, lastSeen: data.lastSeen };
           if (data.uid) {
             names[data.uid] = displayName;
             meta[data.uid] = item;
@@ -1301,11 +1309,13 @@ export const MobileChatView: React.FC = () => {
                                   {initialChar}
                                 </div>
                               )}
-                              {isDevMsg && (
+                              {isDevMsg ? (
                                 <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-gradient-to-tr from-amber-500 to-amber-300 flex items-center justify-center shadow-xs ring-1 ring-slate-900">
                                   <Crown className="w-1.5 h-1.5 text-slate-950 fill-slate-950" />
                                 </span>
-                              )}
+                              ) : (isMe || senderMeta?.isOnline) ? (
+                                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-slate-900 shadow-xs" title="Đang online (Thời gian sống 3p)" />
+                              ) : null}
                             </div>
 
                             {isDevMsg ? (

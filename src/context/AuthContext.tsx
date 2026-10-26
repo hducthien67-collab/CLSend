@@ -233,9 +233,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         lastSeenServer: serverTimestamp(),
       }, { merge: true });
 
-      // Synchronize latest active hardware to users record
+      // Synchronize latest active hardware & online timestamp to users record
       const userDocRef = doc(db, 'users', targetUid);
-      setDoc(userDocRef, { deviceType: currentHwType }, { merge: true }).catch(() => {});
+      setDoc(userDocRef, { 
+        deviceType: currentHwType,
+        lastSeen: new Date().toISOString(),
+        lastActive: new Date().toISOString(),
+        status: 'online',
+      }, { merge: true }).catch(() => {});
     } catch (err) {
       console.warn('Presence update error:', err);
     }
@@ -407,16 +412,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    // Fast Heartbeat interval every 7s (when tab is active) to keep real-time presence synchronized with zero lag
+    // Presence Heartbeat loop: ping every 15s to keep presence fresh within the 3-minute (180,000ms) lifetime window
     if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
     heartbeatTimer.current = setInterval(() => {
-      if (currentUserRef.current && typeof document !== 'undefined' && !document.hidden) {
+      if (currentUserRef.current) {
         updatePresence(currentUserRef.current.uid);
       }
-    }, 7000);
+    }, 15000);
 
     const handleVisibilityChange = () => {
-      if (typeof document !== 'undefined' && !document.hidden && currentUserRef.current) {
+      if (currentUserRef.current && typeof document !== 'undefined' && !document.hidden) {
         updatePresence(currentUserRef.current.uid);
       }
     };
@@ -428,21 +433,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', handleFocus);
 
-    const handleWindowUnload = () => {
-      if (currentUserRef.current) {
-        removePresence(currentUserRef.current.uid);
-      }
-    };
-    window.addEventListener('beforeunload', handleWindowUnload);
-    window.addEventListener('pagehide', handleWindowUnload);
+    // Lưu ý: Chuẩn Facebook giữ thời gian sống 3 phút (180.000ms).
+    // Không xóa presence tức thì khi tải lại trang / chuyển tab để duy trì trạng thái online 3 phút
+    // Chỉ khi quá 3 phút không có heartbeat/phản hồi từ client thì các máy khác mới coi là offline.
 
     return () => {
       isMounted = false;
       unsubscribe();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('beforeunload', handleWindowUnload);
-      window.removeEventListener('pagehide', handleWindowUnload);
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
     };
   }, []);

@@ -88,8 +88,9 @@ export const MobileSendView: React.FC = () => {
           (data.lastSeenServer?.seconds ? data.lastSeenServer.seconds * 1000 : 0) || 
           data.lastSeenMs || 0;
 
-        // Skip records inactive for > 35s
-        if (peerTime && Math.abs(now - peerTime) > 35000) return;
+        // Thời gian sống của web là 3 phút (180.000ms) chuẩn như Facebook
+        // Trong vòng 3 phút nếu client không có phản hồi thì mới chấp nhận là offline
+        if (peerTime && Math.abs(now - peerTime) > 180000) return;
 
         const key = data.deviceId || data.uid;
         deviceMap.set(key, { ...data, peerTime });

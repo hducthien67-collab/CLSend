@@ -119,6 +119,8 @@ export const ChatRoomView: React.FC = () => {
     avatarUrl?: string;
     avatarColor?: string;
     isDev?: boolean;
+    isOnline?: boolean;
+    lastSeen?: string;
     email?: string;
     deviceName?: string;
     deviceType?: string;
@@ -547,12 +549,13 @@ export const ChatRoomView: React.FC = () => {
     setMemberMetaMap((prev) => ({ ...prev, ...meta }));
   }, [currentUser?.uid, currentUser?.email, currentUser?.photoURL, userProfile?.displayName, userProfile?.customAvatarUrl, userProfile?.avatarColor, settings.deviceName, settings.customAvatarUrl, settings.avatarColor, rooms, activeRoomId]);
 
-  // Listen to presence collection to keep live names and avatars of all connected peers updated
+  // Listen to presence collection to keep live names, avatars and online status of all connected peers updated
   useEffect(() => {
     const presenceRef = collection(db, 'presence');
     const unsubscribePresence = onSnapshot(presenceRef, (snapshot) => {
       const names: Record<string, string> = {};
-      const meta: Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean }> = {};
+      const meta: Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean; isOnline?: boolean; lastSeen?: string }> = {};
+      const now = Date.now();
       snapshot.docs.forEach((docSnap) => {
         const data = docSnap.data();
         const displayName = data.displayName || data.deviceName;
@@ -560,8 +563,15 @@ export const ChatRoomView: React.FC = () => {
         const avatarColor = data.avatarColor || '#10b981';
         const isDev = Boolean(data.isDev || isDevUser(data.email));
 
+        const peerTime = data.lastSeenServer?.toMillis?.() || 
+          (data.lastSeenServer?.seconds ? data.lastSeenServer.seconds * 1000 : 0) || 
+          data.lastSeenMs || 
+          (data.lastSeen ? new Date(data.lastSeen).getTime() : 0);
+        // Thời gian sống 3 phút (180.000ms) chuẩn Facebook: chỉ offline khi > 3 phút không phản hồi
+        const isOnline = peerTime > 0 && Math.abs(now - peerTime) <= 180000 && data.status !== 'offline';
+
         if (displayName) {
-          const item = { displayName, avatarUrl, avatarColor, isDev };
+          const item = { displayName, avatarUrl, avatarColor, isDev, isOnline, lastSeen: data.lastSeen };
           if (data.uid) {
             names[data.uid] = displayName;
             meta[data.uid] = item;
@@ -1634,6 +1644,7 @@ export const ChatRoomView: React.FC = () => {
                               avatarUrl: effectiveAvatarUrl,
                               avatarColor: effectiveAvatarColor,
                               isDev: isDevMsg,
+                              isOnline: isMe || Boolean(senderMeta?.isOnline),
                               deviceName: senderMeta?.deviceName,
                               deviceType: senderMeta?.deviceType,
                               createdAt: senderMeta?.createdAt,
@@ -1659,14 +1670,19 @@ export const ChatRoomView: React.FC = () => {
                               {initialChar}
                             </div>
                           )}
-                          {isDevMsg && (
+                          {isDevMsg ? (
                             <span
                               className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-gradient-to-tr from-amber-500 to-amber-300 rounded-full flex items-center justify-center shadow-xs ring-1 ring-slate-900"
                               title="DEV Chính Chủ"
                             >
                               <Crown className="w-2 h-2 text-slate-950 fill-slate-950" />
                             </span>
-                          )}
+                          ) : (isMe || senderMeta?.isOnline) ? (
+                            <span
+                              className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-slate-900 shadow-xs"
+                              title="Đang hoạt động (Online - Thời gian sống 3p)"
+                            />
+                          ) : null}
                         </div>
 
                         {/* Sender Name / DEV Badge */}

@@ -22,6 +22,8 @@ import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
 import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { registerToastListener } from './utils/toast';
+import { DesktopInstallModal } from './components/DesktopInstallModal';
+import { sendDesktopMessageNotification, sendDesktopFileNotification } from './utils/desktopNotification';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc } from 'firebase/firestore';
@@ -60,6 +62,19 @@ function MainApp() {
   const [errorChatInfo, setErrorChatInfo] = useState<ErrorChatInfo | null>(null);
   const [showDataChannelAvatars, setShowDataChannelAvatars] = useState(false);
   const [isStorageAvatarsModalOpen, setIsStorageAvatarsModalOpen] = useState(false);
+  const [isDesktopModalOpen, setIsDesktopModalOpen] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  // Capture PWA beforeinstallprompt event for 1-click desktop installation
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  }, []);
 
   // Shortcut: Ctrl + Shift + A + S to reveal data channel avatars and open modal
   useEffect(() => {
@@ -315,6 +330,15 @@ function MainApp() {
                 senderName: msg.senderName || 'Bạn bè',
                 text: previewText
               });
+              // Send native desktop notification (supported on both Windows Electron & Web PWA)
+              sendDesktopMessageNotification({
+                senderName: msg.senderName || 'Bạn bè',
+                text: previewText,
+                onClick: () => {
+                  setActiveTab('chat');
+                  setChatNotification(null);
+                }
+              });
             }
           }
         }
@@ -534,6 +558,28 @@ function MainApp() {
               fileSize: data.fileSize,
               textContent: data.textContent,
             });
+
+            // Native desktop notification for incoming transfer/message
+            if (data.textContent) {
+              sendDesktopMessageNotification({
+                senderName: data.senderName || 'Người dùng',
+                text: data.textContent,
+                onClick: () => {
+                  setActiveTab('receive');
+                  setIncomingTransferNotice(null);
+                }
+              });
+            } else if (data.fileName) {
+              sendDesktopFileNotification({
+                fileName: data.fileName,
+                fileSize: formatFileSize(data.fileSize || 0),
+                senderName: data.senderName,
+                onClick: () => {
+                  setActiveTab('receive');
+                  setIncomingTransferNotice(null);
+                }
+              });
+            }
           } else {
             notifiedTransfersRef.current.add(docId);
           }
@@ -670,6 +716,17 @@ function MainApp() {
             }
           }}
         />
+
+        {/* Desktop App Center (.exe & PWA 1-Click Install) on Mobile */}
+        <DesktopInstallModal
+          isOpen={isDesktopModalOpen}
+          onClose={() => setIsDesktopModalOpen(false)}
+          deferredPrompt={deferredInstallPrompt}
+          onPwaInstalled={() => {
+            setDeferredInstallPrompt(null);
+            setIsDesktopModalOpen(false);
+          }}
+        />
       </>
     );
   }
@@ -690,6 +747,7 @@ function MainApp() {
           window.history.pushState(null, '', '/?page=datastore');
           setIsDatastorePage(true);
         }}
+        onOpenDesktopInstall={() => setIsDesktopModalOpen(true)}
         incomingCount={incomingCount}
         unreadMessagesCount={unreadMessagesCount}
       />
@@ -978,6 +1036,16 @@ function MainApp() {
           </div>
         </div>
       )}
+      {/* Desktop App Center (.exe & PWA 1-Click Install) */}
+      <DesktopInstallModal
+        isOpen={isDesktopModalOpen}
+        onClose={() => setIsDesktopModalOpen(false)}
+        deferredPrompt={deferredInstallPrompt}
+        onPwaInstalled={() => {
+          setDeferredInstallPrompt(null);
+          setIsDesktopModalOpen(false);
+        }}
+      />
     </div>
   );
 }

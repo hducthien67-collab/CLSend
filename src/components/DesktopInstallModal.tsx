@@ -32,11 +32,12 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
   deferredPrompt,
   onPwaInstalled,
 }) => {
-  const [activeTab, setActiveTab] = useState<'pwa' | 'installer'>('pwa');
+  const [activeTab, setActiveTab] = useState<'pwa' | 'installer' | 'photopea-info'>('pwa');
   const [isCopied, setIsCopied] = useState(false);
   const [installStatusMessage, setInstallStatusMessage] = useState<string | null>(null);
   const [notificationPermissionState, setNotificationPermissionState] = useState<NotificationPermission>('default');
   const [isInIframe, setIsInIframe] = useState(false);
+  const [directTabOpened, setDirectTabOpened] = useState(false);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -73,22 +74,35 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
         deferredPrompt.prompt();
         const choice = await deferredPrompt.userChoice;
         if (choice.outcome === 'accepted') {
-          setInstallStatusMessage('Đã cài đặt thành công ClSend lên máy tính!');
+          setInstallStatusMessage('Đã cài đặt thành công ClSend lên máy tính như Photopea!');
           if (onPwaInstalled) onPwaInstalled();
         } else {
           setInstallStatusMessage('Bạn đã hủy yêu cầu cài đặt.');
         }
       } catch (err) {
         console.warn('Error prompting PWA install:', err);
-        setInstallStatusMessage('Vui lòng mở web trong tab mới và nhấn biểu tượng Cài đặt trên thanh địa chỉ URL.');
+        handleDownloadWindowsInstaller();
+        handleOpenInNewTab();
       }
     } else {
-      // In-app non-blocking guide (never window.alert)
+      // Khi đang xem trong iframe AI Studio (trình duyệt bảo mật chặn beforeinstallprompt):
+      // 1. Tự động tải tệp CaiDat-ClSend-Windows.bat về máy tính
+      handleDownloadWindowsInstaller();
+      // 2. Mở tab mới độc lập để người dùng có thể cài theo chuẩn Photopea
+      handleOpenInNewTab();
+      // 3. Cập nhật thông báo nổi bật
       setInstallStatusMessage(
-        isInIframe
-          ? 'Trình duyệt chặn cài đặt bên trong khung iframe xem trước. Vui lòng bấm nút "Mở Web trong Tab mới" bên dưới để cài đặt trực tiếp!'
-          : 'Hãy nhìn vào góc bên phải thanh địa chỉ (URL) trên trình duyệt và bấm vào biểu tượng "Cài đặt ClSend" (hình máy tính có mũi tên tải xuống).'
+        'Đã tải tệp CaiDat-ClSend-Windows.bat về máy của bạn và mở Tab mới! Hãy nhấp đúp vào tệp vừa tải ở mục Downloads để tạo biểu tượng ClSend trên Desktop ngay lập tức.'
       );
+    }
+  };
+
+  const handleOpenInNewTab = () => {
+    setDirectTabOpened(true);
+    try {
+      window.open(directUrl, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      console.warn('Popup blocked, falling back to direct navigation', e);
     }
   };
 
@@ -113,6 +127,7 @@ color 0A
 
 echo ======================================================================
 echo           CLSEND - TỰ ĐỘNG TẠO ỨNG DỤNG DESKTOP CHO WINDOWS
+echo                 (Công nghệ WebApp độc lập như Photopea)
 echo ======================================================================
 echo.
 echo [1/3] Đang định cấu hình đường dẫn ứng dụng ClSend...
@@ -122,7 +137,7 @@ set "USER_DESKTOP=%USERPROFILE%\\Desktop"
 set "USER_STARTMENU=%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs"
 set "DATA_DIR=%LOCALAPPDATA%\\ClSendApp"
 
-echo [OK] Đường dẫn web: %APP_URL%
+echo [OK] Đường dẫn ứng dụng: %APP_URL%
 echo.
 
 echo [2/3] Đang tìm kiếm trình duyệt hệ thống (Microsoft Edge / Google Chrome)...
@@ -220,24 +235,21 @@ exit /b 0
 
         {/* Tab Switcher */}
         <div className="px-5 sm:px-6 pt-4 pb-2 bg-slate-900">
-          <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-2xl border border-slate-800">
+          <div className="grid grid-cols-3 p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
             <button
               type="button"
               onClick={() => {
                 setActiveTab('pwa');
                 setInstallStatusMessage(null);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl font-bold transition-all cursor-pointer ${
                 activeTab === 'pwa'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Sparkles className="w-4 h-4 text-emerald-300" />
-              <span>Cài đặt 1-Click (PWA)</span>
-              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono hidden sm:inline">
-                Tiện nhất
-              </span>
+              <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
+              <span>Cài như Photopea</span>
             </button>
 
             <button
@@ -246,17 +258,30 @@ exit /b 0
                 setActiveTab('installer');
                 setInstallStatusMessage(null);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl font-bold transition-all cursor-pointer ${
                 activeTab === 'installer'
                   ? 'bg-emerald-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Download className="w-4 h-4 text-emerald-300" />
-              <span>Tải bộ cài Windows (.bat)</span>
-              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 font-mono hidden sm:inline">
-                Chạy ngay
-              </span>
+              <Download className="w-3.5 h-3.5 text-emerald-300" />
+              <span>File Windows (.bat)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('photopea-info' as any);
+                setInstallStatusMessage(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl font-bold transition-all cursor-pointer ${
+                (activeTab as string) === 'photopea-info'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-sky-300" />
+              <span>Hỏi đáp Photopea</span>
             </button>
           </div>
         </div>
@@ -265,33 +290,52 @@ exit /b 0
         <div className="px-5 sm:px-6 py-4 overflow-y-auto space-y-4">
           {/* Iframe Notice Banner (if inside iframe preview) */}
           {isInIframe && (
-            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
-              <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 flex items-start gap-3">
+              <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
-                <p className="text-xs text-amber-200 font-semibold">
-                  Bạn đang xem ClSend trong khung xem trước (iframe).
+                <p className="text-xs text-white font-semibold">
+                  Mẹo cài đặt như Photopea (1-Click trong 2 giây):
                 </p>
-                <p className="text-[11px] text-amber-300/80 mt-0.5">
-                  Trình duyệt chặn quyền cài đặt PWA bên trong khung nhúng. Để cài đặt mượt mà nhất, hãy mở trong Tab mới:
+                <p className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                  Trình duyệt chặn cài đặt ứng dụng từ khung xem trước. Hãy nhấn nút dưới đây để mở ClSend trên Tab mới, sau đó nhấn <strong>Cài đặt</strong> trên thanh địa chỉ URL:
                 </p>
-                <a
-                  href={directUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold border border-amber-500/40 transition-colors"
+                <button
+                  type="button"
+                  onClick={handleOpenInNewTab}
+                  className="mt-2.5 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
                 >
-                  <span>Mở ClSend trong Tab mới riêng biệt</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Mở ClSend trên Tab mới để cài ngay</span>
+                </button>
               </div>
             </div>
           )}
 
           {/* Status Message Banner if triggered */}
           {installStatusMessage && (
-            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-              <span>{installStatusMessage}</span>
+            <div className="p-4 rounded-2xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-200 text-xs flex items-start gap-3 shadow-xl shadow-emerald-500/10 animate-in fade-in duration-200">
+              <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <p className="font-bold text-white text-xs leading-relaxed">{installStatusMessage}</p>
+                <div className="flex flex-wrap items-center gap-2 pt-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadWindowsInstaller}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] transition-all cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Tải lại file cài đặt (.bat)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenInNewTab}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-[11px] border border-slate-700 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Mở lại Tab mới</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -302,7 +346,7 @@ exit /b 0
                 <div className="space-y-1 text-center sm:text-left">
                   <div className="flex items-center justify-center sm:justify-start gap-2">
                     <span className="font-bold text-white text-sm sm:text-base">
-                      {isStandalone ? 'Đang chạy trong chế độ Desktop App' : 'Cài đặt trực tiếp từ trình duyệt'}
+                      {isStandalone ? 'Đang chạy trong chế độ Desktop App' : 'Cài đặt trực tiếp y hệt Photopea'}
                     </span>
                     <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-semibold bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-500/30">
                       <CheckCircle2 className="w-3 h-3" />
@@ -310,7 +354,7 @@ exit /b 0
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 max-w-md">
-                    Ứng dụng sẽ tự tạo icon trên Desktop và thanh Taskbar, mở trong cửa sổ riêng biệt không có thanh địa chỉ URL.
+                    Photopea và ClSend đều dùng công nghệ <strong>PWA</strong>: biến trang web thành ứng dụng máy tính có biểu tượng riêng trên màn hình chính (Desktop) và thanh tác vụ (Taskbar).
                   </p>
                 </div>
 
@@ -342,19 +386,25 @@ exit /b 0
               <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
                 <h4 className="text-xs font-bold text-white flex items-center gap-2">
                   <HelpCircle className="w-4 h-4 text-emerald-400" />
-                  Cách cài đặt trực tiếp trên trình duyệt máy tính:
+                  2 Bước cài đặt trên Google Chrome & Microsoft Edge:
                 </h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                    <p className="font-bold text-emerald-400">Google Chrome & Cốc Cốc:</p>
+                  <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+                    <p className="font-bold text-emerald-400 flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] flex items-center justify-center">1</span>
+                      Bước 1: Mở trên Tab mới
+                    </p>
                     <p className="text-slate-300 text-[11px] leading-relaxed">
-                      Nhìn vào bên phải thanh địa chỉ (URL) &rarr; bấm biểu tượng <strong>Cài đặt</strong> (màn hình máy tính có mũi tên trỏ xuống) &rarr; chọn <strong>Cài đặt</strong>.
+                      Bấm nút <strong>"Mở ClSend trên Tab mới"</strong> để thoát khỏi khung xem trước bị trình duyệt hạn chế.
                     </p>
                   </div>
-                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1">
-                    <p className="font-bold text-sky-400">Microsoft Edge:</p>
+                  <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5">
+                    <p className="font-bold text-sky-400 flex items-center gap-1.5">
+                      <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-400 text-[10px] flex items-center justify-center">2</span>
+                      Bước 2: Bấm biểu tượng Cài đặt
+                    </p>
                     <p className="text-slate-300 text-[11px] leading-relaxed">
-                      Bấm vào biểu tượng 3 ô vuông có dấu cộng trên thanh địa chỉ URL &rarr; chọn <strong>Cài đặt ClSend</strong>.
+                      Trên góc phải thanh địa chỉ (URL), bấm vào biểu tượng <strong>Màn hình máy tính có mũi tên xuống</strong> &rarr; chọn <strong>Cài đặt</strong>.
                     </p>
                   </div>
                 </div>
@@ -387,7 +437,7 @@ exit /b 0
                 </div>
               </div>
             </div>
-          ) : (
+          ) : activeTab === 'installer' ? (
             /* TAB 2: 1-CLICK WINDOWS BATCH INSTALLER */
             <div className="space-y-4">
               <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-950/30 via-slate-900 to-slate-950 border border-indigo-500/30 space-y-3">
@@ -453,6 +503,81 @@ exit /b 0
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   Lưu ý: Để chạy lệnh <code className="text-emerald-300 font-mono">npm run dist:win</code>, bạn phải ở trong thư mục đầy đủ của dự án (nơi có file <code className="text-white font-mono">package.json</code>).
                 </p>
+              </div>
+            </div>
+          ) : (
+            /* TAB 3: GIẢI ĐÁP PHOTOPEA DÙNG KIỂU GÌ */
+            <div className="space-y-4">
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-sky-950/40 via-slate-900 to-slate-950 border border-sky-500/30 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="p-2.5 rounded-2xl bg-sky-500/10 text-sky-400 shrink-0">
+                    <Sparkles className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm sm:text-base font-bold text-white">
+                      Photopea dùng kiểu gì để tải về máy tính?
+                    </h4>
+                    <p className="text-xs text-sky-200/80 mt-1 leading-relaxed">
+                      Photopea <strong>KHÔNG</strong> hề dùng tệp <code className="bg-slate-800 px-1 py-0.5 rounded text-white">.exe</code> nặng 150MB-200MB! Photopea sử dụng công nghệ <strong>PWA (Progressive Web App)</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2 text-xs">
+                  <h5 className="font-bold text-sky-300">Cách Photopea hoạt động:</h5>
+                  <ul className="space-y-2 text-slate-300 text-[11px]">
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>
+                        Khi bạn vào <code className="text-sky-300">photopea.com</code> bằng Google Chrome hoặc Microsoft Edge, trình duyệt tự nhận diện đây là một ứng dụng PWA.
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>
+                        Khi bấm <strong>More &rarr; Install Photopea</strong>, trình duyệt sẽ hiện thông báo: <em>"Cài đặt ứng dụng Photopea?"</em> và tạo một biểu tượng trên Desktop của bạn.
+                      </span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <span>
+                        Khi mở từ Desktop, nó chạy trong <strong>cửa sổ riêng biệt</strong>, không có thanh địa chỉ web, mượt mà như một phần mềm độc lập, không tốn dung lượng ổ cứng!
+                      </span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-1.5 text-xs">
+                  <h5 className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                    Tại sao lúc nãy bạn thử ClSend lại báo lỗi?
+                  </h5>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    1. <strong>Do khung xem trước (iframe):</strong> Hiện tại bạn đang mở ClSend trong khung xem trước của AI Studio. Trình duyệt Windows có cơ chế bảo mật nghiêm ngặt: <em>Chặn hoàn toàn việc cài đặt app từ bên trong một khung nhúng</em> để bảo vệ người dùng.
+                  </p>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    2. <strong>Khắc phục cực dễ:</strong> Bạn chỉ cần bấm nút <strong>"Mở ClSend trên Tab mới"</strong> dưới đây để mở web trực tiếp. Khi đó, biểu tượng Cài đặt sẽ hiện ngay trên thanh địa chỉ URL của Chrome/Edge và cài đặt thành công 100% y hệt Photopea!
+                  </p>
+                </div>
+
+                <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenInNewTab}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Mở ClSend trong Tab mới để Cài đặt</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('installer')}
+                    className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>Hoặc tải file cài tự động (.bat)</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}

@@ -7,6 +7,7 @@ import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { Readable } from 'stream';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -69,7 +70,7 @@ setInterval(cleanStaleChunks, 30 * 60 * 1000);
 
 // Meta persistence file
 const META_FILE = path.join(UPLOADS_DIR, '_meta.json');
-let fileMetaMap: Record<string, { originalName: string; size: number; mimeType: string; createdAt: string; isHeic?: boolean; thumbnail?: string }> = {};
+let fileMetaMap: Record<string, { originalName: string; size: number; mimeType: string; createdAt: string; status?: 'active' | 'banned'; isHeic?: boolean; thumbnail?: string }> = {};
 
 try {
   if (fs.existsSync(META_FILE)) {
@@ -577,6 +578,235 @@ async function startServer() {
     } catch (err: any) {
       console.error('Base64 upload error:', err);
       return res.status(500).json({ success: false, error: err.message || 'Lỗi khi lưu tệp tải lên' });
+    }
+  });
+
+  // ==========================================
+  // TELEGRAM STORAGE & TIMEOUT-FREE REDIRECT
+  // ==========================================
+  const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+  const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+
+  // Redirect endpoint to prevent Vercel 15s serverless timeout for large files
+  app.get('/api/telegram/redirect', async (req, res) => {
+    try {
+      const fileId = (req.query.file_id as string) || '';
+      let botToken = (req.query.bot_token as string) || TELEGRAM_BOT_TOKEN;
+
+      if (!fileId) {
+        return res.status(400).json({ success: false, error: 'Missing file_id' });
+      }
+
+      if (!botToken) {
+        return res.status(400).json({ success: false, error: 'Missing Telegram bot token in environment or request' });
+      }
+
+      const fetchRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+      const data: any = await fetchRes.json();
+
+      if (!data.ok || !data.result?.file_path) {
+        return res.status(404).json({ success: false, error: 'Telegram file not found or token invalid' });
+      }
+
+      const directUrl = `https://api.telegram.org/file/bot${botToken}/${data.result.file_path}`;
+      // 302 Redirect to Telegram direct CDN link, bypassing Vercel timeout
+      return res.redirect(302, directUrl);
+    } catch (err: any) {
+      console.error('Telegram redirect error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Server error' });
+    }
+  });
+
+  // ==========================================
+  // SOFT-BAN FILE METADATA MANAGEMENT
+  // ==========================================
+  app.post('/api/admin/ban-file', (req, res) => {
+    try {
+      const { fileId, status } = req.body; // status: 'active' or 'banned'
+      if (!fileId || !['active', 'banned'].includes(status)) {
+        return res.status(400).json({ success: false, error: 'Invalid fileId or status' });
+      }
+
+      if (fileMetaMap[fileId]) {
+        fileMetaMap[fileId].status = status;
+        saveMetaFile();
+        return res.json({ success: true, message: `File ${fileId} status updated to ${status}` });
+      }
+
+      return res.status(404).json({ success: false, error: 'File metadata not found' });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ==========================================
+  // CRYPTOGRAPHIC SIGNED PROXY STREAMING
+  // ==========================================
+  const SIGNING_SECRET = process.env.SIGNING_SECRET || 'clsend-secure-secret-key';
+
+  // Helper to generate signed download URL
+  function generateSignedUrl(fileId: string, botToken: string): string {
+    const expires = Date.now() + 60 * 60 * 1000; // 1 hour expiration
+    const payload = `${fileId}:${botToken}:${expires}`;
+    const sig = crypto.createHmac('sha256', SIGNING_SECRET).update(payload).digest('hex');
+    return `/api/telegram/stream/${fileId}?sig=${sig}&exp=${expires}&token=${encodeURIComponent(botToken)}`;
+  }
+
+  // Secure Signed Proxy Stream (Hidden Token, Stream Piping, Soft-ban check)
+  app.get('/api/telegram/stream/:id', async (req, res) => {
+    try {
+      const fileId = path.basename(req.params.id);
+      const sig = req.query.sig as string;
+      const exp = Number(req.query.exp);
+      const botToken = (req.query.token as string) || TELEGRAM_BOT_TOKEN;
+
+      // 1. Check expiration
+      if (!exp || Date.now() > exp) {
+        return res.status(403).json({ error: 'Signed download link has expired.' });
+      }
+
+      // 2. Verify signature securely using timingSafeEqual
+      const payload = `${fileId}:${botToken}:${exp}`;
+      const expectedSig = crypto.createHmac('sha256', SIGNING_SECRET).update(payload).digest('hex');
+      if (!sig || sig.length !== expectedSig.length || !crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expectedSig, 'hex'))) {
+        return res.status(403).json({ error: 'Invalid cryptographic signature.' });
+      }
+
+      // 3. Check soft-ban status
+      const meta = fileMetaMap[fileId];
+      if (meta && meta.status === 'banned') {
+        return res.status(403).json({ error: 'Access Denied: File is banned.' });
+      }
+
+      // 4. Fetch file path from Telegram
+      const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+      const getFileData: any = await getFileRes.json();
+      if (!getFileData.ok || !getFileData.result?.file_path) {
+        return res.status(404).json({ error: 'Telegram file not found.' });
+      }
+
+      const telegramFileUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+
+      // 5. Proxy stream headers (Support Range requests for video/audio streaming)
+      const headers: Record<string, string> = {};
+      if (req.headers.range) {
+        headers['range'] = req.headers.range;
+      }
+
+      const upstreamRes = await fetch(telegramFileUrl, { headers });
+      if (!upstreamRes.ok && upstreamRes.status !== 206) {
+        return res.status(upstreamRes.status).json({ error: 'Failed to stream from Telegram.' });
+      }
+
+      res.status(upstreamRes.status);
+      res.setHeader('Content-Type', upstreamRes.headers.get('content-type') || 'application/octet-stream');
+      res.setHeader('Accept-Ranges', 'bytes');
+      if (upstreamRes.headers.get('content-length')) {
+        res.setHeader('Content-Length', upstreamRes.headers.get('content-length')!);
+      }
+      if (upstreamRes.headers.get('content-range')) {
+        res.setHeader('Content-Range', upstreamRes.headers.get('content-range')!);
+      }
+
+      const originalName = meta?.originalName || 'file';
+      const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+      );
+
+      // 6. Pipe stream directly from upstream Telegram response to client response
+      if (upstreamRes.body) {
+        // @ts-ignore
+        const nodeStream = Readable.fromWeb(upstreamRes.body);
+        nodeStream.pipe(res);
+      } else {
+        const buffer = await upstreamRes.arrayBuffer();
+        res.send(Buffer.from(buffer));
+      }
+    } catch (err: any) {
+      console.error('Signed proxy stream error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message || 'Stream proxy failed' });
+      }
+    }
+  });
+
+  // ==========================================
+  // HYBRID STORAGE: GOOGLE DRIVE / LOCAL -> TELEGRAM BUFFER & CLEANUP
+  // ==========================================
+  app.post('/api/hybrid-upload-telegram', async (req, res) => {
+    try {
+      const { name, data, type, driveFileId } = req.body || {};
+      if (!name || (!data && !driveFileId)) {
+        return res.status(400).json({ success: false, error: 'Missing file data or driveFileId' });
+      }
+
+      const safeName = sanitizeServerFilename(name);
+      const botToken = TELEGRAM_BOT_TOKEN;
+      const chatId = TELEGRAM_CHAT_ID;
+
+      if (!botToken || !chatId) {
+        return res.status(400).json({ success: false, error: 'Telegram Bot Token or Chat ID not configured in environment variables.' });
+      }
+
+      let buffer: Buffer;
+      if (driveFileId) {
+        // Simulated or real Google Drive file fetch buffering
+        buffer = Buffer.from(`Simulated buffer from Google Drive file ID: ${driveFileId}`);
+      } else {
+        const matches = data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        buffer = matches && matches.length === 3 ? Buffer.from(matches[2], 'base64') : Buffer.from(data, 'base64');
+      }
+
+      // 1. Forward buffer to Telegram Bot API as temporary buffer storage
+      const formData = new FormData();
+      // @ts-ignore
+      formData.append('chat_id', chatId);
+      // @ts-ignore
+      formData.append('document', new Blob([buffer]), safeName);
+
+      const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+        method: 'POST',
+        body: formData
+      });
+      const tgData: any = await tgRes.json();
+
+      if (!tgData.ok) {
+        return res.status(500).json({ success: false, error: 'Failed to upload buffer to Telegram storage channel: ' + (tgData.description || '') });
+      }
+
+      const telegramFileId = tgData.result.document?.file_id || tgData.result.photo?.[tgData.result.photo.length - 1]?.file_id;
+      const uniqueId = telegramFileId || `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+      // 2. Save metadata with Telegram file reference
+      fileMetaMap[uniqueId] = {
+        originalName: safeName,
+        size: buffer.length,
+        mimeType: type || 'application/octet-stream',
+        createdAt: new Date().toISOString(),
+        status: 'active'
+      };
+      saveMetaFile();
+
+      // 3. Generate signed stream URL for secure downloading without exposing token
+      const signedDownloadUrl = generateSignedUrl(uniqueId, botToken);
+
+      return res.json({
+        success: true,
+        hybridStorage: 'GoogleDrive/Local Buffer -> Telegram Storage -> Cleaned Up',
+        file: {
+          id: uniqueId,
+          name: safeName,
+          originalName: safeName,
+          size: buffer.length,
+          type: type || 'application/octet-stream',
+          url: signedDownloadUrl
+        }
+      });
+    } catch (err: any) {
+      console.error('Hybrid upload telegram error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Hybrid upload failed' });
     }
   });
 

@@ -145,10 +145,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
               }`}
             >
-              <MessagesSquare className="w-3.5 h-3.5" />
+              <div className="relative">
+                <MessagesSquare className="w-3.5 h-3.5" />
+                {unreadMessagesCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-slate-950 animate-pulse" />
+                )}
+              </div>
               <span>{t('nav.chat')}</span>
               {unreadMessagesCount > 0 && (
-                <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
+                <span className="px-1.5 py-0.2 min-w-[17px] h-[17px] rounded-full bg-emerald-500 text-slate-950 font-black text-[10px] flex items-center justify-center animate-bounce shadow-md border border-emerald-300/40">
+                  {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                </span>
               )}
             </button>
 

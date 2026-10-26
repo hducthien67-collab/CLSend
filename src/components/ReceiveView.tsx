@@ -56,6 +56,7 @@ import { isImageFile } from '../utils/fileUpload';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { extractUrls, hasUrls, renderClickableText } from '../utils/textFormat';
 import { downloadFileSafely } from '../utils/fileDownload';
+import { showGlobalToast } from '../utils/toast';
 
 type ReceiveCategoryTab = 'all' | 'files' | 'text' | 'saved_cloud' | 'pending';
 
@@ -103,11 +104,21 @@ export const ReceiveView: React.FC = () => {
     );
   };
 
-  // Helper for Toast alerts
+  // Helper for Toast alerts - routed to topmost persistent global toast
   const showToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
-    setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 4000);
+    showGlobalToast(text, type);
   };
+
+  // Lock background scroll when previewImage modal is open
+  useEffect(() => {
+    if (previewImage) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [previewImage]);
 
   // Listen to transfers directed to this user
   useEffect(() => {

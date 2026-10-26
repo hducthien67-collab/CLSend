@@ -756,7 +756,15 @@ export const SendView: React.FC = () => {
         for (let i = 0; i < totalFiles; i++) {
           const item = selectedFiles[i];
           const currentNumber = i + 1;
-          setUploadProgress(Math.round((i / totalFiles) * 100) + 1);
+          
+          let currentDisplayPct = Math.min(92, Math.round((i / totalFiles) * 100) + 5);
+          setUploadProgress(currentDisplayPct);
+          const progressInterval = setInterval(() => {
+            currentDisplayPct += Math.floor(Math.random() * 5) + 2;
+            if (currentDisplayPct > 92) currentDisplayPct = 92;
+            setUploadProgress(currentDisplayPct);
+          }, 150);
+
           setUploadProgressText(currentLang === 'en'
             ? `Processing file ${currentNumber}/${totalFiles}: "${item.name}"...`
             : `Đang xử lý tệp ${currentNumber}/${totalFiles}: "${item.name}"...`);
@@ -765,6 +773,7 @@ export const SendView: React.FC = () => {
           let serverThumbnail = fileThumbnails[item.name] || item.thumbnail || '';
 
           if (item.isFromCloud && item.cloudUrl) {
+            clearInterval(progressInterval);
             // Already stored securely in personal Cloud Drive!
             fileUrl = item.cloudUrl;
             const fileShare = 100 / totalFiles;
@@ -784,11 +793,13 @@ export const SendView: React.FC = () => {
                   ? `Sending file ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`
                   : `Đang gửi tệp ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`);
               });
+              clearInterval(progressInterval);
               fileUrl = uploaded.url;
               if (uploaded.thumbnail) {
                 serverThumbnail = uploaded.thumbnail;
               }
             } catch (uploadErr: any) {
+              clearInterval(progressInterval);
               console.warn(`Server upload notice for ${item.name}, using resilient direct fallback:`, uploadErr);
               const fallback = await createClientFallbackFileInfo(item.file);
               fileUrl = fallback.url || '';

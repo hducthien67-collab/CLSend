@@ -96,6 +96,7 @@ import { ReportIncidentModal } from './ReportIncidentModal';
 import { RichChatInput, RichChatInputHandle } from './RichChatInput';
 import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
+import { triggerIncomingChatMessageNotification } from '../utils/tabNotification';
 
 // Default Earth / Globe SVG Avatar for Global Lounge (Đại Sảnh Toàn Cầu)
 const DEFAULT_GLOBAL_LOUNGE_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="%23064e3b" stroke="%2310b981" stroke-width="3"/><circle cx="50" cy="50" r="38" fill="%23047857"/><ellipse cx="50" cy="50" rx="18" ry="38" fill="none" stroke="%2334d399" stroke-width="2.5"/><line x1="12" y1="50" x2="88" y2="50" stroke="%2334d399" stroke-width="2.5"/><path d="M20 30 Q50 38 80 30" fill="none" stroke="%236ee7b7" stroke-width="2"/><path d="M20 70 Q50 62 80 70" fill="none" stroke="%236ee7b7" stroke-width="2"/></svg>`;
@@ -689,8 +690,13 @@ export const ChatRoomView: React.FC = () => {
 
       setRecentMessages(msgs);
 
-      if (hasNewExternalMsg && settings.soundEnabled) {
-        playReceiveSound();
+      if (hasNewExternalMsg) {
+        if (settings.soundEnabled) {
+          playReceiveSound();
+        }
+        if (typeof document !== 'undefined' && (document.hidden || !document.hasFocus())) {
+          triggerIncomingChatMessageNotification(1);
+        }
       }
 
       const latestMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;

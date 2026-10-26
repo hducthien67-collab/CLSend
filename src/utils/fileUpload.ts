@@ -476,97 +476,139 @@ export async function uploadFileToServer(
     throw new Error(`Tệp "${file.name}" (${formatFileSize(file.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
   }
 
-  // Strategy 0: High-speed Telegram Cloud Storage (Strictly for files <= 20MB due to Telegram API limits)
-  if (file.size <= 20 * 1024 * 1024) {
-    try {
-      const tgRes = await uploadToTelegram(file);
-      if (tgRes.downloadUrl) {
-        if (onProgress) onProgress(100);
-        return await cacheAndReturn(file, {
-          id: tgRes.fileId,
-          name: file.name,
-          originalName: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          url: tgRes.downloadUrl,
-          viewUrl: tgRes.viewUrl || tgRes.downloadUrl,
-          thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
-        });
+  // Smooth interpolated progress ticker
+  let targetPct = 5;
+  let displayedPct = 5;
+  if (onProgress) onProgress(displayedPct);
+
+  const progressInterval = setInterval(() => {
+    if (displayedPct < targetPct) {
+      displayedPct += 1;
+      if (onProgress) onProgress(displayedPct);
+    } else if (displayedPct < 90 && targetPct < 90) {
+      targetPct += 1; // gradually increase target towards 90%
+    }
+  }, 30); // 30ms per percent for buttery smooth 1-by-1 increment
+
+  const clearProgressTimer = () => {
+    if (progressInterval) clearInterval(progressInterval);
+  };
+
+  const reportProgress = (realPct: number) => {
+    if (realPct > targetPct) {
+      targetPct = Math.min(99, realPct);
+    }
+  };
+
+  try {
+    // Strategy 0: High-speed Telegram Cloud Storage (Files <= 20MB)
+    if (file.size <= 20 * 1024 * 1024) {
+      try {
+        const tgRes = await uploadToTelegram(file);
+        if (tgRes.downloadUrl) {
+          clearProgressTimer();
+          if (onProgress) onProgress(100);
+          return await cacheAndReturn(file, {
+            id: tgRes.fileId,
+            name: file.name,
+            originalName: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            url: tgRes.downloadUrl,
+            viewUrl: tgRes.viewUrl || tgRes.downloadUrl,
+            thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
+          });
+        }
+      } catch (tgErr: any) {
+        console.warn('Telegram Storage notice, transferring to high-speed CLSend storage:', tgErr?.message || tgErr);
       }
-    } catch (tgErr: any) {
-      console.warn('Telegram Storage notice, transferring to high-speed CLSend storage:', tgErr?.message || tgErr);
     }
-  }
 
-  // Strategy 1: For files > 15MB, prioritize Chunked Upload directly!
-  // This bypasses Cloud Run 32MB single-request proxy limit completely.
-  if (file.size > 15 * 1024 * 1024) {
+    // Strategy 1: Chunked Upload (> 15MB)
+    if (file.size > 15 * 1024 * 1024) {
+      try {
+        const res = await uploadViaChunks(file, reportProgress);
+        clearProgressTimer();
+        if (onProgress) onProgress(100);
+        return await cacheAndReturn(file, res);
+      } catch (chunkErr: any) {
+        console.warn(`Primary chunked upload strategy notice for "${file.name}":`, chunkErr?.message || chunkErr);
+      }
+    }
+
+    // Strategy 2: Standard Fetch multipart upload
     try {
-      const res = await uploadViaChunks(file, onProgress);
+      const res = await uploadViaFetch(file, reportProgress);
+      clearProgressTimer();
+      if (onProgress) onProgress(100);
       return await cacheAndReturn(file, res);
-    } catch (chunkErr: any) {
-      console.warn(`Primary chunked upload strategy notice for "${file.name}":`, chunkErr?.message || chunkErr);
+    } catch (err: any) {
+      console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
     }
-  }
 
-  // Strategy 2: Standard Fetch multipart upload
-  try {
-    const res = await uploadViaFetch(file, onProgress);
-    return await cacheAndReturn(file, res);
+    // Strategy 3: Fallback to Chunked Upload
+    try {
+      const res = await uploadViaChunks(file, reportProgress);
+      clearProgressTimer();
+      if (onProgress) onProgress(100);
+      return await cacheAndReturn(file, res);
+    } catch (fallbackChunkErr: any) {
+      console.warn(`Fallback chunked upload notice for "${file.name}":`, fallbackChunkErr?.message || fallbackChunkErr);
+    }
+
+    // Strategy 4: Base64 JSON upload (<= 30MB)
+    if (file.size <= 30 * 1024 * 1024) {
+      try {
+        const res = await uploadViaBase64(file, reportProgress);
+        clearProgressTimer();
+        if (onProgress) onProgress(100);
+        return await cacheAndReturn(file, res);
+      } catch (fallbackErr: any) {
+        console.warn(`Base64 upload strategy notice for "${file.name}":`, fallbackErr?.message || fallbackErr);
+      }
+    }
+
+    // Strategy 5: XHR multipart upload
+    try {
+      const res = await uploadViaMultipart(file, reportProgress);
+      clearProgressTimer();
+      if (onProgress) onProgress(100);
+      return await cacheAndReturn(file, res);
+    } catch (xhrErr: any) {
+      console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
+    }
+
+    // Strategy 5.5: External Free Web Hosting Services
+    try {
+      const extRes = await uploadToExternalWebServices(file, reportProgress);
+      clearProgressTimer();
+      if (onProgress) onProgress(100);
+      return await cacheAndReturn(file, {
+        id: `ext-${Date.now()}`,
+        name: extRes.name,
+        originalName: extRes.name,
+        size: extRes.size,
+        type: extRes.type,
+        url: extRes.url,
+        viewUrl: extRes.url,
+        thumbnail: isImageFile(file) ? extRes.url : undefined
+      });
+    } catch (extErr: any) {
+      console.warn(`External web storage strategy notice for "${file.name}":`, extErr?.message || extErr);
+    }
+
+    // Strategy 6: Client-side fallback (< 400KB or image)
+    if (isImageFile(file) || file.size <= 400 * 1024) {
+      clearProgressTimer();
+      if (onProgress) onProgress(100);
+      const res = await createClientFallbackFileInfo(file);
+      return await cacheAndReturn(file, res);
+    }
+
+    clearProgressTimer();
+    throw new Error(`Không thể kết nối đến máy chủ lưu trữ cho tệp "${file.name}". Vui lòng thử lại.`);
   } catch (err: any) {
-    console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
+    clearProgressTimer();
+    throw err;
   }
-
-  // Strategy 3: Fallback to Chunked Upload if Fetch was blocked or returned HTML
-  try {
-    const res = await uploadViaChunks(file, onProgress);
-    return await cacheAndReturn(file, res);
-  } catch (fallbackChunkErr: any) {
-    console.warn(`Fallback chunked upload notice for "${file.name}":`, fallbackChunkErr?.message || fallbackChunkErr);
-  }
-
-  // Strategy 4: Base64 JSON upload for files up to 30MB
-  if (file.size <= 30 * 1024 * 1024) {
-    try {
-      const res = await uploadViaBase64(file, onProgress);
-      return await cacheAndReturn(file, res);
-    } catch (fallbackErr: any) {
-      console.warn(`Base64 upload strategy notice for "${file.name}":`, fallbackErr?.message || fallbackErr);
-    }
-  }
-
-  // Strategy 5: XHR multipart upload
-  try {
-    const res = await uploadViaMultipart(file, onProgress);
-    return await cacheAndReturn(file, res);
-  } catch (xhrErr: any) {
-    console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
-  }
-
-  // Strategy 5.5: External Free Web Hosting Services (Catbox.moe, Litterbox, Pomf)
-  try {
-    const extRes = await uploadToExternalWebServices(file, onProgress);
-    return await cacheAndReturn(file, {
-      id: `ext-${Date.now()}`,
-      name: extRes.name,
-      originalName: extRes.name,
-      size: extRes.size,
-      type: extRes.type,
-      url: extRes.url,
-      viewUrl: extRes.url,
-      thumbnail: isImageFile(file) ? extRes.url : undefined
-    });
-  } catch (extErr: any) {
-    console.warn(`External web storage strategy notice for "${file.name}":`, extErr?.message || extErr);
-  }
-
-  // Strategy 6: Resilient client-side fallback for images or small files (< 400KB)
-  if (isImageFile(file) || file.size <= 400 * 1024) {
-    console.log(`Activating safe client-side preview/storage for "${file.name}"...`);
-    if (onProgress) onProgress(100);
-    const res = await createClientFallbackFileInfo(file);
-    return await cacheAndReturn(file, res);
-  }
-
-  throw new Error(`Không thể kết nối đến máy chủ lưu trữ cho tệp "${file.name}". Vui lòng thử lại.`);
 }

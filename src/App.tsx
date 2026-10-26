@@ -21,6 +21,7 @@ import { RobloxModerationModal } from './components/RobloxModerationModal';
 import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
 import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
+import { registerToastListener } from './utils/toast';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc } from 'firebase/firestore';
@@ -42,6 +43,7 @@ import { playReceiveSound } from './utils/sound';
 import { formatFileSize, isSmartTv } from './utils/device';
 import { autoCalibrateAndApplyDpi } from './utils/dpi';
 import { renderClickableText } from './utils/textFormat';
+import { setTabNotificationBadge, registerUnreadCountListener } from './utils/tabNotification';
 
 function MainApp() {
   const { currentUser, loading, settings, verifyEmailCodeAndLink, userProfile } = useAuth();
@@ -92,6 +94,19 @@ function MainApp() {
   useEffect(() => {
     const unregister = registerErrorChatListener((info) => {
       setErrorChatInfo(info);
+    });
+    return () => unregister();
+  }, []);
+
+  const [activeToast, setActiveToast] = useState<{ id: string; text: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  useEffect(() => {
+    const unregister = registerToastListener((text, type = 'success') => {
+      const id = Date.now().toString();
+      setActiveToast({ id, text, type });
+      setTimeout(() => {
+        setActiveToast(prev => prev?.id === id ? null : prev);
+      }, 3000);
     });
     return () => unregister();
   }, []);
@@ -244,6 +259,36 @@ function MainApp() {
     textContent?: string;
   } | null>(null);
 
+  // Keep tab notification badge (Facebook green dot favicon + Discord (N) title) synchronized with unreadMessagesCount
+  useEffect(() => {
+    setTabNotificationBadge(unreadMessagesCount);
+  }, [unreadMessagesCount]);
+
+  // Register unread listener so chat subcomponents or manual tests can trigger badges
+  useEffect(() => {
+    const unregister = registerUnreadCountListener((updater) => {
+      setUnreadMessagesCount(updater);
+    });
+    return () => unregister();
+  }, []);
+
+  // When window gains focus or document becomes visible, clear unread count if user is already on Chat tab
+  useEffect(() => {
+    const handleClearIfFocusedChat = () => {
+      if (activeTabRef.current === 'chat' && !document.hidden) {
+        setUnreadMessagesCount(0);
+        setChatNotification(null);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleClearIfFocusedChat);
+    window.addEventListener('focus', handleClearIfFocusedChat);
+    return () => {
+      document.removeEventListener('visibilitychange', handleClearIfFocusedChat);
+      window.removeEventListener('focus', handleClearIfFocusedChat);
+    };
+  }, []);
+
   // Global Real-time Unread Message Tracking for Public Lounge
   useEffect(() => {
     if (!currentUser) return;
@@ -257,7 +302,9 @@ function MainApp() {
           const msg = change.doc.data();
           const msgTime = msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : 0);
           if (msgTime > sessionStartTime && msg.senderId !== currentUser.uid && msg.senderDevice !== settings?.deviceName) {
-            if (activeTab !== 'chat') {
+            // Count as unread if user is not currently looking at the chat tab
+            const isViewingChat = activeTabRef.current === 'chat' && !document.hidden && (typeof document.hasFocus === 'function' ? document.hasFocus() : true);
+            if (!isViewingChat) {
               setUnreadMessagesCount((prev) => prev + 1);
               if (settings?.soundEnabled) {
                 playReceiveSound();
@@ -277,7 +324,7 @@ function MainApp() {
     });
 
     return () => unsubscribe();
-  }, [currentUser, activeTab, settings?.soundEnabled]);
+  }, [currentUser, settings?.soundEnabled]);
 
   // When user switches to chat, clear unread count and notification banner
   useEffect(() => {
@@ -586,6 +633,8 @@ function MainApp() {
             window.history.pushState(null, '', '/?page=datastore');
             setIsDatastorePage(true);
           }}
+          unreadMessagesCount={unreadMessagesCount}
+          onResetUnreadChat={() => setUnreadMessagesCount(0)}
         />
 
         {/* DEV Cloud Audit & Progressive Moderation Modal on Mobile */}
@@ -886,6 +935,48 @@ function MainApp() {
           onDirectCDN={errorChatInfo.onDirectCDN}
           onClose={() => setErrorChatInfo(null)}
         />
+      )}
+
+      {/* Global Floating Toast Notification (Persistent across tabs, always on top layer z-[999999], auto-hides in 3s) */}
+      {activeToast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[999999] pointer-events-none w-full max-w-md px-4 flex justify-center animate-in fade-in slide-in-from-top-4 zoom-in-95 duration-300">
+          <div
+            className={`pointer-events-auto shadow-2xl rounded-2xl px-4 py-3 flex items-center gap-3 backdrop-blur-xl transition-all border ${
+              activeToast.type === 'error'
+                ? 'bg-[#180a10]/95 border-rose-500/60 text-rose-100 shadow-rose-950/60'
+                : activeToast.type === 'info'
+                ? 'bg-[#0a1424]/95 border-sky-500/60 text-sky-100 shadow-sky-950/60'
+                : 'bg-[#08121a]/95 border-emerald-500/60 text-emerald-100 shadow-emerald-950/60'
+            }`}
+          >
+            <div
+              className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                activeToast.type === 'error'
+                  ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                  : activeToast.type === 'info'
+                  ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+                  : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+              }`}
+            >
+              {activeToast.type === 'error' ? (
+                <ShieldAlert className="w-4 h-4" />
+              ) : (
+                <Check className="w-4 h-4 stroke-[2.5]" />
+              )}
+            </div>
+            <p className="text-xs sm:text-sm font-semibold truncate flex-1 leading-snug">
+              {activeToast.text}
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveToast(null)}
+              className="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800/60 cursor-pointer shrink-0"
+              title="Đóng thông báo"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

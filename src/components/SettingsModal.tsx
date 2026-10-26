@@ -65,6 +65,7 @@ import {
 import { DeviceType, LoginSession } from './types';
 import { AVATAR_COLORS, getDeviceTypeInfo, generateDefaultDeviceName } from '../utils/device';
 import { playReceiveSound } from '../utils/sound';
+import { triggerIncomingChatMessageNotification } from '../utils/tabNotification';
 import { isDevUser } from '../utils/devModeration';
 import { FullscreenDesignStudio } from './FullscreenDesignStudio';
 import { 
@@ -1094,7 +1095,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <button
                         type="button"
                         onClick={handleTestSound}
-                        className="px-2 py-0.5 text-[11px] rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700"
+                        className="px-2 py-0.5 text-[11px] rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer"
                       >
                         {t('settings.test_sound')}
                       </button>
@@ -1102,8 +1103,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         type="checkbox"
                         checked={soundEnabled}
                         onChange={(e) => setSoundEnabled(e.target.checked)}
-                        className="w-4 h-4 rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500"
+                        className="w-4 h-4 rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500 cursor-pointer"
                       />
+                    </div>
+                  </div>
+
+                  {/* Browser Tab Badge Notification (Facebook Green Dot Favicon & Discord Title Count) */}
+                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                    <div className="pr-2">
+                      <div className="text-xs font-semibold text-white flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-500/30 animate-pulse" />
+                        <span>Huy hiệu Tab trình duyệt (Facebook & Discord)</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">
+                        Hiện chấm tròn xanh lá ở góc logo tab và số tin nhắn (N) trên thanh tiêu đề khi có tin nhắn mới.
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          triggerIncomingChatMessageNotification(1);
+                          playReceiveSound();
+                        }}
+                        className="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 transition-all cursor-pointer active:scale-95 flex items-center gap-1"
+                        title="Thử nghiệm hiển thị chấm xanh lá trên logo tab và số tin nhắn Discord"
+                      >
+                        <Sparkles className="w-3 h-3 text-emerald-400" />
+                        <span>Thử nghiệm</span>
+                      </button>
                     </div>
                   </div>
                 </div>

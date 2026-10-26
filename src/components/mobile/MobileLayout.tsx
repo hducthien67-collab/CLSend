@@ -15,13 +15,17 @@ interface MobileLayoutProps {
   onOpenRules: () => void;
   onOpenDevConsole?: () => void;
   onOpenDevPage?: () => void;
+  unreadMessagesCount?: number;
+  onResetUnreadChat?: () => void;
 }
 
 export const MobileLayout: React.FC<MobileLayoutProps> = ({
   onToggleViewMode,
   onOpenRules,
   onOpenDevConsole,
-  onOpenDevPage
+  onOpenDevPage,
+  unreadMessagesCount,
+  onResetUnreadChat
 }) => {
   const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>('send');
@@ -88,11 +92,14 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
-          if (tab === 'chat') setUnreadChatCount(0);
+          if (tab === 'chat') {
+            setUnreadChatCount(0);
+            onResetUnreadChat?.();
+          }
         }}
         onOpenSettings={() => setIsSettingsOpen(true)}
         incomingCount={incomingCount}
-        unreadChatCount={unreadChatCount}
+        unreadChatCount={unreadMessagesCount !== undefined ? unreadMessagesCount : unreadChatCount}
       />
 
       {/* Settings Modal */}

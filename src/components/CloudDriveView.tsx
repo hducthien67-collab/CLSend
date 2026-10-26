@@ -47,6 +47,8 @@ import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { getTelegramConfig, uploadToTelegram } from '../utils/telegramStorage';
 import { cacheFileInCommunitySwarm, getFileFromCommunitySwarm } from '../utils/p2pCommunitySwarm';
+import { showGlobalToast } from '../utils/toast';
+import { AudioPreviewPlayer } from './AudioPreviewPlayer';
 
 const MAX_QUOTA_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB personal storage quota
 
@@ -123,12 +125,23 @@ export const CloudDriveView: React.FC = () => {
   const [reuploadingFile, setReuploadingFile] = useState<CloudDriveFile | null>(null);
 
   const showBottomToast = (message: string, isError = false) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setBottomToast({ id: `${Date.now()}`, message, isError });
-    toastTimerRef.current = setTimeout(() => {
-      setBottomToast(null);
-    }, 4500);
+    showGlobalToast(message, isError ? 'error' : 'success');
   };
+
+  // Lock background scroll when file preview or modals are open
+  useEffect(() => {
+    if (previewFile || filePendingDelete || bulkPendingDelete || isCloudUrlModalOpen) {
+      const originalOverflow = document.body.style.overflow;
+      const originalTouchAction = document.body.style.touchAction;
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        document.body.style.touchAction = originalTouchAction;
+      };
+    }
+  }, [previewFile, filePendingDelete, bulkPendingDelete, isCloudUrlModalOpen]);
 
   // Real-time synchronization of personal Cloud files via Firestore
   useEffect(() => {
@@ -1091,25 +1104,27 @@ export const CloudDriveView: React.FC = () => {
       {previewFile && (
         <div
           onClick={() => setPreviewFile(null)}
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200 touch-none overscroll-none"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+            className="bg-[#0b1120] border border-slate-800/80 rounded-2xl sm:rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200"
           >
             {/* Modal Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2.5 min-w-0">
-                {getFileIcon(previewFile.category || 'other', previewFile.name, previewFile.type)}
+            <div className="p-3.5 sm:p-4 border-b border-slate-800/80 flex items-center justify-between gap-3 sm:gap-4 bg-[#0a0f1d]">
+              <div className="flex items-center gap-3 min-w-0">
+                <FileDocIcon fileName={previewFile.name} mimeType={previewFile.type} size="sm" />
                 <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-white truncate">{previewFile.name}</h3>
-                  <p className="text-[11px] text-slate-400">
-                    {formatFileSize(previewFile.size)} • {new Date(previewFile.createdAt).toLocaleString('vi-VN')}
+                  <h3 className="text-xs sm:text-sm font-bold text-white truncate max-w-[180px] sm:max-w-md" title={previewFile.name}>
+                    {previewFile.name}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {formatFileSize(previewFile.size)} • {new Date(previewFile.createdAt).toLocaleTimeString('vi-VN')} {new Date(previewFile.createdAt).toLocaleDateString('vi-VN')}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -1119,7 +1134,7 @@ export const CloudDriveView: React.FC = () => {
                     }
                     downloadFileSafely(previewFile.url, previewFile.name);
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Tải về</span>
@@ -1128,14 +1143,15 @@ export const CloudDriveView: React.FC = () => {
                   type="button"
                   title="Xóa tệp này khỏi Cloud"
                   onClick={() => handleDeleteFile(previewFile)}
-                  className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-colors"
+                  className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-colors cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setPreviewFile(null)}
-                  className="p-1.5 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                  className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                  title="Đóng xem trước"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1143,31 +1159,25 @@ export const CloudDriveView: React.FC = () => {
             </div>
 
             {/* Modal Body / Media Viewer */}
-            <div className="p-4 overflow-auto flex-1 flex items-center justify-center bg-slate-950/60 min-h-[300px]">
+            <div className="p-4 sm:p-6 overflow-auto flex-1 flex items-center justify-center bg-[#070b14]/70 min-h-[300px] modal-scrollable">
               {previewFile.category === 'image' ? (
                 <img
                   src={previewFile.viewUrl || previewFile.url}
                   alt={previewFile.name}
-                  className="max-h-[65vh] max-w-full object-contain rounded-lg shadow-lg"
+                  className="max-h-[65vh] max-w-full object-contain rounded-xl shadow-lg"
                 />
               ) : previewFile.category === 'video' ? (
                 <video
                   src={previewFile.viewUrl || previewFile.url}
                   controls
                   autoPlay
-                  className="max-h-[65vh] max-w-full rounded-lg shadow-lg"
+                  className="max-h-[65vh] max-w-full rounded-xl shadow-lg"
                 />
               ) : previewFile.category === 'audio' ? (
-                <div className="w-full max-w-md p-6 bg-slate-900 border border-slate-800 rounded-2xl text-center">
-                  <Music className="w-12 h-12 text-violet-400 mx-auto mb-3" />
-                  <p className="text-sm font-semibold text-white mb-4">{previewFile.name}</p>
-                  <audio
-                    src={previewFile.viewUrl || previewFile.url}
-                    controls
-                    autoPlay
-                    className="w-full"
-                  />
-                </div>
+                <AudioPreviewPlayer
+                  src={previewFile.viewUrl || previewFile.url}
+                  fileName={previewFile.name}
+                />
               ) : (
                 <div className="text-center p-8 flex flex-col items-center">
                   <div className="mb-4">
@@ -1357,48 +1367,6 @@ export const CloudDriveView: React.FC = () => {
         </div>
       )}
 
-      {/* ============================================================ */}
-      {/* 3. HỘP THÔNG BÁO Ở DƯỚI (BOTTOM FLOATING TOAST NOTIFICATION)   */}
-      {/* ============================================================ */}
-      {bottomToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] max-w-md w-[calc(100vw-2rem)] animate-in slide-in-from-bottom-5 fade-in duration-300 pointer-events-auto">
-          <div
-            className={`px-4 py-3 rounded-2xl shadow-2xl flex items-center justify-between gap-3 backdrop-blur-xl border ${
-              bottomToast.isError
-                ? 'bg-slate-900/95 border-rose-500/60 text-rose-200 shadow-rose-950/50'
-                : 'bg-slate-900/95 border-emerald-500/60 text-emerald-200 shadow-emerald-950/50'
-            }`}
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div
-                className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border ${
-                  bottomToast.isError
-                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                    : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                }`}
-              >
-                {bottomToast.isError ? (
-                  <AlertCircle className="w-4 h-4" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                )}
-              </div>
-              <div className="text-xs sm:text-sm font-medium leading-snug truncate">
-                {bottomToast.message}
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setBottomToast(null)}
-              className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white shrink-0 cursor-pointer transition-colors"
-              title="Đóng thông báo"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
 
       {/* Cloud URL Modal */}

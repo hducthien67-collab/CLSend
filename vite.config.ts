@@ -7,11 +7,15 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: './',
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
+        workbox: {
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        },
         manifest: {
           id: '/',
           name: 'ClSend',

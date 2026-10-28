@@ -48,7 +48,8 @@ import {
   Folder,
   Clipboard,
   AlignLeft,
-  Edit3
+  Edit3,
+  HardDrive
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playSendSound } from '../utils/sound';
@@ -84,6 +85,7 @@ export interface SendFileItem {
   thumbnail?: string;
   isFromCloud?: boolean;
   isUrlLink?: boolean;
+  isTeraBox?: boolean;
 }
 
 export const SendView: React.FC = () => {
@@ -114,11 +116,12 @@ export const SendView: React.FC = () => {
   // Text message modal state (Nhập tin nhắn popup matching Image 1)
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [modalTextValue, setModalTextValue] = useState('');
-  // URL input modal state
+  // URL / TeraBox input modal state
   const [isUrlModalOpen, setIsUrlModalOpen] = useState(false);
   const [urlModalValue, setUrlModalValue] = useState('');
+  const [urlCustomName, setUrlCustomName] = useState('');
 
-  const handleUrlAdded = (urlToUse?: string) => {
+  const handleUrlAdded = (urlToUse?: string, customTitle?: string) => {
     const finalUrl = (urlToUse !== undefined ? urlToUse : urlModalValue).trim();
     if (!finalUrl) return;
     let validUrl = finalUrl;
@@ -127,33 +130,47 @@ export const SendView: React.FC = () => {
     }
     try {
       const urlObj = new URL(validUrl);
+      const isTeraBox = /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(urlObj.hostname);
       const pathname = urlObj.pathname;
       const segments = pathname.split('/').filter(Boolean);
       const rawName = segments[segments.length - 1] || urlObj.hostname;
       const decodedName = decodeURIComponent(rawName);
-      const fileName = decodedName.includes('.') ? decodedName : `${urlObj.hostname}_link`;
+      
+      let fileName = (customTitle !== undefined ? customTitle : urlCustomName).trim();
+      if (!fileName) {
+        if (isTeraBox) {
+          fileName = `TeraBox_File_${rawName.substring(0, 12)}`;
+        } else {
+          fileName = decodedName.includes('.') ? decodedName : `${urlObj.hostname}_link`;
+        }
+      }
+
       const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i.test(validUrl);
 
       const newItem: SendFileItem = {
         id: `url_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         name: fileName,
         size: 0,
-        type: isImage ? 'image/jpeg' : 'text/uri-list',
+        type: isTeraBox ? 'application/x-terabox' : (isImage ? 'image/jpeg' : 'text/uri-list'),
         cloudUrl: validUrl,
         viewUrl: validUrl,
         thumbnail: isImage ? validUrl : undefined,
         isFromCloud: false,
-        isUrlLink: true
+        isUrlLink: true,
+        isTeraBox: isTeraBox
       };
       setSelectedFiles(prev => [...prev, newItem]);
       setUrlModalValue('');
+      setUrlCustomName('');
       setIsUrlModalOpen(false);
       setShowQuickChoiceModal(false);
-      setStatusMessage(currentLang === 'en' ? `🔗 Added URL successfully: ${fileName}` : `🔗 Đã thêm URL thành công: ${fileName}`);
-      setTimeout(() => setStatusMessage(null), 3000);
+      setStatusMessage(currentLang === 'en' 
+        ? `🔗 Added ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'} file: ${fileName}` 
+        : `🔗 Đã thêm tệp ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'}: ${fileName}`);
+      setTimeout(() => setStatusMessage(null), 3500);
     } catch {
       setStatusMessage(currentLang === 'en' ? '⚠️ Invalid URL. Please check the format https://...' : '⚠️ URL không hợp lệ. Vui lòng kiểm tra lại định dạng https://...');
-      setTimeout(() => setStatusMessage(null), 3000);
+      setTimeout(() => setStatusMessage(null), 3500);
     }
   };
 
@@ -572,10 +589,16 @@ export const SendView: React.FC = () => {
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleFilesAdded(e.dataTransfer.files);
+      return;
+    }
+    // Support dragging and dropping links (including TeraBox, Google Drive, direct links)
+    const droppedUrl = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (droppedUrl && droppedUrl.trim().startsWith('http')) {
+      handleUrlAdded(droppedUrl.trim());
     }
   };
 
-  // Handle Paste from Clipboard (Images, Files or Text)
+  // Handle Paste from Clipboard (Images, Files, TeraBox Links or Text)
   const handlePasteAction = async () => {
     // Check if Clipboard API is supported
     if (!navigator.clipboard) {
@@ -616,10 +639,20 @@ export const SendView: React.FC = () => {
         }
       }
 
-      // 2. Try reading plain text / code
+      // 2. Try reading plain text / TeraBox link / URLs
       if (navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
         if (text && text.trim()) {
+          const cleanText = text.trim();
+          // Detect if pasted text is a TeraBox link or any cloud file link
+          const isUrl = /^https?:\/\//i.test(cleanText);
+          const isTeraBox = /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(cleanText);
+
+          if (isUrl && (isTeraBox || cleanText.includes('/s/'))) {
+            handleUrlAdded(cleanText);
+            return;
+          }
+
           setTextContent(text);
           setMode('text');
           setStatusMessage(currentLang === 'en'
@@ -774,16 +807,16 @@ export const SendView: React.FC = () => {
           let fileUrl = '';
           let serverThumbnail = fileThumbnails[item.name] || item.thumbnail || '';
 
-          if (item.isFromCloud && item.cloudUrl) {
+          if ((item.isFromCloud || item.isUrlLink) && item.cloudUrl) {
             clearInterval(progressInterval);
-            // Already stored securely in personal Cloud Drive!
+            // Stored in Cloud Drive or external TeraBox / URL
             fileUrl = item.cloudUrl;
             const fileShare = 100 / totalFiles;
             const overall = Math.min(99, Math.round((i + 1) * fileShare));
             setUploadProgress(overall);
             setUploadProgressText(currentLang === 'en'
-              ? `Prepared cloud file ${currentNumber}/${totalFiles}: "${item.name}"...`
-              : `Đã chuẩn bị tệp Cloud ${currentNumber}/${totalFiles}: "${item.name}"...`);
+              ? `Prepared ${item.isTeraBox ? 'TeraBox' : 'cloud'} file ${currentNumber}/${totalFiles}: "${item.name}"...`
+              : `Đã chuẩn bị tệp ${item.isTeraBox ? 'TeraBox' : 'Cloud'} ${currentNumber}/${totalFiles}: "${item.name}"...`);
           } else if (item.file) {
             // Local file: upload to server
             try {
@@ -833,7 +866,9 @@ export const SendView: React.FC = () => {
             fileSize: item.size,
             fileType: item.type || (isImageFile(item) ? 'image/jpeg' : 'application/octet-stream'),
             fileUrl: safeUrl,
-            fileData: safeData
+            fileData: safeData,
+            isTeraBox: item.isTeraBox || false,
+            isUrlLink: item.isUrlLink || false
           };
 
           await addDoc(collection(db, 'transfers'), payload);
@@ -1380,14 +1415,22 @@ export const SendView: React.FC = () => {
                                 <span className="text-xs font-bold text-white block truncate max-w-[180px] sm:max-w-md">
                                   {file.name}
                                 </span>
-                                {file.isFromCloud && (
+                                {file.isTeraBox ? (
+                                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold inline-flex items-center gap-1 shrink-0">
+                                    <HardDrive className="w-2.5 h-2.5 text-blue-400" /> TeraBox 1TB
+                                  </span>
+                                ) : file.isFromCloud ? (
                                   <span className="text-[9px] px-1 py-0.2 rounded bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold inline-flex items-center gap-0.5 shrink-0">
                                     <Cloud className="w-2.5 h-2.5" /> Cloud
                                   </span>
-                                )}
+                                ) : file.isUrlLink ? (
+                                  <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold inline-flex items-center gap-0.5 shrink-0">
+                                    <LinkIcon className="w-2.5 h-2.5" /> Link
+                                  </span>
+                                ) : null}
                               </div>
                               <span className="text-[10px] text-slate-400 block">
-                                {formatFileSize(file.size)} • {getDocumentTypeInfo(file.name, file.type).label}
+                                {file.isTeraBox ? 'Liên kết tệp đám mây TeraBox' : file.isUrlLink ? 'Liên kết trực tiếp' : `${formatFileSize(file.size)} • ${getDocumentTypeInfo(file.name, file.type).label}`}
                               </span>
                             </div>
                           </div>
@@ -1416,7 +1459,7 @@ export const SendView: React.FC = () => {
             ) : (
               /* Compact Sleek Action Grid (4 Buttons) */
               <div className="py-1 sm:py-1.5 space-y-2.5 text-left">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-2.5">
                   {/* 1. Tập tin */}
                   <button
                     id="pick-file-btn"
@@ -1500,7 +1543,27 @@ export const SendView: React.FC = () => {
                       <span className="text-[10px] text-slate-400 hidden sm:block">{t('send.paste_sub')}</span>
                     </div>
                   </button>
-                  
+
+                  {/* 5. TeraBox / Link Cloud */}
+                  <button
+                    id="pick-terabox-btn"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsUrlModalOpen(true);
+                    }}
+                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-blue-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none col-span-2 sm:col-span-1"
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-blue-500/20 flex items-center justify-center text-slate-200 group-hover:text-blue-400 transition-colors shrink-0">
+                      <HardDrive className="w-4 h-4 text-blue-400" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-slate-200 group-hover:text-white block leading-tight">
+                        TeraBox / Link
+                      </span>
+                      <span className="text-[10px] text-blue-400 font-medium hidden sm:block">Kho 1024 GB</span>
+                    </div>
+                  </button>
                 </div>
 
                 {/* Dropzone subtle helper */}
@@ -1963,7 +2026,7 @@ export const SendView: React.FC = () => {
         </div>
       )}
 
-      {/* URL Input Modal */}
+      {/* TeraBox & Cloud Link Input Modal */}
       {isUrlModalOpen && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-[2px] animate-in fade-in duration-150 touch-none overscroll-none"
@@ -1974,10 +2037,17 @@ export const SendView: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between">
-              <h3 className="text-sm sm:text-base font-bold text-white tracking-wide flex items-center gap-2">
-                <LinkIcon className="w-4 h-4 text-indigo-400" />
-                <span>{currentLang === 'en' ? 'Enter URL / Link' : 'Nhập URL / Liên kết'}</span>
-              </h3>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <HardDrive className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white tracking-wide">
+                    {currentLang === 'en' ? 'Add TeraBox / Cloud File' : 'Thêm tệp TeraBox / Cloud'}
+                  </h3>
+                  <span className="text-[10px] text-blue-300 font-medium">Hỗ trợ kho miễn phí 1024 GB (1TB)</span>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsUrlModalOpen(false)}
@@ -1986,26 +2056,71 @@ export const SendView: React.FC = () => {
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <p className="text-xs text-slate-300">
-              {currentLang === 'en' ? 'Paste image, document, video URL or website link you want to send:' : 'Dán URL của hình ảnh, tài liệu, video hoặc liên kết web bạn muốn gửi:'}
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Dán đường dẫn chia sẻ từ <strong>TeraBox</strong> (hoặc Google Drive, Fshare, OneDrive) để gửi tệp siêu lớn mà không tốn dung lượng upload:
             </p>
-            <div className="rounded-xl overflow-hidden bg-[#242b3b] border border-slate-700/70 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20 transition-all p-2.5">
-              <input
-                type="url"
-                value={urlModalValue}
-                onChange={(e) => setUrlModalValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleUrlAdded();
-                  }
-                }}
-                placeholder={currentLang === 'en' ? 'https://example.com/file.png or https://...' : 'https://example.com/file.png hoặc https://...'}
-                className="w-full bg-transparent text-white text-xs sm:text-sm focus:outline-none placeholder:text-slate-500 font-mono"
-                autoFocus
-              />
+
+            {/* Input URL */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-300">
+                1. Đường dẫn liên kết (URL):
+              </label>
+              <div className="rounded-xl overflow-hidden bg-[#242b3b] border border-slate-700/70 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-all p-2.5">
+                <input
+                  type="url"
+                  value={urlModalValue}
+                  onChange={(e) => setUrlModalValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUrlAdded();
+                    }
+                  }}
+                  placeholder="https://terabox.com/s/1... hoặc https://1024tera.com/s/..."
+                  className="w-full bg-transparent text-white text-xs sm:text-sm focus:outline-none placeholder:text-slate-500 font-mono"
+                  autoFocus
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-end gap-2.5 pt-1">
+
+            {/* Input Custom Title */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-300">
+                2. Tên tệp hiển thị (Tùy chọn):
+              </label>
+              <div className="rounded-xl overflow-hidden bg-[#242b3b] border border-slate-700/70 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 transition-all p-2.5">
+                <input
+                  type="text"
+                  value={urlCustomName}
+                  onChange={(e) => setUrlCustomName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUrlAdded();
+                    }
+                  }}
+                  placeholder="Ví dụ: Video_Ky_Yeu_4K.zip, Tai_Lieu_Hoc_Tap.pdf"
+                  className="w-full bg-transparent text-white text-xs sm:text-sm focus:outline-none placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            {/* Helper link to terabox.com */}
+            <div className="pt-1 flex items-center justify-between text-[11px]">
+              <a
+                href="https://www.terabox.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 underline inline-flex items-center gap-1 font-medium"
+              >
+                <span>Chưa có link? Mở TeraBox để lấy link (1TB)</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setIsUrlModalOpen(false)}
@@ -2016,9 +2131,11 @@ export const SendView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleUrlAdded()}
-                className="px-5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
+                disabled={!urlModalValue.trim()}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <span>{currentLang === 'en' ? 'Confirm add URL' : 'Xác nhận thêm URL'}</span>
+                <HardDrive className="w-4 h-4" />
+                <span>{currentLang === 'en' ? 'Add TeraBox File' : 'Xác nhận thêm tệp'}</span>
               </button>
             </div>
           </div>

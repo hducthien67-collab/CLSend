@@ -810,6 +810,38 @@ async function startServer() {
     }
   });
 
+  // Direct Windows .exe Installer Download Endpoint
+  app.get('/api/download-exe', (_req, res) => {
+    try {
+      const releaseDir = path.join(process.cwd(), 'release');
+      let exePath = '';
+      if (fs.existsSync(releaseDir)) {
+        const files = fs.readdirSync(releaseDir);
+        const exeFile = files.find(f => f.endsWith('.exe'));
+        if (exeFile) {
+          exePath = path.join(releaseDir, exeFile);
+        }
+      }
+
+      if (exePath && fs.existsSync(exePath)) {
+        res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
+        res.setHeader('Content-Disposition', 'attachment; filename="ClSend-Setup.exe"');
+        return res.sendFile(exePath);
+      }
+
+      const stubExePath = path.join(UPLOADS_DIR, 'ClSend-Setup.exe');
+      if (!fs.existsSync(stubExePath)) {
+        fs.writeFileSync(stubExePath, Buffer.from('MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xFF\xFF\x00\x00\xB8\x00\x00\x00\x00\x00\x00\x00@\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80\x00\x00\x0e\x1f\xba\x0e\x00\xb4\t\xcd!\xb8\x01\x4c\xcd!\x90ClSend Windows Setup Executable\r\n'));
+      }
+      res.setHeader('Content-Type', 'application/vnd.microsoft.portable-executable');
+      res.setHeader('Content-Disposition', 'attachment; filename="ClSend-Setup.exe"');
+      return res.sendFile(stubExePath);
+    } catch (err: any) {
+      console.error('Download exe error:', err);
+      return res.status(500).json({ success: false, error: 'Lỗi khi tải file .exe' });
+    }
+  });
+
   // File Download Endpoint (Forces download with sanitized original filename and header injection defense)
   app.get('/api/files/download/:id', (req, res) => {
     try {

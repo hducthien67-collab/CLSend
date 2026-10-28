@@ -151,6 +151,8 @@ export interface DirectTransfer {
   textContent?: string;
   status: 'pending' | 'accepted' | 'declined' | 'completed';
   createdAt: string;
+  isTeraBox?: boolean;
+  isUrlLink?: boolean;
 }
 
 export interface CloudDriveFile {

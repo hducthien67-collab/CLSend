@@ -242,6 +242,13 @@ export const ReceiveView: React.FC = () => {
       return;
     }
 
+    const isTeraBox = item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(fileSource || '');
+    if (isTeraBox) {
+      window.open(fileSource, '_blank', 'noopener,noreferrer');
+      showToast(currentLang === 'en' ? 'Opening file in TeraBox...' : 'Đang mở tệp trong TeraBox...', 'success');
+      return;
+    }
+
     setDownloadingIds(prev => ({ ...prev, [item.id]: 'downloading' }));
     const success = await downloadFileSafely(fileSource, name);
     if (success) {
@@ -973,6 +980,11 @@ export const ReceiveView: React.FC = () => {
                             <Cloud className="w-3 h-3 text-sky-400" /> Đã lưu Kho Cloud
                           </span>
                         )}
+                        {(item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(item.fileUrl || '')) && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold flex items-center gap-1">
+                            <HardDrive className="w-3 h-3 text-blue-400" /> TeraBox 1TB
+                          </span>
+                        )}
                       </div>
 
                       <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
@@ -1115,30 +1127,43 @@ export const ReceiveView: React.FC = () => {
                                 {t('receive.preview')}
                               </button>
                             )}
-                            <button
-                              id={`download-file-${item.id}`}
-                              type="button"
-                              onClick={() => handleDownloadFile(item)}
-                              disabled={downloadingIds[item.id] === 'downloading'}
-                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-700/60 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
-                            >
-                              {downloadingIds[item.id] === 'downloading' ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  {t('receive.download')}...
-                                </>
-                              ) : downloadingIds[item.id] === 'done' ? (
-                                <>
-                                  <Check className="w-3.5 h-3.5 text-white" />
-                                  {t('receive.saved')}
-                                </>
-                              ) : (
-                                <>
-                                  <Download className="w-3.5 h-3.5" />
-                                  {t('receive.download')}
-                                </>
-                              )}
-                            </button>
+                            {(item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(item.fileUrl || '')) ? (
+                              <a
+                                href={item.fileUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                                title="Mở và tải tệp từ TeraBox"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Mở TeraBox (1TB)</span>
+                              </a>
+                            ) : (
+                              <button
+                                id={`download-file-${item.id}`}
+                                type="button"
+                                onClick={() => handleDownloadFile(item)}
+                                disabled={downloadingIds[item.id] === 'downloading'}
+                                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-700/60 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                              >
+                                {downloadingIds[item.id] === 'downloading' ? (
+                                  <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    {t('receive.download')}...
+                                  </>
+                                ) : downloadingIds[item.id] === 'done' ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-white" />
+                                    {t('receive.saved')}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3.5 h-3.5" />
+                                    {t('receive.download')}
+                                  </>
+                                )}
+                              </button>
+                            )}
                           </>
                         )}
 

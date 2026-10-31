@@ -677,3 +677,84 @@ html, body, #root {
   transform: translate3d(0, 0, 0);
   backface-visibility: hidden;
 }
+
+/* ==========================================================
+   DYNAMIC LIVING BACKGROUND & AURORA MOTION EFFECTS
+   ========================================================== */
+@keyframes aurora-orb-1 {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.5;
+  }
+  33% {
+    transform: translate3d(50px, -40px, 0) scale(1.15);
+    opacity: 0.8;
+  }
+  66% {
+    transform: translate3d(-30px, 30px, 0) scale(0.92);
+    opacity: 0.45;
+  }
+}
+
+@keyframes aurora-orb-2 {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.45;
+  }
+  40% {
+    transform: translate3d(-60px, 45px, 0) scale(1.18);
+    opacity: 0.75;
+  }
+  80% {
+    transform: translate3d(40px, -25px, 0) scale(0.9);
+    opacity: 0.4;
+  }
+}
+
+@keyframes aurora-orb-3 {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.4;
+  }
+  50% {
+    transform: translate3d(35px, 50px, 0) scale(1.25);
+    opacity: 0.65;
+  }
+}
+
+@keyframes background-cyber-grid {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 64px 64px;
+  }
+}
+
+.animate-aurora-orb-1 {
+  animation: aurora-orb-1 14s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-aurora-orb-2 {
+  animation: aurora-orb-2 18s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-aurora-orb-3 {
+  animation: aurora-orb-3 22s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-cyber-grid {
+  animation: background-cyber-grid 32s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-aurora-orb-1,
+  .animate-aurora-orb-2,
+  .animate-aurora-orb-3,
+  .animate-cyber-grid {
+    animation: none !important;
+  }
+}

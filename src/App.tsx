@@ -23,6 +23,9 @@ import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { registerToastListener } from './utils/toast';
 import { DesktopInstallModal } from './components/DesktopInstallModal';
+import { DesktopSyncModal } from './components/DesktopSyncModal';
+import { LandingPage } from './components/LandingPage';
+import { SilkFabricBackground } from './components/SilkFabricBackground';
 import { sendDesktopMessageNotification, sendDesktopFileNotification } from './utils/desktopNotification';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
@@ -49,7 +52,6 @@ import { setTabNotificationBadge, registerUnreadCountListener } from './utils/ta
 
 function MainApp() {
   const { currentUser, loading, settings, verifyEmailCodeAndLink, userProfile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>('send');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDevConsoleOpen, setIsDevConsoleOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -63,7 +65,68 @@ function MainApp() {
   const [showDataChannelAvatars, setShowDataChannelAvatars] = useState(false);
   const [isStorageAvatarsModalOpen, setIsStorageAvatarsModalOpen] = useState(false);
   const [isDesktopModalOpen, setIsDesktopModalOpen] = useState(false);
+  const [isDesktopSyncOpen, setIsDesktopSyncOpen] = useState(false);
+  const [urlSyncCode, setUrlSyncCode] = useState<string>('');
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+
+  // Auto-detect ?syncCode=123456 in URL (e.g. from mobile camera or QR code)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('syncCode') || params.get('sync');
+      if (code && code.replace(/[^0-9]/g, '').length === 6) {
+        setUrlSyncCode(code.replace(/[^0-9]/g, ''));
+        setIsDesktopSyncOpen(true);
+      }
+    }
+  }, []);
+  // Dedicated Landing Page Tab (Reflected in URL ?page=landing or ?tab=landing or #landing)
+  const [isLandingTab, setIsLandingTab] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      const tab = params.get('tab');
+      return page === 'landing' || page === 'intro' || tab === 'landing' || window.location.hash === '#landing';
+    }
+    return false;
+  });
+
+  // Track whether an unauthenticated visitor has clicked to open the AuthModal
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      return page === 'login' || page === 'auth' || page === 'register';
+    }
+    return false;
+  });
+
+  // Ensure unauthenticated visitors see ?page=landing explicitly in the browser URL bar
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const isElectron = Boolean((window as any).electronAPI?.isElectron);
+      if (isElectron) return;
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      if (!currentUser && !showAuthModal && page !== 'login' && page !== 'auth' && page !== 'datastore') {
+        if (page !== 'landing') {
+          window.history.replaceState(null, '', '/?page=landing');
+          setIsLandingTab(true);
+        }
+      }
+    }
+  }, [currentUser, showAuthModal]);
+
+  const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      if (page === 'receive') return 'receive';
+      if (page === 'chat') return 'chat';
+      if (page === 'drive' || page === 'storage') return 'drive';
+    }
+    return 'send';
+  });
 
   // Capture PWA beforeinstallprompt event for 1-click desktop installation
   useEffect(() => {
@@ -501,14 +564,37 @@ function MainApp() {
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
-      setIsDatastorePage(
-        params.get('page') === 'datastore' ||
-        params.get('page') === 'dev-cloud' ||
-        window.location.hash === '#datastore' ||
-        window.location.hash === '#dev-cloud' ||
-        window.location.pathname === '/datastore' ||
-        window.location.pathname === '/dev-cloud'
-      );
+      const page = params.get('page');
+      if (page === 'landing' || page === 'intro' || window.location.hash === '#landing') {
+        setIsLandingTab(true);
+        setShowAuthModal(false);
+        setIsDatastorePage(false);
+      } else if (page === 'login' || page === 'auth' || page === 'register') {
+        setIsLandingTab(false);
+        setShowAuthModal(true);
+        setIsDatastorePage(false);
+      } else if (page === 'receive') {
+        setIsLandingTab(false);
+        setIsDatastorePage(false);
+        setActiveTab('receive');
+      } else if (page === 'chat') {
+        setIsLandingTab(false);
+        setIsDatastorePage(false);
+        setActiveTab('chat');
+      } else if (page === 'drive' || page === 'storage') {
+        setIsLandingTab(false);
+        setIsDatastorePage(false);
+        setActiveTab('drive');
+      } else if (page === 'send') {
+        setIsLandingTab(false);
+        setIsDatastorePage(false);
+        setActiveTab('send');
+      } else if (page === 'datastore' || page === 'dev-cloud') {
+        setIsLandingTab(false);
+        setIsDatastorePage(true);
+      } else {
+        setIsLandingTab(false);
+      }
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -660,9 +746,95 @@ function MainApp() {
     );
   }
 
-  // Not signed in -> Show Auth Gate (Registration / Login)
+  const isDesktopElectron = typeof window !== 'undefined' && Boolean((window as any).electronAPI?.isElectron);
+
+  // Priority 1: User explicitly viewing Landing Page tab on URL (?page=landing or ?tab=landing)
+  if (isLandingTab && !isDesktopElectron) {
+    return (
+      <>
+        <LandingPage
+          onEnterApp={() => {
+            setIsLandingTab(false);
+            if (currentUser) {
+              window.history.pushState(null, '', '/?page=send');
+            } else {
+              setShowAuthModal(true);
+              window.history.pushState(null, '', '/?page=login');
+            }
+          }}
+          onOpenDownload={() => setIsDesktopModalOpen(true)}
+          onOpenRules={handleOpenRulesManually}
+          isLoggedIn={Boolean(currentUser)}
+        />
+        <DesktopInstallModal
+          isOpen={isDesktopModalOpen}
+          onClose={() => setIsDesktopModalOpen(false)}
+          deferredPrompt={deferredInstallPrompt}
+          onPwaInstalled={() => {
+            setDeferredInstallPrompt(null);
+            setIsDesktopModalOpen(false);
+          }}
+        />
+        {/* Rules / Terms of Service Modal */}
+        <RulesModal
+          isOpen={isRulesOpen}
+          isMandatory={false}
+          onAccept={handleAcceptRules}
+          onClose={() => setIsRulesOpen(false)}
+        />
+      </>
+    );
+  }
+
+  // Priority 2: If not signed in -> Prioritize Landing Page on Web, or AuthModal on Desktop
   if (!currentUser) {
-    return <AuthModal />;
+    if (isDesktopElectron) {
+      return <AuthModal />;
+    }
+
+    // On Web: Prioritize Landing Page for new / unauthenticated visitors
+    if (!showAuthModal) {
+      return (
+        <>
+          <LandingPage
+            onEnterApp={() => {
+              setShowAuthModal(true);
+              window.history.pushState(null, '', '/?page=login');
+            }}
+            onOpenDownload={() => setIsDesktopModalOpen(true)}
+            onOpenRules={handleOpenRulesManually}
+            isLoggedIn={false}
+          />
+          <DesktopInstallModal
+            isOpen={isDesktopModalOpen}
+            onClose={() => setIsDesktopModalOpen(false)}
+            deferredPrompt={deferredInstallPrompt}
+            onPwaInstalled={() => {
+              setDeferredInstallPrompt(null);
+              setIsDesktopModalOpen(false);
+            }}
+          />
+          {/* Rules / Terms of Service Modal */}
+          <RulesModal
+            isOpen={isRulesOpen}
+            isMandatory={false}
+            onAccept={handleAcceptRules}
+            onClose={() => setIsRulesOpen(false)}
+          />
+        </>
+      );
+    }
+
+    // Visitor clicked to log in or register -> Show AuthModal with easy back button to Landing Page
+    return (
+      <AuthModal
+        onBackToLanding={() => {
+          setShowAuthModal(false);
+          setIsLandingTab(true);
+          window.history.pushState(null, '', '/?page=landing');
+        }}
+      />
+    );
   }
 
   const isDev = isDevUser(currentUser.email);
@@ -731,14 +903,23 @@ function MainApp() {
     );
   }
 
+
+  const handleTabChange = (tab: 'send' | 'receive' | 'chat' | 'drive') => {
+    setActiveTab(tab);
+    window.history.pushState(null, '', `/?page=${tab}`);
+  };
+
   return (
-    <div className={`w-full flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-900 ${
+    <div className={`w-full flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-900 relative ${
       activeTab === 'chat' ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen overflow-x-hidden'
     }`}>
+      {/* Living Dynamic Silk Wave Ribbons & Floating Luminescent Starlight Background */}
+      <SilkFabricBackground className="fixed inset-0 pointer-events-none -z-10" intensity="normal" showParticles={true} showGrid={true} />
+
       {/* Top Navbar */}
       <Navbar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleTabChange}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenRules={handleOpenRulesManually}
         onOpenDevConsole={() => setIsDevConsoleOpen(true)}
@@ -747,7 +928,6 @@ function MainApp() {
           window.history.pushState(null, '', '/?page=datastore');
           setIsDatastorePage(true);
         }}
-        onOpenDesktopInstall={() => setIsDesktopModalOpen(true)}
         incomingCount={incomingCount}
         unreadMessagesCount={unreadMessagesCount}
       />
@@ -1045,6 +1225,12 @@ function MainApp() {
           setDeferredInstallPrompt(null);
           setIsDesktopModalOpen(false);
         }}
+      />
+      {/* Desktop Auth Sync Modal (Đồng bộ tài khoản từ Web sang Desktop) */}
+      <DesktopSyncModal
+        isOpen={isDesktopSyncOpen}
+        onClose={() => setIsDesktopSyncOpen(false)}
+        initialCode={urlSyncCode}
       />
     </div>
   );

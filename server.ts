@@ -1687,6 +1687,103 @@ Quy định trả về JSON:
     }
   });
 
+  // ==========================================================
+  // REAL DESKTOP INSTALLER & APP SHORTCUT DOWNLOAD (.CMD / .EXE LAUNCHER)
+  // ==========================================================
+  const handleDesktopDownload = (req: express.Request, res: express.Response) => {
+    try {
+      const host = req.get('host') || 'localhost:3000';
+      const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+      const appUrl = `${protocol}://${host}`;
+
+      // Create a native Windows batch / command setup script that installs a native desktop shortcut with official icon
+      const scriptContent = `@echo off
+chcp 65001 >nul
+title Cài đặt Ứng dụng ClSend Desktop
+color 0A
+echo ==========================================================
+echo        CHƯƠNG TRÌNH CÀI ĐẶT ỨNG DỤNG CLSEND DESKTOP
+echo ==========================================================
+echo.
+echo [*] Đang thiết lập ứng dụng ClSend trên máy tính của bạn...
+echo [*] URL Hệ Thống: ${appUrl}
+echo.
+
+set "APP_URL=${appUrl}"
+set "DESKTOP_DIR=%USERPROFILE%\\Desktop"
+set "SHORTCUT_PATH=%DESKTOP_DIR%\\ClSend.lnk"
+set "ICON_DIR=%APPDATA%\\ClSend"
+
+if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
+
+:: Tải favicon / logo chính thức về thư mục icon
+powershell -Command "try { Invoke-WebRequest -Uri '${appUrl}/favicon.ico' -OutFile '%ICON_DIR%\\app.ico' -UseBasicParsing } catch {}" >nul 2>&1
+
+:: Tìm trình duyệt Chromium (Microsoft Edge hoặc Google Chrome) để chạy chế độ App Desktop độc lập không viền URL
+set "BROWSER_EXE="
+if exist "%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    set "BROWSER_EXE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"
+) else if exist "%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe" (
+    set "BROWSER_EXE=%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"
+) else if exist "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe" (
+    set "BROWSER_EXE=%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe"
+) else if exist "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe" (
+    set "BROWSER_EXE=%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe"
+) else if exist "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe" (
+    set "BROWSER_EXE=%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe"
+)
+
+:: Tạo Desktop Shortcut chuẩn VBScript
+set "VBS_SCRIPT=%TEMP%\\create_clsend_shortcut.vbs"
+(
+echo Set oWS = WScript.CreateObject("WScript.Shell"^)
+echo sLinkFile = "%SHORTCUT_PATH%"
+echo Set oLink = oWS.CreateShortcut(sLinkFile^)
+if defined BROWSER_EXE (
+    echo oLink.TargetPath = "%BROWSER_EXE%"
+    echo oLink.Arguments = "--app=""%APP_URL%"""
+) else (
+    echo oLink.TargetPath = "%APP_URL%"
+)
+echo oLink.Description = "ClSend - Truyền Tệp P2P Siêu Tốc & Trò Chuyện Trực Tuyến"
+if exist "%ICON_DIR%\\app.ico" (
+    echo oLink.IconLocation = "%ICON_DIR%\\app.ico, 0"
+)
+echo oLink.Save
+) > "%VBS_SCRIPT%"
+
+cscript /nologo "%VBS_SCRIPT%" >nul 2>&1
+del "%VBS_SCRIPT%" >nul 2>&1
+
+echo [✓] Đã tạo thành công biểu tượng ClSend trên Màn hình Desktop!
+echo.
+echo [*] Đang khởi động ClSend Desktop...
+timeout /t 2 >nul
+
+if defined BROWSER_EXE (
+    start "" "%BROWSER_EXE%" --app="%APP_URL%"
+) else (
+    start "" "%APP_URL%"
+)
+
+echo.
+echo [✓] Hoàn tất cài đặt! Bạn có thể đóng cửa sổ này.
+timeout /t 3 >nul
+exit
+`;
+
+      res.setHeader('Content-Type', 'application/x-bat; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="ClSend-Desktop-Setup.cmd"');
+      return res.send(scriptContent);
+    } catch (e: any) {
+      console.error('Error generating desktop installer:', e);
+      return res.status(500).json({ success: false, error: 'Không thể tạo tệp cài đặt desktop' });
+    }
+  };
+
+  app.get('/api/download-exe', handleDesktopDownload);
+  app.get('/api/download-desktop', handleDesktopDownload);
+
   // API 404 Handler - Prevent API requests from falling through to Vite HTML
   app.all('/api', (_req, res) => {
     res.status(404).json({ success: false, error: 'API endpoint không tồn tại' });

@@ -75,6 +75,7 @@ interface AuthContextType {
   syncGoogleProfilePhoto: () => Promise<string | null>;
   linkWithGoogleAccount: () => Promise<{ email: string; photoURL: string | null } | null>;
   updatePresence: (uid?: string, profile?: Partial<UserDevice>) => Promise<void>;
+  loginWithSyncPayload: (payload: { userSession: AppUser; profileData: UserDevice; settings?: Partial<AppSettings> }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -272,6 +273,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       updatePresence(currentUser.uid, userProfile || undefined);
     }
 
+    // Listen to Electron desktop Google login IPC bridge
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.onGoogleLogin) {
+      (window as any).electronAPI.onGoogleLogin(async (data: { uid: string; email: string; displayName: string; photoURL: string }) => {
+        if (data && data.uid) {
+          const appUser: AppUser = {
+            uid: data.uid,
+            email: data.email || `${data.uid}@cloudsend.local`,
+            displayName: data.displayName || data.email?.split('@')[0] || 'Người dùng Google',
+            photoURL: data.photoURL || null,
+          };
+          setCurrentUser(appUser);
+          currentUserRef.current = appUser;
+          localStorage.setItem('cloudsend_custom_session', JSON.stringify(appUser));
+
+          const profileData: UserDevice = {
+            uid: data.uid,
+            email: data.email || '',
+            displayName: data.displayName || 'Người dùng Google',
+            deviceName: settingsRef.current.deviceName,
+            deviceType: detectDeviceType(),
+            avatarColor: settingsRef.current.avatarColor,
+            customAvatarUrl: data.photoURL || undefined,
+            createdAt: new Date().toISOString(),
+          };
+          setUserProfile(profileData);
+          localStorage.setItem('cloudsend_user_profile', JSON.stringify(profileData));
+          if (data.photoURL) {
+            setSettings(prev => ({ ...prev, customAvatarUrl: data.photoURL }));
+          }
+
+          try {
+            await setDoc(doc(db, 'users', data.uid), profileData, { merge: true });
+          } catch {}
+
+          await updatePresence(data.uid, profileData);
+          if (isMounted) setLoading(false);
+        }
+      });
+    }
+
     const restoreCustomSession = async () => {
       const saved = localStorage.getItem('cloudsend_custom_session');
       if (saved) {
@@ -326,6 +367,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        if (typeof window !== 'undefined' && window.location.search.includes('desktopAuth=true')) {
+          window.location.href = `/auth-success?uid=${encodeURIComponent(user.uid)}&email=${encodeURIComponent(user.email || '')}&displayName=${encodeURIComponent(user.displayName || '')}&photoURL=${encodeURIComponent(user.photoURL || '')}`;
+          return;
+        }
+
         // Enforce Dev Ban Check on Gmail / Firebase Auth
         const banCheck = await checkUserBanStatus(user.email, user.uid);
         if (banCheck.isBanned) {
@@ -578,6 +624,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithEmail = async (emailOrUsername: string, pass: string) => {
     return loginWithAccount(emailOrUsername, pass);
+  };
+
+  const loginWithSyncPayload = async (payload: { userSession: AppUser; profileData: UserDevice; settings?: Partial<AppSettings> }) => {
+    if (!payload?.userSession?.uid) return;
+    const session = payload.userSession;
+    const profile = payload.profileData;
+
+    localStorage.setItem('cloudsend_custom_session', JSON.stringify(session));
+    localStorage.setItem('cloudsend_user_profile', JSON.stringify(profile));
+
+    setCurrentUser(session);
+    currentUserRef.current = session;
+    setUserProfile(profile);
+
+    if (payload.settings) {
+      setSettings((prev) => ({ ...prev, ...payload.settings }));
+    }
+
+    try {
+      await setDoc(doc(db, 'users', session.uid), profile, { merge: true });
+    } catch {}
+
+    await updatePresence(session.uid, profile);
   };
 
   const registerWithAccount = async (
@@ -1556,6 +1625,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         syncGoogleProfilePhoto,
         linkWithGoogleAccount,
         updatePresence,
+        loginWithSyncPayload,
       }}
     >
       {children}

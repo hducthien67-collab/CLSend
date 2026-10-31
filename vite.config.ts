@@ -7,23 +7,23 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: './',
+    base: '/',
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        workbox: {
-          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        },
+        injectRegister: 'auto',
+        includeAssets: ['favicon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'maskable-icon-512x512.png', 'manifest.json'],
         manifest: {
           id: '/',
-          name: 'ClSend',
+          name: 'ClSend - Truyền Tệp Siêu Tốc & Chat Trực Tuyến',
           short_name: 'ClSend',
-          description: 'Secure Cloud Sharing',
-          theme_color: '#ffffff',
-          background_color: '#ffffff',
+          description: 'Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị',
+          theme_color: '#020617',
+          background_color: '#020617',
           display: 'standalone',
+          orientation: 'any',
           start_url: '/',
           scope: '/',
           icons: [
@@ -39,7 +39,17 @@ export default defineConfig(() => {
               type: 'image/png',
               purpose: 'any',
             },
+            {
+              src: '/maskable-icon-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
           ],
+        },
+        workbox: {
+          maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         },
         devOptions: {
           enabled: true,

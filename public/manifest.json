@@ -1,0 +1,32 @@
+{
+  "id": "/",
+  "name": "ClSend - Truyền Tệp Siêu Tốc & Chat Trực Tuyến",
+  "short_name": "ClSend",
+  "description": "Nền tảng truyền tệp siêu tốc & phòng trò chuyện tức thì đa thiết bị phong cách tối giản, an toàn và bảo mật cao.",
+  "theme_color": "#020617",
+  "background_color": "#020617",
+  "display": "standalone",
+  "orientation": "any",
+  "start_url": "/",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

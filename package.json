@@ -29,6 +29,7 @@
     "motion": "^12.23.24",
     "multer": "^2.4.0",
     "nodemailer": "^10.0.12",
+    "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "sharp": "^0.35.4",
@@ -40,6 +41,7 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.14.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
@@ -57,6 +59,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "firebase-applet-config.json",
       "package.json"
     ],
     "win": {

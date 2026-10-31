@@ -7,6 +7,7 @@ import { MobileReceiveView } from './MobileReceiveView';
 import { MobileChatView } from './MobileChatView';
 import { MobileCloudView } from './MobileCloudView';
 import { SettingsModal } from '../SettingsModal';
+import { SilkFabricBackground } from '../SilkFabricBackground';
 import { db } from '../../firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
@@ -53,6 +54,9 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
   return (
     <div className="h-[100dvh] min-h-[100dvh] max-h-[100dvh] w-full bg-[#0b0f19] text-slate-100 flex flex-col relative overflow-hidden selection:bg-emerald-500 selection:text-slate-950 font-sans touch-manipulation">
+      {/* Living Dynamic Silk Ribbon & Floating Particles Background */}
+      <SilkFabricBackground className="fixed inset-0 pointer-events-none -z-10" intensity="subtle" showParticles={true} showGrid={false} />
+
       {/* Mobile Top Header */}
       <MobileHeader
         onOpenSettings={() => setIsSettingsOpen(true)}

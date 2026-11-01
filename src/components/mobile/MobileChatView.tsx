@@ -49,12 +49,14 @@ import {
   Zap,
   History,
   Clipboard,
-  AlertTriangle
+  AlertTriangle,
+  Copy
 } from 'lucide-react';
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { renderClickableText } from '../../utils/textFormat';
+import { wrapSecureBase64Message, unwrapSecureBase64Message } from '../../utils/base64Security';
 import { ReportMessageModal } from '../ReportMessageModal';
 import { RoomDetailsModal } from '../RoomDetailsModal';
 import { ZoomableImageViewerModal } from '../ZoomableImageViewerModal';
@@ -86,6 +88,7 @@ export const MobileChatView: React.FC = () => {
   // Message state: today & yesterday loaded by default, older messages loaded when scrolling up
   const [recentMessages, setRecentMessages] = useState<ChatMessage[]>([]);
   const [olderMessages, setOlderMessages] = useState<ChatMessage[]>([]);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [memberMetaMap, setMemberMetaMap] = useState<Record<string, { displayName: string; avatarUrl?: string; avatarColor?: string; isDev?: boolean; isOnline?: boolean; lastSeen?: string }>>({});
 
   const messages = React.useMemo(() => {
@@ -478,8 +481,8 @@ export const MobileChatView: React.FC = () => {
       senderDevice: settings?.deviceName || 'Điện thoại',
       senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
       senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
-      text: sanitizedText,
-      rawText: rawTextOriginal,
+      text: wrapSecureBase64Message(sanitizedText),
+      rawText: wrapSecureBase64Message(rawTextOriginal),
       hasProfanity: hasProfanity,
       detectedProfanity: detectedList,
       isDevMessage: isDev,
@@ -1396,10 +1399,13 @@ export const MobileChatView: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Text Content */}
+                        {/* Text Content with full highlight & bôi đen support */}
                         {msg.text && (
-                          <div className="whitespace-pre-wrap leading-relaxed">
-                            {renderClickableText(msg.text)}
+                          <div 
+                            className="whitespace-pre-wrap leading-relaxed chat-message-text select-text cursor-text [user-select:text] selection:bg-emerald-500 selection:text-slate-950"
+                            data-chat-message="true"
+                          >
+                            {renderClickableText(unwrapSecureBase64Message(msg.text))}
                           </div>
                         )}
 
@@ -1408,6 +1414,29 @@ export const MobileChatView: React.FC = () => {
                           <span className="font-mono">
                             {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                           </span>
+
+                          {/* 1-Tap Copy Message Button */}
+                          {msg.text && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const textToCopy = unwrapSecureBase64Message(msg.text || '');
+                                if (textToCopy) {
+                                  navigator.clipboard.writeText(textToCopy);
+                                  setCopiedMsgId(msg.id);
+                                  setTimeout(() => setCopiedMsgId(null), 2000);
+                                }
+                              }}
+                              className="opacity-70 hover:opacity-100 text-slate-300 hover:text-emerald-300 transition-opacity p-0.5 flex items-center gap-0.5 cursor-pointer"
+                              title="Sao chép nội dung tin nhắn"
+                            >
+                              {copiedMsgId === msg.id ? (
+                                <Check className="w-3 h-3 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
 
                           {canDelete ? (
                             <button

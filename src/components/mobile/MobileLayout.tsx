@@ -18,6 +18,7 @@ interface MobileLayoutProps {
   onOpenDevPage?: () => void;
   unreadMessagesCount?: number;
   onResetUnreadChat?: () => void;
+  onOpenInstall?: () => void;
 }
 
 export const MobileLayout: React.FC<MobileLayoutProps> = ({
@@ -26,7 +27,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
   onOpenDevConsole,
   onOpenDevPage,
   unreadMessagesCount,
-  onResetUnreadChat
+  onResetUnreadChat,
+  onOpenInstall
 }) => {
   const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>('send');
@@ -63,6 +65,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
         onToggleViewMode={onToggleViewMode}
         viewMode="mobile"
         onOpenDevPage={onOpenDevPage}
+        onOpenInstall={onOpenInstall}
       />
 
       {/* Centered Main Tab Content Area (Symmetrically balanced, never skewed or shifted) */}

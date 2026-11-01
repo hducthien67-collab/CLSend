@@ -193,6 +193,15 @@ export const TRANSLATIONS = {
     'chat.tabs_structure': 'Cấu trúc & Ảnh nhóm',
     'chat.tabs_members': 'Thành viên ({count})',
     'chat.tabs_images': 'Hình ảnh ({count})',
+    'chat.selection_hint': 'Đang bôi đen: Ctrl+B để Đậm, Ctrl+I để Nghiêng',
+    'chat.clean_text': 'Làm gọn',
+    'chat.bold': 'Đậm',
+    'chat.italic': 'Nghiêng',
+    'chat.bold_applied': '✨ Đã in đậm văn bản trực tiếp (Ctrl+B)',
+    'chat.italic_applied': '✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)',
+    'chat.code_applied': '✨ Đã định dạng mã (Ctrl+E)',
+    'chat.cleaned': '✨ Đã tự động làm gọn văn bản & loại bỏ ký tự lỗi!',
+
 
     // RulesModal
     'rules.title': 'Quy Tắc Cộng Đồng & An Toàn CLSend',
@@ -535,6 +544,15 @@ export const TRANSLATIONS = {
     'chat.tabs_structure': 'Structure & Group Photo',
     'chat.tabs_members': 'Members ({count})',
     'chat.tabs_images': 'Images ({count})',
+    'chat.selection_hint': 'Selected: Ctrl+B for Bold, Ctrl+I for Italic',
+    'chat.clean_text': 'Clean',
+    'chat.bold': 'Bold',
+    'chat.italic': 'Italic',
+    'chat.bold_applied': '✨ Bold applied directly (Ctrl+B)',
+    'chat.italic_applied': '✨ Italic applied directly (Ctrl+I)',
+    'chat.code_applied': '✨ Code formatted (Ctrl+E)',
+    'chat.cleaned': '✨ Text automatically cleaned & errors removed!',
+
 
     // RulesModal
     'rules.title': 'CLSend Community Rules & Safety',

@@ -1594,7 +1594,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         roomId: selectedItemId,
         senderId: currentUser.uid,
         senderName: devSenderName,
-        senderEmail: currentUser.email || 'hducthien67@gmail.com',
+        senderEmail: currentUser.email || 'admin@clsend.app',
         senderDevice: settings.deviceName || 'DEV DataStore Console',
         text: messageText,
         rawText: messageText, // Giữ nguyên văn không che
@@ -1696,7 +1696,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         </div>
         <h2 className="text-xl font-bold text-white mb-2">403 - Quyền Truy Cập Bị Từ Chối</h2>
         <p className="text-sm text-slate-400 max-w-md mb-2">
-          Chỉ tài khoản DEV chính thức (<span className="text-emerald-400 font-mono font-semibold">hducthien67@gmail.com</span>) mới có quyền truy cập hệ thống DataStore này.
+          Chỉ Quản trị viên và Nhà phát triển hệ thống mới có quyền truy cập khu vực DataStore này.
         </p>
         <p className="text-xs text-rose-300 font-mono bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20 mb-6">
           Tài khoản hiện tại ({currentUser?.email || 'Chưa đăng nhập'}) không có quyền hạn.

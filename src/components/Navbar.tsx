@@ -212,7 +212,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
           </div>
 
-          {/* DATASTORE Direct Button (CHỈ HIỂN THỊ DUY NHẤT CHO DEV: hducthien67@gmail.com) */}
+          {/* DATASTORE Direct Button (CHỈ HIỂN THỊ CHO TÀI KHOẢN DEV CHÍNH CHỦ) */}
           {isDev && (
             <div className="flex items-center gap-1.5">
               <div className="flex items-center bg-emerald-500/15 hover:bg-emerald-500/20 border border-emerald-500/40 rounded-xl p-0.5 shadow-lg shadow-emerald-500/10 transition-colors">
@@ -330,11 +330,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setIsLangSubMenuOpen(false);
                       onOpenSettings();
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     <Settings className="w-4 h-4 text-emerald-400" />
                     <span>{t('nav.settings')}</span>
                   </button>
+
+                  {onOpenRules && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAvatarMenuOpen(false);
+                        setIsLangSubMenuOpen(false);
+                        onOpenRules();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                    >
+                      <Scale className="w-4 h-4 text-teal-400" />
+                      <span>Điều khoản & Quy định</span>
+                    </button>
+                  )}
 
                   {/* Nút Ngôn ngữ có bản nhỏ mở ra bên cạnh */}
                   <div className="relative">

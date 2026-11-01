@@ -1459,7 +1459,7 @@ export const SendView: React.FC = () => {
             ) : (
               /* Compact Sleek Action Grid (4 Buttons) */
               <div className="py-1 sm:py-1.5 space-y-2.5 text-left">
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5">
                   {/* 1. Tập tin */}
                   <button
                     id="pick-file-btn"
@@ -1541,27 +1541,6 @@ export const SendView: React.FC = () => {
                         {t('send.paste')}
                       </span>
                       <span className="text-[10px] text-slate-400 hidden sm:block">{t('send.paste_sub')}</span>
-                    </div>
-                  </button>
-
-                  {/* 5. TeraBox / Link Cloud */}
-                  <button
-                    id="pick-terabox-btn"
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsUrlModalOpen(true);
-                    }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-blue-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none col-span-2 sm:col-span-1"
-                  >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-blue-500/20 flex items-center justify-center text-slate-200 group-hover:text-blue-400 transition-colors shrink-0">
-                      <HardDrive className="w-4 h-4 text-blue-400" />
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-200 group-hover:text-white block leading-tight">
-                        TeraBox / Link
-                      </span>
-                      <span className="text-[10px] text-blue-400 font-medium hidden sm:block">Kho 1024 GB</span>
                     </div>
                   </button>
                 </div>

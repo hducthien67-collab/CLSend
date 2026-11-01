@@ -1292,6 +1292,75 @@ Trả về kết quả ở định dạng JSON chuẩn:
     }
   });
 
+  // Server-side AI Link Resolver Proxy using Google Gemini API
+  app.post('/api/ai-resolve-link', async (req, res) => {
+    try {
+      const { url, rawText } = req.body || {};
+      const targetUrl = String(url || rawText || '').trim();
+      if (!targetUrl) {
+        return res.status(400).json({ success: false, error: 'Thiếu đường dẫn hoặc văn bản cần phân tích.' });
+      }
+
+      const ai = getAiClient();
+      if (!ai) {
+        const isTeraBox = /terabox|1024tera|mirrobox|nephobox/i.test(targetUrl);
+        const isGoogleDrive = /drive\.google\.com|docs\.google\.com/i.test(targetUrl);
+        const isMega = /mega\.nz|mega\.co\.nz/i.test(targetUrl);
+        return res.json({
+          success: true,
+          serviceName: isTeraBox ? 'TeraBox 1TB' : isGoogleDrive ? 'Google Drive' : isMega ? 'MEGA' : 'Cloud Link',
+          fileName: isTeraBox ? 'TeraBox_Shared_File' : isGoogleDrive ? 'Google_Drive_File' : 'Shared_File_Link',
+          isTeraBox: isTeraBox,
+          downloadHint: 'Sử dụng liên kết trực tiếp hoặc tải xuống qua ứng dụng CloudSend.',
+          summary: `Đã phát hiện liên kết ${isTeraBox ? 'TeraBox' : 'chia sẻ đám mây'}. Sẵn sàng nhập vào hệ thống.`
+        });
+      }
+
+      const prompt = `Analyze the following URL or text containing a cloud storage or file sharing link:
+"${targetUrl}"
+
+You are CLSend's intelligent link resolution and metadata extraction AI assistant.
+Determine the storage service (e.g. TeraBox, Google Drive, OneDrive, MEGA, Dropbox, MediaFire, GitHub, Direct Link, etc.), extract or infer a professional file name, check if it is TeraBox, and provide a clean summary and download instruction.
+
+Return strictly valid JSON:
+{
+  "success": true,
+  "serviceName": "Name of the storage service",
+  "fileName": "Inferred or extracted file name with extension",
+  "isTeraBox": boolean,
+  "downloadHint": "Brief download or access instructions for user",
+  "summary": "Short description of the link contents"
+}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        }
+      });
+
+      if (response?.text) {
+        const result = JSON.parse(response.text);
+        return res.json(result);
+      }
+
+      return res.json({
+        success: true,
+        serviceName: 'Cloud Storage',
+        fileName: 'Shared_Link_File',
+        isTeraBox: /terabox/i.test(targetUrl),
+        downloadHint: 'Tải xuống qua liên kết đám mây.',
+        summary: 'Liên kết đám mây hợp lệ.'
+      });
+    } catch (err: any) {
+      console.warn('AI resolve link error:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Lỗi khi phân tích liên kết bằng AI' });
+    }
+  });
+
+
+
   // ==========================================================
   // REAL-TIME AI CONTENT MODERATION (OpenAI Moderation API + Gemini AI Hybrid)
   // ==========================================================

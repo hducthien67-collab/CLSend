@@ -78,6 +78,7 @@ import {
   autoPruneWeeklyMessages 
 } from '../utils/devModeration';
 import { renderClickableText, cleanAndFormatUserText, sanitizeDisplayText } from '../utils/textFormat';
+import { wrapSecureBase64Message, unwrapSecureBase64Message } from '../utils/base64Security';
 import { 
   uploadFileToServer, 
   generateImageThumbnail, 
@@ -225,15 +226,15 @@ export const ChatRoomView: React.FC = () => {
   const toggleFormatting = (type: 'bold' | 'italic' | 'code' | 'codeblock') => {
     if (type === 'bold') {
       richInputRef.current?.applyBold();
-      setFormatNotice('✨ Đã in đậm văn bản trực tiếp (Ctrl+B)');
+      setFormatNotice(t('chat.bold_applied'));
       setTimeout(() => setFormatNotice(null), 2500);
     } else if (type === 'italic') {
       richInputRef.current?.applyItalic();
-      setFormatNotice('✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)');
+      setFormatNotice(t('chat.italic_applied'));
       setTimeout(() => setFormatNotice(null), 2500);
     } else if (type === 'code' || type === 'codeblock') {
       richInputRef.current?.applyCode?.();
-      setFormatNotice('✨ Đã định dạng mã (Ctrl+E)');
+      setFormatNotice(t('chat.code_applied'));
       setTimeout(() => setFormatNotice(null), 2500);
     }
   };
@@ -241,7 +242,7 @@ export const ChatRoomView: React.FC = () => {
   // Smart Clean / Format Text (Làm gọn văn bản - chống văn bản rác, khoảng trắng thừa, BiDi rác, layout vỡ)
   const handleCleanInputText = () => {
     richInputRef.current?.cleanText();
-    setFormatNotice('✨ Đã tự động làm gọn văn bản & loại bỏ ký tự lỗi!');
+    setFormatNotice(t('chat.cleaned'));
     setTimeout(() => setFormatNotice(null), 3500);
   };
 
@@ -256,6 +257,7 @@ export const ChatRoomView: React.FC = () => {
   const imageInputRef = useRef<HTMLInputElement>(null);
 
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
   // Discord / Zalo pagination: load latest 35 messages by default, infinite scroll up to load older
   const [messageLimit, setMessageLimit] = useState(35);
@@ -1035,8 +1037,8 @@ export const ChatRoomView: React.FC = () => {
       senderDevice: settings.deviceName,
       senderAvatar: userProfile?.customAvatarUrl || settings.customAvatarUrl || currentUser.photoURL || '',
       senderAvatarColor: userProfile?.avatarColor || settings.avatarColor || '#10b981',
-      text: textToSend,
-      rawText: rawTextOriginal,
+      text: wrapSecureBase64Message(textToSend),
+      rawText: wrapSecureBase64Message(rawTextOriginal),
       hasProfanity: hasProfanity,
       detectedProfanity: detectedList,
       createdAt: effectiveIso,
@@ -1359,7 +1361,7 @@ export const ChatRoomView: React.FC = () => {
                       <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     )}
                     <span className="font-semibold text-sm truncate">
-                      {room.name}
+                      {room.id === 'public-relay-lounge' ? t('chat.public_lounge') : room.name}
                     </span>
                     {room.id === 'public-relay-lounge' ? (
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
@@ -1377,7 +1379,7 @@ export const ChatRoomView: React.FC = () => {
                     )}
                   </div>
                   <p className="text-xs text-slate-400 truncate mt-0.5">
-                    {room.description || (room.isPrivate !== false ? `Mã riêng tư: ${room.code}` : 'Phòng cộng đồng')}
+                    {room.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (room.description || (room.isPrivate !== false ? `Mã riêng tư: ${room.code}` : 'Phòng cộng đồng'))}
                   </p>
                 </div>
                 {room.isPrivate !== false && room.id !== 'public-relay-lounge' && (
@@ -1445,7 +1447,7 @@ export const ChatRoomView: React.FC = () => {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-sm sm:text-base font-bold text-white truncate">
-                    {activeRoom.name}
+                    {activeRoom.id === 'public-relay-lounge' ? t('chat.public_lounge') : activeRoom.name}
                   </h2>
                   {activeRoom.isPrivate !== false && activeRoom.id !== 'public-relay-lounge' && (
                     <button
@@ -1460,7 +1462,7 @@ export const ChatRoomView: React.FC = () => {
                   )}
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5">
-                  {activeRoom.description || (activeRoom.isPrivate !== false ? 'Phòng riêng tư bảo mật' : 'Sảnh kết nối công khai')}
+                  {activeRoom.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (activeRoom.description || (activeRoom.isPrivate !== false ? 'Phòng riêng tư bảo mật' : 'Sảnh kết nối công khai'))}
                 </p>
               </div>
             </div>
@@ -1727,6 +1729,29 @@ export const ChatRoomView: React.FC = () => {
                           </button>
                         )}
 
+                        {/* Copy message button */}
+                        {msg.text && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const textToCopy = unwrapSecureBase64Message(msg.text || '');
+                              if (textToCopy) {
+                                navigator.clipboard.writeText(textToCopy);
+                                setCopiedMsgId(msg.id);
+                                setTimeout(() => setCopiedMsgId(null), 2000);
+                              }
+                            }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all ml-1 cursor-pointer"
+                            title="Sao chép nội dung tin nhắn"
+                          >
+                            {copiedMsgId === msg.id ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+
                         {/* Report button for other users */}
                         {!isMe && (
                           <button
@@ -1880,13 +1905,13 @@ export const ChatRoomView: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Text Message */}
+                    {/* Text Message with full highlight & selection support */}
                     {msg.text && (
                       <div 
-                        className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full chat-message-text select-text cursor-text"
+                        className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full chat-message-text select-text cursor-text [user-select:text] selection:bg-emerald-500 selection:text-slate-950"
                         data-chat-message="true"
                       >
-                        {renderClickableText(censorProfanity(msg.text).cleanText, isMe)}
+                        {renderClickableText(censorProfanity(unwrapSecureBase64Message(msg.text)).cleanText, isMe)}
                       </div>
                     )}
                   </div>
@@ -2064,7 +2089,7 @@ export const ChatRoomView: React.FC = () => {
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.15s]" />
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" />
                     </span>
-                    <span className="italic">Đang soạn tin...</span>
+                    <span className="italic">{t('chat.composing')}</span>
                   </div>
 
                   <button
@@ -2074,7 +2099,7 @@ export const ChatRoomView: React.FC = () => {
                     className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm active:scale-95"
                   >
                     <Wand2 className="w-3 h-3 text-emerald-400" />
-                    <span>Làm gọn</span>
+                    <span>{t('chat.clean_text')}</span>
                   </button>
                 </div>
               )}
@@ -2085,7 +2110,7 @@ export const ChatRoomView: React.FC = () => {
               <div className="text-[11px] sm:text-xs text-emerald-300 bg-slate-900/95 border border-emerald-500/40 rounded-xl px-2.5 py-1 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-1 duration-150">
                 <span className="flex items-center gap-1 truncate">
                   <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
-                  <span>Đang bôi đen: <strong>Ctrl+B</strong> để Đậm, <strong>Ctrl+I</strong> để Nghiêng</span>
+                  <span>{t('chat.selection_hint')}</span>
                 </span>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
@@ -2093,14 +2118,14 @@ export const ChatRoomView: React.FC = () => {
                     onClick={() => toggleFormatting('bold')}
                     className="px-1.5 py-0.2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]"
                   >
-                    B Đậm
+                    B {t('chat.bold')}
                   </button>
                   <button
                     type="button"
                     onClick={() => toggleFormatting('italic')}
                     className="px-1.5 py-0.2 rounded bg-emerald-600 hover:bg-emerald-500 text-white italic text-[10px]"
                   >
-                    I Nghiêng
+                    I {t('chat.italic')}
                   </button>
                 </div>
               </div>

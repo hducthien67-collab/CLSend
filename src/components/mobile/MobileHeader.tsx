@@ -10,11 +10,13 @@ interface MobileHeaderProps {
   onToggleViewMode?: () => void;
   viewMode?: 'mobile' | 'desktop';
   onOpenDevPage?: () => void;
+  onOpenInstall?: () => void;
 }
 
 export const MobileHeader: React.FC<MobileHeaderProps> = ({
   onOpenSettings,
-  onOpenDevPage
+  onOpenDevPage,
+  onOpenInstall
 }) => {
   const { currentUser, userProfile, settings } = useAuth();
   const [copiedCode, setCopiedCode] = useState(false);
@@ -76,6 +78,19 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
 
         {/* Right Controls: Connect Code Pill & Profile/Settings Avatar */}
         <div className="flex items-center gap-1.5">
+          {/* Install Mobile App 1-Touch Button */}
+          {onOpenInstall && typeof window !== 'undefined' && !(window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) && (
+            <button
+              type="button"
+              onClick={onOpenInstall}
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 text-[9px] font-bold text-emerald-300 transition-all active:scale-95 shadow-sm cursor-pointer"
+              title="Cài đặt CLSend về màn hình chính điện thoại (1-Chạm)"
+            >
+              <Smartphone className="w-2.5 h-2.5 text-emerald-400" />
+              <span>Tải App</span>
+            </button>
+          )}
+
           {/* Connect Code Quick Pill */}
           <button
             type="button"

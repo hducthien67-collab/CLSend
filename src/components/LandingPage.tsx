@@ -4,28 +4,48 @@ import {
   Globe, 
   Check, 
   ArrowRight,
-  Sparkles,
-  Monitor,
   Smartphone,
+  Monitor,
   ShieldCheck,
-  CheckCircle2
+  Sparkles
 } from 'lucide-react';
 import { CloudSendLogo } from './CloudSendLogo';
 import { SilkFabricBackground } from './SilkFabricBackground';
 
 interface LandingPageProps {
   onEnterApp: () => void;
-  onOpenDownload: () => void;
+  onOpenDownload: (initialTab?: 'mobile' | 'pc') => void;
   onOpenRules?: () => void;
   isLoggedIn?: boolean;
+  deferredPrompt?: any;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ 
   onEnterApp, 
   onOpenDownload,
   onOpenRules,
-  isLoggedIn = false
+  isLoggedIn = false,
+  deferredPrompt
 }) => {
+  const isMobile = typeof window !== 'undefined' && /mobile|iphone|ipod|android/i.test(navigator.userAgent.toLowerCase());
+
+  // 1-Click Mobile Install Handler: triggers deferredPrompt directly if available!
+  const handleMobileDownloadClick = async () => {
+    if (deferredPrompt) {
+      try {
+        deferredPrompt.prompt();
+        const choice = await deferredPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          return;
+        }
+      } catch (err) {
+        console.warn('Direct mobile install prompt failed:', err);
+      }
+    }
+    // If prompt not available (e.g. iOS Safari, or already used), open mobile install sheet
+    onOpenDownload('mobile');
+  };
+
   return (
     <div className="min-h-screen bg-[#070b13] text-slate-100 flex flex-col font-sans selection:bg-emerald-500/30 selection:text-emerald-200 relative overflow-x-hidden">
       {/* Living Silk Wave Background (Dark + Soft Emerald currents) */}
@@ -34,7 +54,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Top Ambient Green Glow */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[700px] h-[300px] bg-gradient-to-b from-emerald-500/10 via-teal-500/5 to-transparent blur-3xl pointer-events-none rounded-full -z-10" />
 
-      {/* Top Header / Navigation (Trimmed to clean essentials in dark theme) */}
+      {/* Top Header / Navigation */}
       <header className="w-full bg-[#0b0f19]/85 backdrop-blur-md border-b border-slate-800/80 sticky top-0 z-30 shadow-md">
         <div className="max-w-6xl mx-auto px-4 sm:px-8 h-16 sm:h-20 flex items-center justify-between">
           {/* Logo & Brand */}
@@ -50,18 +70,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 CLSend
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/30 hidden sm:inline-block">
-                PC & Web
+                Mobile & PC
               </span>
             </div>
           </div>
 
           {/* Clean Trimmed-Down Navigation Links */}
-          <nav className="flex items-center gap-4 sm:gap-7 text-xs sm:text-sm font-semibold">
+          <nav className="flex items-center gap-3.5 sm:gap-6 text-xs sm:text-sm font-semibold">
             {onOpenRules && (
               <button
                 type="button"
                 onClick={onOpenRules}
-                className="text-slate-300 hover:text-emerald-400 tracking-wide transition-colors uppercase cursor-pointer"
+                className="text-slate-300 hover:text-emerald-400 tracking-wide transition-colors uppercase cursor-pointer hidden sm:inline-block"
               >
                 Bảo Mật
               </button>
@@ -71,16 +91,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <button
                 type="button"
                 onClick={onOpenRules}
-                className="text-slate-300 hover:text-emerald-400 tracking-wide transition-colors uppercase cursor-pointer"
+                className="text-slate-300 hover:text-emerald-400 tracking-wide transition-colors uppercase cursor-pointer hidden sm:inline-block"
               >
                 Điều Khoản
               </button>
             )}
 
+            {/* Quick Install button in header */}
+            <button
+              type="button"
+              onClick={() => onOpenDownload(isMobile ? 'mobile' : 'pc')}
+              className="text-xs sm:text-sm font-bold text-emerald-400 hover:text-emerald-300 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Smartphone className="w-3.5 h-3.5 sm:hidden" />
+              <span>{isMobile ? 'Tải Về Điện Thoại' : 'Tải App'}</span>
+            </button>
+
             <button
               type="button"
               onClick={onEnterApp}
-              className="text-emerald-400 hover:text-emerald-300 font-bold tracking-wide transition-colors uppercase cursor-pointer flex items-center gap-1"
+              className="text-emerald-400 hover:text-emerald-300 font-bold tracking-wide transition-colors uppercase cursor-pointer flex items-center gap-1 ml-1"
             >
               <span>{isLoggedIn ? 'Vào Ứng Dụng' : 'Đăng Nhập'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -99,14 +129,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center relative z-10">
             
-            {/* Left Column: Heading, Checklist, and 2 Clean CTA Buttons */}
+            {/* Left Column: Heading, Checklist, and 1-Click Mobile & PC Action Buttons */}
             <div className="lg:col-span-6 xl:col-span-7 flex flex-col justify-center text-left">
               <h1 className="text-2xl sm:text-3xl lg:text-[35px] font-extrabold text-white leading-[1.2] tracking-tight mb-2">
-                Tải CLSend PC cho máy tính
+                {isMobile ? 'Tải CLSend Về Điện Thoại' : 'Tải CLSend Cho Máy Tính & Điện Thoại'}
               </h1>
 
               <p className="text-sm sm:text-base font-semibold text-slate-300 mb-6 sm:mb-8">
-                Ứng dụng CLSend đã có mặt trên Windows, Mac OS, Web
+                {isMobile 
+                  ? 'Cài đặt trực tiếp vào điện thoại Android & iPhone chỉ với 1-chạm' 
+                  : 'Ứng dụng CLSend đã có mặt trên Windows, Mac OS, Android & iOS'}
               </p>
 
               {/* Checklist items with EMERALD GREEN checkmarks */}
@@ -115,48 +147,100 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0">
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </div>
-                  <span>Gửi file, ảnh, video cực nhanh lên đến 1GB</span>
+                  <span>Gửi file, ảnh, video cực nhanh không giới hạn</span>
                 </li>
 
                 <li className="flex items-center gap-3">
                   <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0">
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </div>
-                  <span>Đồng bộ tin nhắn với điện thoại</span>
+                  <span>Đồng bộ tức thì giữa Điện thoại & Máy tính</span>
                 </li>
 
                 <li className="flex items-center gap-3">
                   <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center shrink-0">
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </div>
-                  <span>Tối ưu cho chat nhóm và trao đổi công việc</span>
+                  <span>Tối ưu cho chat bảo mật và truyền tệp riêng tư P2P</span>
                 </li>
               </ul>
 
-              {/* Two Clean Action Buttons in Emerald Green theme */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5 sm:gap-4">
-                {/* Button 1: Tải ngay (Solid Emerald Green) */}
-                <button
-                  id="landing-download-now-btn"
-                  type="button"
-                  onClick={onOpenDownload}
-                  className="inline-flex items-center justify-center gap-2.5 px-7 py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:from-emerald-700 active:to-teal-600 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-600/30 hover:shadow-emerald-500/40 transition-all duration-200 active:scale-[0.98] cursor-pointer"
-                >
-                  <Download className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
-                  <span>Tải ngay</span>
-                </button>
+              {/* Action Buttons: Tailored for 1-Click Mobile & PC */}
+              {isMobile ? (
+                /* Mobile Layout Buttons: 1-Click Mobile Primary Button */
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5 sm:gap-4">
+                    {/* Button 1: Tải về điện thoại (1-Chạm) */}
+                    <button
+                      id="mobile-direct-install-cta-btn"
+                      type="button"
+                      onClick={handleMobileDownloadClick}
+                      className="inline-flex items-center justify-center gap-2.5 px-7 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 active:from-emerald-600 active:to-teal-500 text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-emerald-500/25 transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                    >
+                      <Smartphone className="w-5 h-5 stroke-[2.5] text-slate-950" />
+                      <span>📲 Tải Về Điện Thoại (1-Chạm)</span>
+                    </button>
 
-                {/* Button 2: Dùng bản web (Clean Emerald Outline) */}
-                <button
-                  id="landing-use-web-btn"
-                  type="button"
-                  onClick={onEnterApp}
-                  className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl border-2 border-emerald-500/80 hover:bg-emerald-500/15 text-emerald-400 hover:text-emerald-300 font-bold text-sm sm:text-base transition-all duration-200 active:scale-[0.98] cursor-pointer bg-slate-900/80"
-                >
-                  <Globe className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
-                  <span>{isLoggedIn ? 'Vào ứng dụng' : 'Dùng bản web'}</span>
-                </button>
-              </div>
+                    {/* Button 2: Dùng bản web */}
+                    <button
+                      id="landing-use-web-btn"
+                      type="button"
+                      onClick={onEnterApp}
+                      className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl border-2 border-emerald-500/80 hover:bg-emerald-500/15 text-emerald-400 hover:text-emerald-300 font-bold text-sm sm:text-base transition-all active:scale-[0.98] cursor-pointer bg-slate-900/80"
+                    >
+                      <Globe className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
+                      <span>{isLoggedIn ? 'Vào ứng dụng' : 'Dùng bản web'}</span>
+                    </button>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => onOpenDownload('pc')}
+                      className="text-xs text-slate-400 hover:text-emerald-400 transition-colors cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <span>Hoặc xem cách cài đặt cho máy tính (PC / Windows / Mac)</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Desktop Layout Buttons: Both PC and Mobile Options */
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5 sm:gap-4 flex-wrap">
+                  {/* Button 1: Tải về PC */}
+                  <button
+                    id="landing-download-pc-btn"
+                    type="button"
+                    onClick={() => onOpenDownload('pc')}
+                    className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 active:from-emerald-700 active:to-teal-600 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-600/30 transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+                    <span>Tải về PC</span>
+                  </button>
+
+                  {/* Button 2: Tải về điện thoại (QR Scan & 1-chạm) */}
+                  <button
+                    id="landing-download-mobile-btn"
+                    type="button"
+                    onClick={() => onOpenDownload('mobile')}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-750 text-emerald-300 hover:text-white font-bold text-sm sm:text-base border border-emerald-500/30 transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Smartphone className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />
+                    <span>Tải về điện thoại</span>
+                  </button>
+
+                  {/* Button 3: Dùng bản web */}
+                  <button
+                    id="landing-use-web-btn"
+                    type="button"
+                    onClick={onEnterApp}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-xl border-2 border-emerald-500/80 hover:bg-emerald-500/15 text-emerald-400 hover:text-emerald-300 font-bold text-sm sm:text-base transition-all active:scale-[0.98] cursor-pointer bg-slate-900/80"
+                  >
+                    <Globe className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.2]" />
+                    <span>{isLoggedIn ? 'Vào ứng dụng' : 'Dùng bản web'}</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Right Column: High Fidelity Laptop & Smartphone Showcase Mockup */}

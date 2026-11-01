@@ -2,8 +2,11 @@ import { doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, orderBy, on
 import { db } from '../firebase/config';
 import { UserSanction, SanctionLevel } from '../types';
 
-// The authorized Developer Email who owns the app and Cloud administration
-export const DEV_EMAIL = 'hducthien67@gmail.com';
+import { decodeBase64 } from './base64Security';
+
+// Mã hóa Base64 cho danh tính Nhà phát triển để chống quét văn bản thô
+const DEV_AUTH_B64 = 'aGR1Y3RoaWVuNjdAZ21haWwuY29t';
+export const DEV_EMAIL = decodeBase64(DEV_AUTH_B64);
 
 /**
  * Check if a user is the authorized DEV

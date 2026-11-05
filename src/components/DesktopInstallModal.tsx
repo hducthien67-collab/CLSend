@@ -95,7 +95,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
         deferredPrompt.prompt();
         const choice = await deferredPrompt.userChoice;
         if (choice.outcome === 'accepted') {
-          setInstallStatusMessage('Đã cài đặt CLSend thành công vào màn hình chính điện thoại!');
+          setInstallStatusMessage('Đã cài đặt ClSend thành công vào màn hình chính điện thoại!');
           if (onPwaInstalled) onPwaInstalled();
         } else {
           setInstallStatusMessage('Bạn đã đóng bảng cài đặt.');
@@ -124,7 +124,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
         deferredPrompt.prompt();
         const choice = await deferredPrompt.userChoice;
         if (choice.outcome === 'accepted') {
-          setInstallStatusMessage('Đã cài đặt thành công CLSend lên máy tính!');
+          setInstallStatusMessage('Đã cài đặt thành công ClSend lên máy tính!');
           if (onPwaInstalled) onPwaInstalled();
         } else {
           setInstallStatusMessage('Bạn đã hủy yêu cầu cài đặt.');
@@ -173,7 +173,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                {isMobile ? 'Cài Đặt CLSend Vào Điện Thoại' : 'Tải & Cài Đặt CLSend'}
+                {isMobile ? 'Cài Đặt ClSend Vào Điện Thoại' : 'Tải & Cài Đặt ClSend'}
                 <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap shrink-0">
                   {isMobile ? 'Mobile App' : activeTab === 'mobile' ? 'Mobile QR' : 'PC Desktop'}
                 </span>
@@ -269,7 +269,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
                     </div>
 
                     <p className="text-xs text-slate-300 leading-relaxed">
-                      Ứng dụng CLSend sẽ được ghim trực tiếp ra màn hình chính điện thoại, mở toàn màn hình không có thanh web, thông báo tệp tức thì và chạy siêu mượt.
+                      Ứng dụng ClSend sẽ được ghim trực tiếp ra màn hình chính điện thoại, mở toàn màn hình không có thanh web, thông báo tệp tức thì và chạy siêu mượt.
                     </p>
 
                     <button
@@ -337,7 +337,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
                     <div className="p-3.5 bg-white rounded-3xl shadow-2xl shadow-emerald-500/15 border-4 border-slate-800/90 hover:border-emerald-500/50 transition-colors">
                       <img 
                         src={qrDataUrl} 
-                        alt="QR Code Cài đặt CLSend về Điện Thoại" 
+                        alt="QR Code Cài đặt ClSend về Điện Thoại" 
                         className="w-52 h-52 sm:w-56 sm:h-56 object-contain rounded-2xl" 
                       />
                     </div>
@@ -399,7 +399,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    Tạo ứng dụng riêng biệt chạy độc lập trên màn hình máy tính: không có thanh địa chỉ web, có icon CLSend ngoài Desktop, ghim được vào Taskbar Windows.
+                    Tạo ứng dụng riêng biệt chạy độc lập trên màn hình máy tính: không có thanh địa chỉ web, có icon ClSend ngoài Desktop, ghim được vào Taskbar Windows.
                   </p>
                 </div>
 
@@ -421,7 +421,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
               <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 flex items-center justify-between gap-4">
                 <div className="space-y-1">
                   <h5 className="text-xs font-bold text-white">Tải bộ tạo biểu tượng Desktop (.cmd)</h5>
-                  <p className="text-[11px] text-slate-400">Tự động tạo shortcut CLSend với icon sắc nét ngoài Desktop Windows 10/11</p>
+                  <p className="text-[11px] text-slate-400">Tự động tạo shortcut ClSend với icon sắc nét ngoài Desktop Windows 10/11</p>
                 </div>
                 <a
                   href="/api/download-desktop"
@@ -443,7 +443,7 @@ export const DesktopInstallModal: React.FC<DesktopInstallModalProps> = ({
                   className="w-full py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800/80 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Mở Trang Giới Thiệu Chi Tiết (CLSend PC)</span>
+                  <span>Mở Trang Giới Thiệu Chi Tiết (ClSend PC)</span>
                 </button>
               </div>
             </div>

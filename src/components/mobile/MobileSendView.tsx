@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { yieldToMain } from '../../utils/scheduler';
 import { useAuth, getClientDeviceId } from '../../context/AuthContext';
 import { db } from '../../firebase/config';
 import { 
@@ -178,6 +179,7 @@ export const MobileSendView: React.FC = () => {
 
     setIsSending(true);
     setIsTextSheetOpen(false);
+    await yieldToMain();
 
     try {
       await addDoc(collection(db, 'transfers'), {
@@ -630,7 +632,8 @@ export const MobileSendView: React.FC = () => {
               type="button"
               onClick={handleSendText}
               disabled={!textMessage.trim()}
-              className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+              className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 cursor-pointer"
+              style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
             >
               <span>Gửi Ngay</span>
               <Send className="w-3.5 h-3.5" />

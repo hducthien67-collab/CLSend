@@ -18,12 +18,14 @@ import {
 import { OFFICIAL_TERMS_OF_SERVICE, MainArticle, SubClause } from '../data/officialTerms';
 import { CloudSendLogo } from './CloudSendLogo';
 import { SilkFabricBackground } from './SilkFabricBackground';
+import { useLanguage } from '../context/LanguageContext';
 
 interface TermsOfServicePageProps {
   onBack: () => void;
 }
 
 export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }) => {
+  const { currentLang, setLanguage } = useLanguage();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [copiedClauseId, setCopiedClauseId] = useState<string | null>(null);
@@ -66,7 +68,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
   }, []);
 
   const handleCopyCitation = (clause: SubClause, article: MainArticle) => {
-    const citation = `[Trích dẫn CLSend: ${article.articleNumber} - Khoản ${clause.clauseNumber}: ${clause.title}]\nNội dung: ${clause.description}\nChế tài: ${clause.penalty}\nNguồn chính thức: ${window.location.origin}/?page=rules#clause-${clause.id}`;
+    const citation = `[Trích dẫn ClSend: ${article.articleNumber} - Khoản ${clause.clauseNumber}: ${clause.title}]\nNội dung: ${clause.description}\nChế tài: ${clause.penalty}\nNguồn chính thức: ${window.location.origin}/?page=rules#clause-${clause.id}`;
     navigator.clipboard.writeText(citation);
     setCopiedClauseId(clause.id);
     setTimeout(() => setCopiedClauseId(null), 2500);
@@ -105,13 +107,42 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
 
             <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-800">
               <CloudSendLogo className="w-6 h-6 text-emerald-400" />
-              <span className="font-bold text-white text-sm">CLSend Legal Portal</span>
+              <span className="font-bold text-white text-sm">ClSend Legal Portal</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold">
-              v2.5 Ban hành 2026
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center rounded-xl bg-slate-900 border border-slate-700/80 p-0.5">
+              <button
+                type="button"
+                onClick={() => setLanguage('vi')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  currentLang === 'vi'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Tiếng Việt"
+              >
+                <span>🇻🇳</span>
+                <span className="hidden sm:inline">Tiếng Việt</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  currentLang === 'en'
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="English"
+              >
+                <span>🇬🇧</span>
+                <span className="hidden sm:inline">English</span>
+              </button>
+            </div>
+
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold hidden sm:inline-block">
+              {currentLang === 'en' ? 'v2.5 Issued 2026' : 'v2.5 Ban hành 2026'}
             </span>
           </div>
         </div>
@@ -129,11 +160,11 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-              Bộ Luật Điều Khoản Sử Dụng & An Toàn Dữ Liệu CLSend
+              Bộ Luật Điều Khoản Sử Dụng & An Toàn Dữ Liệu ClSend
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Căn cứ theo Luật An ninh mạng và các tiêu chuẩn bảo mật dữ liệu P2P quốc tế: Đây là bộ quy định có hiệu lực thi hành bắt buộc đối với mọi hoạt động truyền tệp, tải xuống, nhắn tin và lưu trữ đám mây trên hệ sinh thái CLSend.
+              Căn cứ theo Luật An ninh mạng và các tiêu chuẩn bảo mật dữ liệu P2P quốc tế: Đây là bộ quy định có hiệu lực thi hành bắt buộc đối với mọi hoạt động truyền tệp, tải xuống, nhắn tin và lưu trữ đám mây trên hệ sinh thái ClSend.
             </p>
 
             {/* Quick Metrics */}
@@ -363,7 +394,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
       {/* Footer */}
       <footer className="w-full py-6 text-center text-xs text-slate-500 border-t border-slate-900 bg-slate-950/80">
         <p>
-          © 2012 - 2026 CLSend P2P Cloud Suite • Văn bản Điều khoản & Quy tắc An toàn có hiệu lực từ ngày 01/01/2026.
+          © 2012 - 2026 ClSend P2P Cloud Suite • Văn bản Điều khoản & Quy tắc An toàn có hiệu lực từ ngày 01/01/2026.
         </p>
       </footer>
     </div>

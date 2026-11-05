@@ -256,7 +256,7 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-950/80 border border-slate-700 text-slate-300 font-mono">
-                  CLSend Moderation
+                  ClSend Moderation
                 </span>
                 {activeSanction.violationCount > 1 && (
                   <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/30 border border-rose-500 text-rose-200 font-mono">
@@ -281,7 +281,7 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
           {/* Main Statement */}
           <div className="space-y-1.5 border-b border-slate-800 pb-3">
             <p className="text-slate-300 text-xs">
-              Hệ thống an toàn ghi nhận tài khoản trên <strong className="text-white">CLSend</strong> đã vi phạm <strong className="text-emerald-400">Tiêu chuẩn Cộng đồng</strong>.
+              Hệ thống an toàn ghi nhận tài khoản trên <strong className="text-white">ClSend</strong> đã vi phạm <strong className="text-emerald-400">Tiêu chuẩn Cộng đồng</strong>.
             </p>
             
             <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between flex-wrap gap-1.5 pt-0.5">
@@ -317,7 +317,7 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
               <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
                 <div className="text-[9px] text-slate-400 uppercase font-mono">Người ban hành kỷ luật:</div>
                 <div className="text-amber-300 font-bold truncate mt-0.5">{actedBy}</div>
-                <div className="text-[9px] text-emerald-400 font-mono">Hệ Thống An Toàn CLSend</div>
+                <div className="text-[9px] text-emerald-400 font-mono">Hệ Thống An Toàn ClSend</div>
               </div>
             </div>
           </div>
@@ -372,7 +372,7 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
                 className="w-4 h-4 rounded text-emerald-500 bg-slate-900 border-slate-700 focus:ring-emerald-500 mt-0.5 shrink-0 cursor-pointer"
               />
               <span className="text-[11px] text-slate-300 font-medium select-none">
-                Tôi đồng ý tuân thủ Nội quy và Tiêu chuẩn Cộng đồng CLSend (I Agree).
+                Tôi đồng ý tuân thủ Nội quy và Tiêu chuẩn Cộng đồng ClSend (I Agree).
               </span>
             </label>
           )}

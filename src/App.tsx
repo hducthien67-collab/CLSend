@@ -12,22 +12,25 @@ import { SendView } from './components/SendView';
 import { ReceiveView } from './components/ReceiveView';
 import { ChatRoomView } from './components/ChatRoomView';
 import { CloudDriveView } from './components/CloudDriveView';
-import { SettingsModal } from './components/SettingsModal';
-import { DevCloudConsoleModal } from './components/DevCloudConsoleModal';
-import { DevDatastorePage } from './components/DevDatastorePage';
-import { RulesModal } from './components/RulesModal';
-import { TermsOfServicePage } from './components/TermsOfServicePage';
-import { GoogleDisplayNameModal } from './components/auth/GoogleDisplayNameModal';
-import { RobloxModerationModal } from './components/RobloxModerationModal';
-import { ErrorChatAssistantModal } from './components/ErrorChatAssistantModal';
-import { DataStorageAvatarsModal } from './components/DataStorageAvatars';
+
+// High-Performance Lazy-Loaded Modals & Secondary Pages
+const SettingsModal = React.lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const DevCloudConsoleModal = React.lazy(() => import('./components/DevCloudConsoleModal').then(m => ({ default: m.DevCloudConsoleModal })));
+const DevDatastorePage = React.lazy(() => import('./components/DevDatastorePage').then(m => ({ default: m.DevDatastorePage })));
+const RulesModal = React.lazy(() => import('./components/RulesModal').then(m => ({ default: m.RulesModal })));
+const TermsOfServicePage = React.lazy(() => import('./components/TermsOfServicePage').then(m => ({ default: m.TermsOfServicePage })));
+const GoogleDisplayNameModal = React.lazy(() => import('./components/auth/GoogleDisplayNameModal').then(m => ({ default: m.GoogleDisplayNameModal })));
+const RobloxModerationModal = React.lazy(() => import('./components/RobloxModerationModal').then(m => ({ default: m.RobloxModerationModal })));
+const ErrorChatAssistantModal = React.lazy(() => import('./components/ErrorChatAssistantModal').then(m => ({ default: m.ErrorChatAssistantModal })));
+const DataStorageAvatarsModal = React.lazy(() => import('./components/DataStorageAvatars').then(m => ({ default: m.DataStorageAvatarsModal })));
+const DesktopInstallModal = React.lazy(() => import('./components/DesktopInstallModal').then(m => ({ default: m.DesktopInstallModal })));
+const DesktopSyncModal = React.lazy(() => import('./components/DesktopSyncModal').then(m => ({ default: m.DesktopSyncModal })));
+const LandingPage = React.lazy(() => import('./components/LandingPage').then(m => ({ default: m.LandingPage })));
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { registerToastListener } from './utils/toast';
-import { DesktopInstallModal } from './components/DesktopInstallModal';
-import { DesktopSyncModal } from './components/DesktopSyncModal';
-import { LandingPage } from './components/LandingPage';
 import { SilkFabricBackground } from './components/SilkFabricBackground';
 import { sendDesktopMessageNotification, sendDesktopFileNotification, isPwaStandalone } from './utils/desktopNotification';
+import { cleanAllPwaCachesAndBloat } from './utils/pwaStorageCleaner';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { db, auth } from './firebase/config';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc } from 'firebase/firestore';
@@ -79,6 +82,23 @@ function MainApp() {
       if (code && code.replace(/[^0-9]/g, '').length === 6) {
         setUrlSyncCode(code.replace(/[^0-9]/g, ''));
         setIsDesktopSyncOpen(true);
+      }
+    }
+  }, []);
+
+  // Automatic one-time cleanup of legacy 500MB bloated P2P caches and unused blobs
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const cleanedKey = 'cloudsend_pwa_500mb_bloat_cleared_v1';
+      if (!localStorage.getItem(cleanedKey)) {
+        cleanAllPwaCachesAndBloat()
+          .then((res) => {
+            localStorage.setItem(cleanedKey, 'true');
+            if (res.freedMb > 0) {
+              console.log(`[PWA Optimizer] Successfully freed ${res.freedMb} MB of legacy cache!`);
+            }
+          })
+          .catch(() => {});
       }
     }
   }, []);
@@ -754,7 +774,7 @@ function MainApp() {
           </div>
           <h1 className="text-xl font-bold text-white mb-2">403 - Quyền Truy Cập Bị Từ Chối</h1>
           <p className="text-sm text-slate-400 max-w-md mb-2">
-            Trang Quản Trị & DataStore chỉ dành riêng cho Quản trị viên và Nhà phát triển hệ thống CLSend.
+            Trang Quản Trị & DataStore chỉ dành riêng cho Quản trị viên và Nhà phát triển hệ thống ClSend.
           </p>
           <p className="text-xs text-rose-300 font-mono bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20 mb-6">
             Tài khoản hiện tại của bạn ({currentUser.email || 'Khách'}) không có quyền truy cập chức năng này.
@@ -1169,26 +1189,33 @@ function MainApp() {
 
       {/* Main Content Area: Nhận diện Tab đang sử dụng, chỉ kích hoạt Tab hiện tại và dừng các tab khác để chống giật lag */}
       <main className="flex-1 min-h-0 w-full flex flex-col relative overflow-hidden">
-        {activeTab === 'send' && (
-          <div key="send-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-            <SendView />
+        <React.Suspense fallback={
+          <div className="flex-1 flex flex-col items-center justify-center p-12 text-slate-400">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" />
+            <span className="text-xs font-mono">Đang tải mô-đun siêu tốc...</span>
           </div>
-        )}
-        {activeTab === 'receive' && (
-          <div key="receive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-            <ReceiveView />
-          </div>
-        )}
-        {activeTab === 'drive' && (
-          <div key="drive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-            <CloudDriveView />
-          </div>
-        )}
-        {activeTab === 'chat' && (
-          <div key="chat-tab" className="w-full flex-1 flex flex-col overflow-hidden h-full animate-tab-switch pb-16 md:pb-0">
-            <ChatRoomView />
-          </div>
-        )}
+        }>
+          {activeTab === 'send' && (
+            <div key="send-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
+              <SendView />
+            </div>
+          )}
+          {activeTab === 'receive' && (
+            <div key="receive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
+              <ReceiveView />
+            </div>
+          )}
+          {activeTab === 'drive' && (
+            <div key="drive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
+              <CloudDriveView />
+            </div>
+          )}
+          {activeTab === 'chat' && (
+            <div key="chat-tab" className="w-full flex-1 flex flex-col overflow-hidden h-full animate-tab-switch pb-16 md:pb-0">
+              <ChatRoomView />
+            </div>
+          )}
+        </React.Suspense>
       </main>
 
       {/* Settings Modal (opened via gear icon) */}
@@ -1325,7 +1352,14 @@ export default function App() {
     <AppHealthCheck>
       <LanguageProvider>
         <AuthProvider>
-          <MainApp />
+          <React.Suspense fallback={
+            <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white">
+              <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" />
+              <span className="text-xs text-slate-400 font-mono">Đang khởi chạy ClSend...</span>
+            </div>
+          }>
+            <MainApp />
+          </React.Suspense>
         </AuthProvider>
       </LanguageProvider>
     </AppHealthCheck>

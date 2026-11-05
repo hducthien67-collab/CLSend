@@ -33,7 +33,7 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
     title: 'Quy Định Về Ngôn Ngữ Giao Tiếp & Ứng Xử Trong Phòng Trò Chuyện',
     category: 'speech',
     categoryLabel: 'Giao Tiếp & Ngôn Từ',
-    summary: 'Áp dụng cho tất cả các phòng chat công cộng (Lounge), phòng chat nhóm P2P và các đoạn trao đổi văn bản trực tiếp trên hệ thống CLSend.',
+    summary: 'Áp dụng cho tất cả các phòng chat công cộng (Lounge), phòng chat nhóm P2P và các đoạn trao đổi văn bản trực tiếp trên hệ thống ClSend.',
     subClauses: [
       {
         id: '1.1',
@@ -195,16 +195,16 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
     title: 'Quy Định Về Lưu Trữ Đám Mây & Kho Dữ Liệu Cloud Drive',
     category: 'cloud',
     categoryLabel: 'Lưu Trữ Cloud Drive',
-    summary: 'Quy định về hạn mức lưu trữ, quyền sở hữu dữ liệu và cam kết bảo vệ dữ liệu trên hệ thống đám mây CLSend Cloud Drive.',
+    summary: 'Quy định về hạn mức lưu trữ, quyền sở hữu dữ liệu và cam kết bảo vệ dữ liệu trên hệ thống đám mây ClSend Cloud Drive.',
     subClauses: [
       {
         id: '3.1',
         clauseNumber: '3.1',
         title: 'Quyền sở hữu hợp pháp & trách nhiệm pháp lý đối với dữ liệu',
-        description: 'Người dùng sở hữu 100% bản quyền đối với các tệp tin do mình tải lên. CLSend không tự ý đọc trộm, chỉnh sửa hoặc kinh doanh dữ liệu cá nhân của người dùng.',
+        description: 'Người dùng sở hữu 100% bản quyền đối với các tệp tin do mình tải lên. ClSend không tự ý đọc trộm, chỉnh sửa hoặc kinh doanh dữ liệu cá nhân của người dùng.',
         examples: [
           'Người dùng chịu trách nhiệm pháp lý duy nhất trước pháp luật đối với nội dung tệp tin mình lưu trữ.',
-          'CLSend cung cấp hạ tầng kỹ thuật lưu trữ mã hóa an toàn theo tiêu chuẩn điện toán đám mây.'
+          'ClSend cung cấp hạ tầng kỹ thuật lưu trữ mã hóa an toàn theo tiêu chuẩn điện toán đám mây.'
         ],
         severity: 'low',
         severityLabel: 'Mức độ: Quy chuẩn chung',
@@ -227,7 +227,7 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         id: '3.3',
         clauseNumber: '3.3',
         title: 'Mã hóa dữ liệu đầu cuối & Trách nhiệm lưu trữ khóa mã',
-        description: 'Dữ liệu được mã hóa riêng tư trên trình duyệt trước khi đẩy lên đám mây. Người dùng có trách nhiệm ghi nhớ mật khẩu và mã PIN; CLSend không thể khôi phục dữ liệu nếu người dùng làm mất khóa bí mật cá nhân.',
+        description: 'Dữ liệu được mã hóa riêng tư trên trình duyệt trước khi đẩy lên đám mây. Người dùng có trách nhiệm ghi nhớ mật khẩu và mã PIN; ClSend không thể khôi phục dữ liệu nếu người dùng làm mất khóa bí mật cá nhân.',
         examples: [
           'Tự bảo vệ mật khẩu tài khoản và không chia sẻ mã PIN đồng bộ cho người lạ.',
           'Định kỳ sao lưu dữ liệu quan trọng sang thiết bị ngoại vi của cá nhân.'
@@ -240,7 +240,7 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         id: '3.4',
         clauseNumber: '3.4',
         title: 'Quy trình thu hồi & tiêu hủy tệp tin độc hại khỏi Cloud',
-        description: 'Nếu phát hiện tệp tin trên Cloud Drive chứa mã độc nguy hiểm hoặc văn hóa phẩm cấm theo phán quyết pháp luật, CLSend có quyền cách ly và tiêu hủy tệp tin đó mà không cần báo trước.',
+        description: 'Nếu phát hiện tệp tin trên Cloud Drive chứa mã độc nguy hiểm hoặc văn hóa phẩm cấm theo phán quyết pháp luật, ClSend có quyền cách ly và tiêu hủy tệp tin đó mà không cần báo trước.',
         examples: [
           'Tệp tin bị các nhà mạng quốc tế hoặc hệ thống quét virus cảnh báo đỏ (Red Alert).',
           'Tệp tin có lệnh thu hồi chính thức từ cơ quan quản lý an ninh thông tin.'
@@ -320,7 +320,7 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         description: 'Mỗi tài khoản được liên kết với một ID thiết bị và mật mã xác thực. Người dùng có nghĩa vụ bảo mật thông tin này, không cung cấp mã đồng bộ 6 số cho người lạ.',
         examples: [
           'Mã QR và mã 6 số đồng bộ là chìa khóa quyền truy cập trực tiếp tài khoản.',
-          'CLSend không bao giờ yêu cầu người dùng đọc mã PIN đồng bộ qua bất kỳ tin nhắn nào.'
+          'ClSend không bao giờ yêu cầu người dùng đọc mã PIN đồng bộ qua bất kỳ tin nhắn nào.'
         ],
         severity: 'medium',
         severityLabel: 'Mức độ: Cảnh giác an toàn',
@@ -330,9 +330,9 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         id: '5.2',
         clauseNumber: '5.2',
         title: 'Nghiêm cấm hành vi mạo danh Ban Quản Trị, Dev hoặc Hệ Thống',
-        description: 'Nghiêm cấm đặt tên hiển thị, hình đại diện hoặc gửi thông điệp giả mạo Quản trị viên, Nhà phát triển, Ban Điều Hành hoặc Thông báo hệ thống CLSend.',
+        description: 'Nghiêm cấm đặt tên hiển thị, hình đại diện hoặc gửi thông điệp giả mạo Quản trị viên, Nhà phát triển, Ban Điều Hành hoặc Thông báo hệ thống ClSend.',
         examples: [
-          'Đặt tên hiển thị: "Admin CLSend", "Ban Quản Trị", "Hệ Thống Tự Động", "Dev Chính Chủ".',
+          'Đặt tên hiển thị: "Admin ClSend", "Ban Quản Trị", "Hệ Thống Tự Động", "Dev Chính Chủ".',
           'Giả danh Quản trị viên yêu cầu người khác gửi mật khẩu hoặc nộp tiền phạt.',
           'Dùng huy hiệu giả mạo DEV để dọa dẫm người dùng mới.'
         ],
@@ -436,10 +436,10 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         id: '7.1',
         clauseNumber: '7.1',
         title: 'Giới hạn trách nhiệm đối với kênh truyền P2P phi tập trung',
-        description: 'Kênh truyền P2P là kết nối trực tiếp thiết bị - tới - thiết bị thông qua công nghệ WebRTC. Dữ liệu truyền đi không đi qua máy chủ lưu trữ của CLSend. Do đó, người nhận có trách nhiệm tự kiểm tra độ an toàn của tệp tin trước khi mở.',
+        description: 'Kênh truyền P2P là kết nối trực tiếp thiết bị - tới - thiết bị thông qua công nghệ WebRTC. Dữ liệu truyền đi không đi qua máy chủ lưu trữ của ClSend. Do đó, người nhận có trách nhiệm tự kiểm tra độ an toàn của tệp tin trước khi mở.',
         examples: [
           'Luôn quét virus tệp tin nhận được từ người lạ trước khi mở trên máy tính.',
-          'CLSend không chịu trách nhiệm đối với các mất mát tài chính do người dùng tự nguyện chuyển giao dữ liệu cá nhân cho bên thứ ba.'
+          'ClSend không chịu trách nhiệm đối với các mất mát tài chính do người dùng tự nguyện chuyển giao dữ liệu cá nhân cho bên thứ ba.'
         ],
         severity: 'low',
         severityLabel: 'Mức độ: Quy định pháp lý',
@@ -449,7 +449,7 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         id: '7.2',
         clauseNumber: '7.2',
         title: 'Quyền sửa đổi, cập nhật điều khoản & Thông báo thi hành',
-        description: 'CLSend có quyền cập nhật, bổ sung các điều khoản này để phù hợp với sự phát triển của công nghệ và quy định pháp luật mới nhất. Mọi thay đổi lớn sẽ được công bố công khai trên ứng dụng.',
+        description: 'ClSend có quyền cập nhật, bổ sung các điều khoản này để phù hợp với sự phát triển của công nghệ và quy định pháp luật mới nhất. Mọi thay đổi lớn sẽ được công bố công khai trên ứng dụng.',
         examples: [
           'Thông báo phiên bản điều khoản cập nhật sẽ xuất hiện trên trang chính.',
           'Việc tiếp tục sử dụng ứng dụng sau khi cập nhật đồng nghĩa với việc bạn chấp thuận hoàn toàn điều khoản mới.'
@@ -461,8 +461,8 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
       {
         id: '7.3',
         clauseNumber: '7.3',
-        title: 'Cam kết tuân thủ của người dùng khi truy cập CLSend',
-        description: 'Bằng việc nhấn "Đồng ý", đăng nhập hoặc tiếp tục sử dụng các dịch vụ gửi tệp, chat và lưu trữ của CLSend, người dùng cam kết đã đọc, hiểu rõ và tuyệt đối tuân thủ Bộ Luật Điều Khoản Sử Dụng này.',
+        title: 'Cam kết tuân thủ của người dùng khi truy cập ClSend',
+        description: 'Bằng việc nhấn "Đồng ý", đăng nhập hoặc tiếp tục sử dụng các dịch vụ gửi tệp, chat và lưu trữ của ClSend, người dùng cam kết đã đọc, hiểu rõ và tuyệt đối tuân thủ Bộ Luật Điều Khoản Sử Dụng này.',
         examples: [
           'Cam kết chung tay xây dựng cộng đồng chia sẻ tệp tin và trò chuyện văn minh, lành mạnh và an toàn.',
           'Sẵn sàng thông báo cho Ban Quản Trị khi phát hiện các hành vi vi phạm nghiêm trọng.'

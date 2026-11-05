@@ -84,24 +84,8 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
 
     window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
-    // Auto pause loop when browser tab is inactive to preserve battery & GPU
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        isPaused = true;
-        if (animationFrameId !== null) {
-          cancelAnimationFrame(animationFrameId);
-          animationFrameId = null;
-        }
-      } else {
-        if (isPaused) {
-          isPaused = false;
-          lastTime = performance.now();
-          animationFrameId = requestAnimationFrame(render);
-        }
-      }
-    };
+    // No visibility pausing
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     // Initialize floating luminescent starlight bokeh particles
     const particles: Particle[] = [];
@@ -170,7 +154,7 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
     let lastTime = performance.now();
 
     const render = (now: number) => {
-      if (isPaused || document.hidden) return;
+      if (isPaused) return;
 
       const delta = Math.min(32, now - lastTime);
       lastTime = now;
@@ -318,7 +302,6 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
     return () => {
       window.removeEventListener('resize', resizeCanvas);
       window.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
       }

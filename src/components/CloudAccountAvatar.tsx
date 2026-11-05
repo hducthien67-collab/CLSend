@@ -12,7 +12,7 @@ interface CloudAccountAvatarProps {
 }
 
 /**
- * Avatar nhận diện riêng biệt dành cho các tài khoản Cloud CLSend
+ * Avatar nhận diện riêng biệt dành cho các tài khoản Cloud ClSend
  * Thiết kế mang đậm phong cách đám mây lưu trữ bảo mật (Cloud Node Shield):
  * - Nền Gradient Cyber Sky / Emerald Cyan cao cấp
  * - Biểu tượng Đám mây đồng bộ + Khiên an ninh tích hợp

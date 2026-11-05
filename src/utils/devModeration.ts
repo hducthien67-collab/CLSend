@@ -22,7 +22,7 @@ export const SANCTION_TIERS = {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 15 * 60 * 1000, // 15 mins
     label: 'Mức 1 (Nhẹ): Cảnh báo & Khóa chat 15 phút',
-    remind: 'Hệ thống an toàn CLSend ghi nhận lời nói của bạn chưa phù hợp với Tiêu chuẩn Cộng đồng. Lần này chỉ nhắc nhở nhẹ thôi nhé, hãy luôn giữ thái độ lịch sự, văn minh và tôn trọng mọi người trong các cuộc trò chuyện nha :))',
+    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp với Tiêu chuẩn Cộng đồng. Lần này chỉ nhắc nhở nhẹ thôi nhé, hãy luôn giữ thái độ lịch sự, văn minh và tôn trọng mọi người trong các cuộc trò chuyện nha :))',
     severity: 'light' as const,
   },
   level_2: {

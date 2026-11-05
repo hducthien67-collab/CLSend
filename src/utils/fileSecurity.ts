@@ -1,5 +1,5 @@
 /**
- * CLSend Secure File System & Content Protection Module
+ * ClSend Secure File System & Content Protection Module
  * Fixes all file upload and download vulnerabilities:
  * 1. Dangerous executable / script extension blocking (.exe, .bat, .cmd, .vbs, .ps1, .sh, .jar, .scr, etc.)
  * 2. Double-extension attack defense (e.g. document.pdf.exe, photo.jpg.vbs)
@@ -112,7 +112,7 @@ export function inspectFileSecurity(file: { name: string; size?: number; type?: 
       isSafe: false,
       sanitizedName,
       category: 'executable_blocked',
-      error: `Định dạng tệp .${lastExt} là tệp thực thi/mã lệnh nguy hiểm và đã bị CLSend từ chối tải lên để bảo vệ người dùng.`
+      error: `Định dạng tệp .${lastExt} là tệp thực thi/mã lệnh nguy hiểm và đã bị ClSend từ chối tải lên để bảo vệ người dùng.`
     };
   }
 

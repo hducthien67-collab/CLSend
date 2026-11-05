@@ -6,7 +6,9 @@ import { MobileSendView } from './MobileSendView';
 import { MobileReceiveView } from './MobileReceiveView';
 import { MobileChatView } from './MobileChatView';
 import { MobileCloudView } from './MobileCloudView';
-import { SettingsModal } from '../SettingsModal';
+
+// Lazy loaded modals to optimize mobile initial bundle
+const SettingsModal = React.lazy(() => import('../SettingsModal').then(m => ({ default: m.SettingsModal })));
 import { SilkFabricBackground } from '../SilkFabricBackground';
 import { db } from '../../firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -71,26 +73,32 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
       {/* Centered Main Tab Content Area (Symmetrically balanced, never skewed or shifted) */}
       <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col overflow-hidden">
         <main className="flex-1 min-h-0 w-full flex flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom,0px))]">
-          {activeTab === 'send' && (
-            <div key="m-send" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-              <MobileSendView />
+          <React.Suspense fallback={
+            <div className="flex-1 flex items-center justify-center p-8 text-emerald-400">
+              <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
             </div>
-          )}
-          {activeTab === 'receive' && (
-            <div key="m-receive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-              <MobileReceiveView />
-            </div>
-          )}
-          {activeTab === 'chat' && (
-            <div key="m-chat" className="flex-1 min-h-0 h-full flex flex-col overflow-hidden animate-in fade-in duration-150">
-              <MobileChatView />
-            </div>
-          )}
-          {activeTab === 'drive' && (
-            <div key="m-drive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-              <MobileCloudView />
-            </div>
-          )}
+          }>
+            {activeTab === 'send' && (
+              <div key="m-send" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+                <MobileSendView />
+              </div>
+            )}
+            {activeTab === 'receive' && (
+              <div key="m-receive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+                <MobileReceiveView />
+              </div>
+            )}
+            {activeTab === 'chat' && (
+              <div key="m-chat" className="flex-1 min-h-0 h-full flex flex-col overflow-hidden animate-in fade-in duration-150">
+                <MobileChatView />
+              </div>
+            )}
+            {activeTab === 'drive' && (
+              <div key="m-drive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
+                <MobileCloudView />
+              </div>
+            )}
+          </React.Suspense>
         </main>
       </div>
 

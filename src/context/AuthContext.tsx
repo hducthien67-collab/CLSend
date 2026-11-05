@@ -67,6 +67,8 @@ interface AuthContextType {
     expiresTimestamp: number;
     emailMessage: string;
     recipientEmail: string;
+    isRealSmtp?: boolean;
+    serverMessage?: string | null;
   }>;
   verifyEmailCodeAndLink: (targetEmail: string, inputCode: string) => Promise<void>;
   getLoginSessions: () => Promise<LoginSession[]>;
@@ -127,6 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   
   const currentUserRef = useRef<AppUser | null>(currentUser);
+  const isLinkingAccountRef = useRef<boolean>(false);
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
@@ -366,6 +369,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (isLinkingAccountRef.current) {
+        // Account linking is currently running for existing user session - do not overwrite
+        return;
+      }
+
       if (user) {
         if (typeof window !== 'undefined' && window.location.search.includes('desktopAuth=true')) {
           window.location.href = `/auth-success?uid=${encodeURIComponent(user.uid)}&email=${encodeURIComponent(user.email || '')}&displayName=${encodeURIComponent(user.displayName || '')}&photoURL=${encodeURIComponent(user.photoURL || '')}`;
@@ -1127,23 +1135,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Also save locally for instant response & offline stability
     localStorage.setItem(`cloudsend_active_otp_${currentUsr.uid}`, JSON.stringify(record));
 
-    // 1. Dispatch real email directly via Firebase Auth's Google email delivery infrastructure
+    // Dispatch real email via backend SMTP server (clsendmailer@gmail.com)
+    let serverRespData: any = null;
     try {
-      if (typeof window !== 'undefined') {
-        const actionCodeSettings = {
-          url: `${window.location.origin}/?emailVerifyCode=${code}&email=${encodeURIComponent(cleanEmail)}`,
-          handleCodeInApp: true,
-        };
-        await sendSignInLinkToEmail(auth, cleanEmail, actionCodeSettings);
-        console.log(`[Firebase Auth Email] Real verification email successfully dispatched to ${cleanEmail}`);
-      }
-    } catch (fbErr) {
-      console.warn('[Firebase Auth Email] sendSignInLinkToEmail notice:', fbErr);
-    }
-
-    // 2. Dispatch real email via backend server
-    try {
-      await fetch('/api/auth/send-verification-email', {
+      const resp = await fetch('/api/auth/send-verification-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1153,6 +1148,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           durationMinutes: 15
         })
       });
+      if (resp.ok) {
+        serverRespData = await resp.json();
+      }
     } catch (err) {
       console.warn('API send-verification-email call notice:', err);
     }
@@ -1163,6 +1161,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       expiresTimestamp,
       emailMessage,
       recipientEmail: cleanEmail,
+      isRealSmtp: Boolean(serverRespData?.isRealSmtp),
+      serverMessage: serverRespData?.message || null,
     };
   };
 
@@ -1527,6 +1527,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const linkWithGoogleAccount = async (): Promise<{ email: string; photoURL: string | null } | null> => {
+    isLinkingAccountRef.current = true;
     try {
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
@@ -1566,26 +1567,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setSettings((prev) => ({ ...prev, customAvatarUrl: photoUrl }));
           }
 
-          await setDoc(doc(db, 'users', currentUsr.uid), {
-            email: email,
-            linkedEmail: email,
-            isEmailVerified: true,
-            emailVerifiedAt: nowIso,
-            customAvatarUrl: photoUrl || null,
-          }, { merge: true });
-
-          const identifier = userProfile?.username || currentUsr.displayName || '';
-          if (identifier) {
-            const accountKey = await getAccountKey(identifier.trim().toLowerCase());
-            await setDoc(doc(db, 'accounts', accountKey), {
+          try {
+            await setDoc(doc(db, 'users', currentUsr.uid), {
               email: email,
               linkedEmail: email,
               isEmailVerified: true,
               emailVerifiedAt: nowIso,
-            }, { merge: true }).catch(() => {});
+              customAvatarUrl: photoUrl || null,
+            }, { merge: true });
+          } catch (e) {
+            console.warn('Firestore set user notice:', e);
           }
 
-          await updatePresence(currentUsr.uid, updatedProf);
+          const identifier = userProfile?.username || currentUsr.displayName || '';
+          if (identifier) {
+            try {
+              const accountKey = await getAccountKey(identifier.trim().toLowerCase());
+              await setDoc(doc(db, 'accounts', accountKey), {
+                email: email,
+                linkedEmail: email,
+                isEmailVerified: true,
+                emailVerifiedAt: nowIso,
+              }, { merge: true });
+            } catch (e) {
+              console.warn('Firestore set account notice:', e);
+            }
+          }
+
+          await updatePresence(currentUsr.uid, updatedProf).catch(() => {});
         }
         return { email, photoURL: photoUrl };
       }
@@ -1596,6 +1605,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       console.warn('Link Google account error:', err);
       throw err;
+    } finally {
+      setTimeout(() => {
+        isLinkingAccountRef.current = false;
+      }, 1500);
     }
   };
 

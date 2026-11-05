@@ -7,7 +7,7 @@
  * 3. Graceful restoration to pristine default favicon and title when viewed
  */
 
-let originalTitle = typeof document !== 'undefined' ? document.title : 'CLSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến';
+let originalTitle = typeof document !== 'undefined' ? document.title : 'ClSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến';
 let originalFaviconHref = '/favicon.svg';
 let cachedBaseFaviconImage: HTMLImageElement | null = null;
 let isImageLoading = false;

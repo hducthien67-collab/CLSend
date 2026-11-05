@@ -1,5 +1,6 @@
 import { UserProfileModal } from './UserProfileModal';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, startTransition } from 'react';
+import { yieldToMain } from '../utils/scheduler';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { db } from '../firebase/config';
@@ -79,6 +80,23 @@ import {
 } from '../utils/devModeration';
 import { renderClickableText, cleanAndFormatUserText, sanitizeDisplayText } from '../utils/textFormat';
 import { wrapSecureBase64Message, unwrapSecureBase64Message } from '../utils/base64Security';
+
+// Global memory-efficient LRU cache to eliminate Base64 decoding and Profanity regex during scrolling
+const textMessageCleanCache = new Map<string, string>();
+function getCachedCleanMessageText(rawText: string): string {
+  if (!rawText) return '';
+  let cached = textMessageCleanCache.get(rawText);
+  if (cached === undefined) {
+    const unwrapped = unwrapSecureBase64Message(rawText);
+    cached = censorProfanity(unwrapped).cleanText;
+    if (textMessageCleanCache.size > 300) {
+      const first = textMessageCleanCache.keys().next().value;
+      if (first) textMessageCleanCache.delete(first);
+    }
+    textMessageCleanCache.set(rawText, cached);
+  }
+  return cached;
+}
 import { 
   uploadFileToServer, 
   generateImageThumbnail, 
@@ -259,10 +277,10 @@ export const ChatRoomView: React.FC = () => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
-  // Discord / Zalo pagination: load latest 35 messages by default, infinite scroll up to load older
-  const [messageLimit, setMessageLimit] = useState(35);
+  // Pagination: load latest 10 messages by default, scroll up to load +10 more
+  const [messageLimit, setMessageLimit] = useState(10);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
-  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const previousScrollHeightRef = useRef<number>(0);
   const previousScrollTopRef = useRef<number>(0);
 
@@ -277,7 +295,7 @@ export const ChatRoomView: React.FC = () => {
   const latestMessageIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef(true);
 
-  // Reset scroll and unread tracking when switching rooms
+  // Reset scroll and pagination tracking when switching rooms
   useEffect(() => {
     initialLoadRef.current = true;
     lastSeenMessageIdRef.current = null;
@@ -286,9 +304,10 @@ export const ChatRoomView: React.FC = () => {
     setHasUnreadNewMessage(false);
     setShowScrollBottomBtn(false);
     isNearBottomRef.current = true;
+    setMessageLimit(10);
     setOlderMessages([]);
     setRecentMessages([]);
-    setHasMoreOlder(true);
+    setHasMoreOlder(false);
     setIsLoadingOlder(false);
     previousScrollHeightRef.current = 0;
     previousScrollTopRef.current = 0;
@@ -346,108 +365,66 @@ export const ChatRoomView: React.FC = () => {
     }
   };
 
-  // Discord / Zalo: Tải các đoạn chat cũ hơn trước ngày hôm qua (hoặc trước con trỏ tin nhắn cũ nhất)
-  const handleLoadOlderMessages = async () => {
+  // Tải thêm 10 đoạn chat cũ hơn khi cuộn lên trên
+  const handleLoadOlderMessages = () => {
     if (isLoadingOlder || !hasMoreOlder || !activeRoomId) return;
-    setIsLoadingOlder(true);
-
     const el = chatContainerRef.current;
-    const oldScrollHeight = el ? el.scrollHeight : 0;
-    const oldScrollTop = el ? el.scrollTop : 0;
-
-    try {
-      const oldestMsg = olderMessages.length > 0 
-        ? olderMessages[0] 
-        : (recentMessages.length > 0 ? recentMessages[0] : null);
-
-      const oldestCursor = oldestMsg?.createdAt || getYesterdayStartIso();
-      const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
-      const olderQuery = query(
-        messagesRef,
-        where('createdAt', '<', oldestCursor),
-        orderBy('createdAt', 'desc'),
-        limit(30)
-      );
-
-      const snap = await getDocs(olderQuery);
-      if (snap.empty) {
-        setHasMoreOlder(false);
-        setIsLoadingOlder(false);
-        return;
-      }
-
-      const fetched: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        fetched.push({ id: docSnap.id, ...data } as ChatMessage);
-      });
-
-      // Sort chronological ascending
-      fetched.sort((a, b) => {
-        const timeA = getMessageTime(a);
-        const timeB = getMessageTime(b);
-        if (timeA !== timeB) return timeA - timeB;
-        return (a.createdAt || '').localeCompare(b.createdAt || '');
-      });
-
-      if (snap.docs.length < 30) {
-        setHasMoreOlder(false);
-      }
-
-      setOlderMessages((prev) => {
-        const existingIds = new Set(prev.map(m => m.id));
-        const newUnique = fetched.filter(m => !existingIds.has(m.id));
-        return [...newUnique, ...prev];
-      });
-
-      // Discord / Zalo scroll position preservation (chống giật/nhảy màn hình)
-      requestAnimationFrame(() => {
-        if (el) {
-          const heightDiff = el.scrollHeight - oldScrollHeight;
-          el.scrollTop = oldScrollTop + heightDiff;
-        }
-        setIsLoadingOlder(false);
-      });
-    } catch (err) {
-      console.warn('Error loading older messages:', err);
-      setIsLoadingOlder(false);
+    if (el) {
+      previousScrollHeightRef.current = el.scrollHeight;
+      previousScrollTopRef.current = el.scrollTop;
     }
+    setIsLoadingOlder(true);
+    setMessageLimit((prev) => prev + 10);
   };
 
-  // Track scroll position to handle new unread messages & Discord/Zalo infinite scroll up
+  const showScrollBottomBtnRef = useRef(false);
+  const scrollRafIdRef = useRef<number | null>(null);
+  const lastLoadOlderTimeRef = useRef(0);
+
+  // Track scroll position to handle new unread messages & infinite scroll up to load +10 older messages (Throttled via rAF)
   const handleScrollChat = () => {
-    const el = chatContainerRef.current;
-    if (!el) return;
+    if (scrollRafIdRef.current !== null) return;
 
-    // Discord / Zalo Infinite Scroll Up: Khi người dùng lăn chuột lên gần đầu hoặc tới mốc ngày đó
-    if (el.scrollTop <= 80 && hasMoreOlder && !isLoadingOlder) {
-      handleLoadOlderMessages();
-    }
+    scrollRafIdRef.current = requestAnimationFrame(() => {
+      scrollRafIdRef.current = null;
+      const el = chatContainerRef.current;
+      if (!el) return;
 
-    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const nearBottom = distanceToBottom < 100;
-    isNearBottomRef.current = nearBottom;
-
-    if (nearBottom) {
-      // Trường hợp 2: Khi người dùng xem ngay tin nhắn mới nhất hoặc cuộn xuống đáy
-      if (latestMessageIdRef.current) {
-        lastSeenMessageIdRef.current = latestMessageIdRef.current;
+      // Khi người dùng lăn chuột lên gần đầu (<= 60px), tự động nạp thêm 10 tin nhắn cũ hơn (cooldown 400ms)
+      const now = Date.now();
+      if (el.scrollTop <= 60 && hasMoreOlder && !isLoadingOlder && now - lastLoadOlderTimeRef.current > 400) {
+        lastLoadOlderTimeRef.current = now;
+        handleLoadOlderMessages();
       }
-      hasUnreadNewMessageRef.current = false;
-      setHasUnreadNewMessage(false);
-      setShowScrollBottomBtn(false);
-    } else {
-      // Người dùng cuộn lên trên:
-      // CHỈ HIỆN nút "Tin nhắn mới nhất" NẾU có tin nhắn mới mà người dùng CHƯA XEM!
-      // Khi đã xem rồi (lastSeenMessageIdRef.current === latestMessageIdRef.current),
-      // thì khi cuộn lên trên sẽ KHÔNG HIỆN nút Tin nhắn mới nhất nữa!
-      const hasUnread = Boolean(
-        hasUnreadNewMessageRef.current &&
-        latestMessageIdRef.current &&
-        latestMessageIdRef.current !== lastSeenMessageIdRef.current
-      );
-      setShowScrollBottomBtn(hasUnread);
-    }
+
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const nearBottom = distanceToBottom < 100;
+      isNearBottomRef.current = nearBottom;
+
+      if (nearBottom) {
+        if (latestMessageIdRef.current) {
+          lastSeenMessageIdRef.current = latestMessageIdRef.current;
+        }
+        if (hasUnreadNewMessageRef.current) {
+          hasUnreadNewMessageRef.current = false;
+          setHasUnreadNewMessage(false);
+        }
+        if (showScrollBottomBtnRef.current) {
+          showScrollBottomBtnRef.current = false;
+          setShowScrollBottomBtn(false);
+        }
+      } else {
+        const hasUnread = Boolean(
+          hasUnreadNewMessageRef.current &&
+          latestMessageIdRef.current &&
+          latestMessageIdRef.current !== lastSeenMessageIdRef.current
+        );
+        if (showScrollBottomBtnRef.current !== hasUnread) {
+          showScrollBottomBtnRef.current = hasUnread;
+          setShowScrollBottomBtn(hasUnread);
+        }
+      }
+    });
   };
 
   // Listen to available rooms
@@ -651,26 +628,18 @@ export const ChatRoomView: React.FC = () => {
     };
   }, []);
 
-  // Listen to messages in active room (Chỉ tải tin nhắn hôm nay và hôm qua khi vào phòng; các tin nhắn cũ tải khi cuộn lên)
+  // Listen to messages in active room (Tải 10 tin nhắn mới nhất, cuộn lên để xem tiếp 10 tin nhắn cũ)
   useEffect(() => {
     if (!currentUser || !activeRoomId) return;
 
-    const yesterdayIso = getYesterdayStartIso();
     const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
     
-    // 1. Tải các đoạn chat của hôm nay và ngày hôm qua (từ 00:00 hôm qua đến nay)
+    // Tải theo messageLimit (bắt đầu là 10, tăng dần +10 khi cuộn lên trên)
     const q = query(
       messagesRef, 
-      where('createdAt', '>=', yesterdayIso), 
-      orderBy('createdAt', 'asc')
+      orderBy('createdAt', 'desc'),
+      limit(messageLimit)
     );
-
-    // 2. Kiểm tra xem có tin nhắn cũ hơn trước ngày hôm qua hay không để kích hoạt nút cuộn/tải thêm
-    getDocs(query(messagesRef, where('createdAt', '<', yesterdayIso), orderBy('createdAt', 'desc'), limit(1)))
-      .then((snap) => {
-        setHasMoreOlder(!snap.empty);
-      })
-      .catch(() => {});
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs: ChatMessage[] = [];
@@ -685,7 +654,10 @@ export const ChatRoomView: React.FC = () => {
         }
       });
 
-      // Sort messages ascending chronologically
+      // Nếu số lượng tin nhắn đạt tới messageLimit thì nghĩa là còn tin nhắn cũ hơn phía trước
+      setHasMoreOlder(snapshot.docs.length >= messageLimit);
+
+      // Sắp xếp thứ tự thời gian tăng dần để hiển thị từ trên xuống dưới
       msgs.sort((a, b) => {
         const timeA = getMessageTime(a);
         const timeB = getMessageTime(b);
@@ -719,6 +691,19 @@ export const ChatRoomView: React.FC = () => {
       const isFirst = initialLoadRef.current;
       initialLoadRef.current = false;
       
+      // Giữ nguyên vị trí mắt nhìn khi vừa nạp thêm 10 tin nhắn cũ (chống nhảy/giật màn hình)
+      if (isLoadingOlder) {
+        requestAnimationFrame(() => {
+          const el = chatContainerRef.current;
+          if (el) {
+            const heightDiff = el.scrollHeight - previousScrollHeightRef.current;
+            el.scrollTop = previousScrollTopRef.current + heightDiff;
+          }
+          setIsLoadingOlder(false);
+        });
+        return;
+      }
+
       // Handle scrolling & scroll restoration
       if (isFirst) {
         if (latestMsg) {
@@ -758,7 +743,7 @@ export const ChatRoomView: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [currentUser, activeRoomId, settings.soundEnabled]);
+  }, [currentUser, activeRoomId, messageLimit, settings.soundEnabled]);
 
   // Auto-detect and register user as a member when entering any room
   useEffect(() => {
@@ -987,6 +972,24 @@ export const ChatRoomView: React.FC = () => {
       return;
     }
 
+    // 1. INSTANT CLEAR & UI FEEDBACK (Immediate Visual Reaction)
+    setInputText('');
+    richInputRef.current?.clear();
+    setAttachments([]);
+    setSelfDestructMode('off');
+    setShowSelfDestructMenu(false);
+    try {
+      localStorage.removeItem(`cloudsend_chat_draft_${activeRoomId}`);
+    } catch {}
+
+    // 2. Play send sound off the main critical paint path
+    if (settings.soundEnabled) {
+      requestAnimationFrame(() => playSendSound());
+    }
+
+    // 3. ⚡ YIELD TO MAIN: Lets browser complete Next Paint (<16ms INP) before heavy processing
+    await yieldToMain();
+
     const sanitizedInput = sanitizeDisplayText(rawTextOriginal);
     const { cleanText, hasProfanity, detectedList } = censorProfanity(sanitizedInput);
     const textToSend = cleanText;
@@ -999,21 +1002,6 @@ export const ChatRoomView: React.FC = () => {
     const attachmentsToSend = [...attachments];
     const isSelfDestruct = selfDestructMode !== 'off' && attachmentsToSend.length > 0;
     const selfDestructDuration = selfDestructMode === '10s' ? 10 : selfDestructMode === '30s' ? 30 : 0;
-
-    // 1. INSTANT CLEAR (0ms latency - feels completely instantaneous like Discord/Zalo)
-    setInputText('');
-    richInputRef.current?.clear();
-    setAttachments([]);
-    setSelfDestructMode('off');
-    setShowSelfDestructMenu(false);
-    try {
-      localStorage.removeItem(`cloudsend_chat_draft_${activeRoomId}`);
-    } catch {}
-
-    // 2. Play send sound instantly
-    if (settings.soundEnabled) {
-      playSendSound();
-    }
 
     const tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
     const effectiveTimeMs = Date.now();
@@ -1505,64 +1493,44 @@ export const ChatRoomView: React.FC = () => {
 
             return (
               <>
-                {/* Discord / Zalo Infinite Scroll Up Header */}
+                {/* 10-message pagination controls at top */}
                 {isLoadingOlder ? (
                   <div className="py-2.5 flex items-center justify-center text-xs text-slate-400 gap-2 select-none animate-pulse">
                     <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                    <span>Đang tải các đoạn chat trước ngày hôm qua...</span>
+                    <span>{t('chat.loading_older')}</span>
                   </div>
                 ) : hasMoreOlder ? (
                   <div className="py-2 flex items-center justify-center select-none">
                     <button
                       type="button"
                       onClick={handleLoadOlderMessages}
-                      className="px-3.5 py-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-[11px] font-semibold text-slate-300 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group"
+                      className="px-3.5 py-1.5 rounded-full bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/80 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group cursor-pointer"
                     >
                       <History className="w-3.5 h-3.5 text-emerald-400 group-hover:-rotate-45 transition-transform" />
-                      <span>Lăn chuột lên hoặc bấm để tải tin nhắn trước ngày hôm qua</span>
+                      <span>{t('chat.load_older_10')}</span>
                     </button>
                   </div>
                 ) : visibleMessages.length > 0 ? (
-                  <div className="py-3 text-center text-xs text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1.5">
+                  <div className="py-2.5 text-center text-xs text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Đã hiển thị toàn bộ lịch sử cuộc trò chuyện</span>
+                    <span>{t('chat.reached_beginning')}</span>
                   </div>
                 ) : null}
 
-                {/* Empty State for today and yesterday */}
+                {/* Empty State */}
                 {visibleMessages.length === 0 && (
                   <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center shadow-inner">
-                      <Calendar className="w-6 h-6" />
+                      <MessagesSquare className="w-6 h-6" />
                     </div>
                     <div>
                       <p className="text-sm sm:text-base font-semibold text-slate-200">
-                        Chưa có tin nhắn nào trong hôm nay và hôm qua
+                        {t('chat.empty')}
                       </p>
                       <p className="text-xs text-slate-500 max-w-sm mt-1">
-                        Hệ thống chỉ tải sẵn tin nhắn hôm nay và hôm qua để tối ưu tốc độ và chống lag.
+                        {currentLang === 'en' ? 'Send a message or drop files below to start the conversation!' : 'Gửi tin nhắn hoặc đính kèm tệp tin bên dưới để bắt đầu cuộc trò chuyện!'}
                       </p>
                     </div>
-                    {hasMoreOlder && (
-                      <button
-                        type="button"
-                        onClick={handleLoadOlderMessages}
-                        disabled={isLoadingOlder}
-                        className="px-4 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-2 transition-all active:scale-95 shadow-sm"
-                      >
-                        {isLoadingOlder ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                            <span>Đang tải tin nhắn cũ...</span>
-                          </>
-                        ) : (
-                          <>
-                            <History className="w-4 h-4 text-emerald-400" />
-                            <span>Tải tin nhắn trước ngày hôm qua</span>
-                          </>
-                        )}
-                      </button>
-                    )}
                   </div>
                 )}
 
@@ -1570,7 +1538,7 @@ export const ChatRoomView: React.FC = () => {
                 {visibleMessages.map((msg, index) => {
                   const isMe = msg.senderId === currentUser?.uid;
                   const isDevMsg = !!(msg.isDevMessage || isDevUser(msg.senderEmail) || (msg.senderName && msg.senderName.includes('DEV')));
-                  const isWarned = !!(msg.hasProfanity || msg.hasWarning || msg.isReported || censorProfanity(msg.text || '').hasProfanity);
+                  const isWarned = !!(msg.hasProfanity || msg.hasWarning || msg.isReported);
 
                   // Group Date Timeline Divider calculation
                   const currentDateKey = getGroupDateKey(msg.createdAt);
@@ -1911,7 +1879,7 @@ export const ChatRoomView: React.FC = () => {
                         className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full chat-message-text select-text cursor-text [user-select:text] selection:bg-emerald-500 selection:text-slate-950"
                         data-chat-message="true"
                       >
-                        {renderClickableText(censorProfanity(unwrapSecureBase64Message(msg.text)).cleanText, isMe)}
+                        {renderClickableText(getCachedCleanMessageText(msg.text), isMe)}
                       </div>
                     )}
                   </div>
@@ -2224,12 +2192,13 @@ export const ChatRoomView: React.FC = () => {
                 />
               </div>
 
-              {/* Send Button */}
+              {/* Send Button (INP Optimized < 16ms) */}
               <button
                 id="send-message-btn"
                 type="submit"
                 disabled={(!inputText.trim() && attachments.length === 0) || isCompressing}
-                className="p-2 sm:p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-all shadow-md active:scale-95 shrink-0"
+                className="p-2 sm:p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shadow-md shrink-0"
+                style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                 title={t('chat.send_btn')}
               >
                 <Send className="w-4 h-4 sm:w-5 sm:h-5" />

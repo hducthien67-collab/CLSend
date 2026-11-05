@@ -112,7 +112,7 @@ export async function downloadFileSafely(
   // Security: Block unsafe protocols (javascript:, vbscript:, etc.)
   if (!isSafeDownloadUrl(source)) {
     console.error('downloadFileSafely: Unsafe URL blocked:', source);
-    notifyDownload('Liên kết tải về không an toàn và đã bị CLSend chặn.', 'error');
+    notifyDownload('Liên kết tải về không an toàn và đã bị ClSend chặn.', 'error');
     if (onProgress) onProgress('error');
     return false;
   }

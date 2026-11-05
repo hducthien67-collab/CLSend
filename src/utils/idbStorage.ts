@@ -72,3 +72,48 @@ export async function getFileBlobLocally(idOrKey: string): Promise<Blob | null> 
     return null;
   }
 }
+
+export async function clearFileDatabase(): Promise<void> {
+  try {
+    const db = await openFileDatabase();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.warn('Could not clear IndexedDB:', err);
+  }
+}
+
+export async function getFileStorageStats(): Promise<{ count: number; totalBytes: number }> {
+  try {
+    const db = await openFileDatabase();
+    return new Promise((resolve) => {
+      const transaction = db.transaction(STORE_NAME, 'readonly');
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+      let count = 0;
+      let totalBytes = 0;
+
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest).result as IDBCursorWithValue | null;
+        if (cursor) {
+          count++;
+          if (cursor.value instanceof Blob) {
+            totalBytes += cursor.value.size;
+          }
+          cursor.continue();
+        } else {
+          resolve({ count, totalBytes });
+        }
+      };
+      request.onerror = () => resolve({ count: 0, totalBytes: 0 });
+    });
+  } catch {
+    return { count: 0, totalBytes: 0 };
+  }
+}
+

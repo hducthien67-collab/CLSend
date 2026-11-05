@@ -1,5 +1,6 @@
 import { UserProfileModal } from '../UserProfileModal';
 import React, { useState, useEffect, useRef } from 'react';
+import { yieldToMain } from '../../utils/scheduler';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { db } from '../../firebase/config';
@@ -109,10 +110,10 @@ export const MobileChatView: React.FC = () => {
   // Modals & Viewers
   const [showRoomDetails, setShowRoomDetails] = useState(false);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
-  // Discord / Zalo pagination: load latest 35 messages by default, infinite scroll up to load older
-  const [messageLimit, setMessageLimit] = useState(35);
+  // Pagination: load latest 10 messages by default, scroll up to load +10 more
+  const [messageLimit, setMessageLimit] = useState(10);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
-  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const previousScrollHeightRef = useRef<number>(0);
   const previousScrollTopRef = useRef<number>(0);
 
@@ -120,6 +121,9 @@ export const MobileChatView: React.FC = () => {
   const [selectedProfileUser, setSelectedProfileUser] = useState<any | null>(null);
   const [viewingZoomImage, setViewingZoomImage] = useState<{ url: string; name?: string; size?: number } | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
+  const showScrollBottomRef = useRef(false);
+  const scrollRafRef = useRef<number | null>(null);
+  const lastLoadOlderRef = useRef(0);
   const [memberNamesMap, setMemberNamesMap] = useState<Record<string, string>>({});
 
   // Room Create & Join state
@@ -259,68 +263,19 @@ export const MobileChatView: React.FC = () => {
     }
   }, [rooms, activeRoomId]);
 
-  // Discord / Zalo: Tải các đoạn chat cũ hơn trước ngày hôm qua (hoặc trước tin nhắn cũ nhất)
-  const handleLoadOlderMessages = async () => {
+  // Tải thêm 10 đoạn chat cũ hơn khi cuộn lên trên
+  const handleLoadOlderMessages = () => {
     if (isLoadingOlder || !hasMoreOlder || !activeRoomId) return;
-    setIsLoadingOlder(true);
-
     const el = messagesContainerRef.current;
-    const oldScrollHeight = el ? el.scrollHeight : 0;
-    const oldScrollTop = el ? el.scrollTop : 0;
-
-    try {
-      const oldestMsg = olderMessages.length > 0 
-        ? olderMessages[0] 
-        : (recentMessages.length > 0 ? recentMessages[0] : null);
-
-      const oldestCursor = oldestMsg?.createdAt || getYesterdayStartIso();
-      const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
-      const olderQuery = query(
-        messagesRef,
-        where('createdAt', '<', oldestCursor),
-        orderBy('createdAt', 'desc'),
-        limit(30)
-      );
-
-      const snap = await getDocs(olderQuery);
-      if (snap.empty) {
-        setHasMoreOlder(false);
-        setIsLoadingOlder(false);
-        return;
-      }
-
-      const fetched: ChatMessage[] = [];
-      snap.forEach((docSnap) => {
-        fetched.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
-      });
-
-      fetched.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-
-      if (snap.docs.length < 30) {
-        setHasMoreOlder(false);
-      }
-
-      setOlderMessages((prev) => {
-        const existingIds = new Set(prev.map(m => m.id));
-        const newUnique = fetched.filter(m => !existingIds.has(m.id));
-        return [...newUnique, ...prev];
-      });
-
-      // Preserve scroll position (chống giật màn hình)
-      requestAnimationFrame(() => {
-        if (el) {
-          const heightDiff = el.scrollHeight - oldScrollHeight;
-          el.scrollTop = oldScrollTop + heightDiff;
-        }
-        setIsLoadingOlder(false);
-      });
-    } catch (err) {
-      console.warn('Error loading older messages:', err);
-      setIsLoadingOlder(false);
+    if (el) {
+      previousScrollHeightRef.current = el.scrollHeight;
+      previousScrollTopRef.current = el.scrollTop;
     }
+    setIsLoadingOlder(true);
+    setMessageLimit((prev) => prev + 10);
   };
 
-  // Listen to messages in active room (Chỉ tải tin nhắn hôm nay và hôm qua khi vào phòng; các tin nhắn cũ tải khi cuộn lên)
+  // Listen to messages in active room (Tải 10 tin nhắn mới nhất, cuộn lên để xem tiếp 10 tin nhắn cũ)
   useEffect(() => {
     if (!currentUser || !activeRoomId) return;
 
@@ -329,22 +284,14 @@ export const MobileChatView: React.FC = () => {
     setOlderMessages([]);
     setIsLoadingOlder(false);
 
-    const yesterdayIso = getYesterdayStartIso();
     const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
     
-    // 1. Chỉ tải tin nhắn từ 00:00 hôm qua đến hôm nay
+    // Tải theo messageLimit (bắt đầu là 10, tăng dần +10 khi cuộn lên trên)
     const q = query(
       messagesRef, 
-      where('createdAt', '>=', yesterdayIso), 
-      orderBy('createdAt', 'asc')
+      orderBy('createdAt', 'desc'),
+      limit(messageLimit)
     );
-
-    // 2. Kiểm tra xem có tin nhắn cũ hơn trước ngày hôm qua hay không
-    getDocs(query(messagesRef, where('createdAt', '<', yesterdayIso), orderBy('createdAt', 'desc'), limit(1)))
-      .then((snap) => {
-        setHasMoreOlder(!snap.empty);
-      })
-      .catch(() => {});
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: ChatMessage[] = [];
@@ -359,13 +306,29 @@ export const MobileChatView: React.FC = () => {
         }
       });
 
-      // Sort messages ascending chronologically for display
+      // Nếu số lượng trả về bằng messageLimit thì nghĩa là còn tin nhắn cũ hơn
+      setHasMoreOlder(snapshot.docs.length >= messageLimit);
+
+      // Sắp xếp thứ tự thời gian tăng dần để hiển thị từ trên xuống dưới
       list.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
 
       setRecentMessages(list);
 
       if (hasExternal && settings?.soundEnabled) {
         playReceiveSound();
+      }
+
+      // Giữ nguyên vị trí mắt nhìn khi nạp thêm 10 tin nhắn cũ
+      if (isLoadingOlder) {
+        requestAnimationFrame(() => {
+          const el = messagesContainerRef.current;
+          if (el) {
+            const heightDiff = el.scrollHeight - previousScrollHeightRef.current;
+            el.scrollTop = previousScrollTopRef.current + heightDiff;
+          }
+          setIsLoadingOlder(false);
+        });
+        return;
       }
 
       if (isFirstLoadRef.current) {
@@ -383,7 +346,7 @@ export const MobileChatView: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [activeRoomId, currentUser?.uid, settings?.soundEnabled]);
+  }, [activeRoomId, currentUser?.uid, messageLimit, settings?.soundEnabled]);
 
   // Auto-scroll and reset when entering room or switching mode
   useEffect(() => {
@@ -438,6 +401,7 @@ export const MobileChatView: React.FC = () => {
     const rawTextOriginal = rawText.trim();
     // 1. Instant 0ms clear
     setInputText('');
+    await yieldToMain();
 
     // Moderate text: filter profanity
     const profanityResult = censorProfanity(rawTextOriginal);
@@ -766,16 +730,24 @@ export const MobileChatView: React.FC = () => {
   };
 
   const handleScroll = () => {
-    const el = messagesContainerRef.current;
-    if (!el) return;
+    if (scrollRafRef.current !== null) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = null;
+      const el = messagesContainerRef.current;
+      if (!el) return;
 
-    // Discord / Zalo infinite scroll up: Load older messages when scrolling near top
-    if (el.scrollTop <= 80 && hasMoreOlder && !isLoadingOlder) {
-      handleLoadOlderMessages();
-    }
+      const now = Date.now();
+      if (el.scrollTop <= 80 && hasMoreOlder && !isLoadingOlder && now - lastLoadOlderRef.current > 400) {
+        lastLoadOlderRef.current = now;
+        handleLoadOlderMessages();
+      }
 
-    const isFarFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 280;
-    setShowScrollBottom(isFarFromBottom);
+      const isFarFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 280;
+      if (showScrollBottomRef.current !== isFarFromBottom) {
+        showScrollBottomRef.current = isFarFromBottom;
+        setShowScrollBottom(isFarFromBottom);
+      }
+    });
   };
 
   const visibleRooms = rooms.filter(room => {
@@ -1181,62 +1153,42 @@ export const MobileChatView: React.FC = () => {
 
           return (
             <>
-              {/* Discord / Zalo Infinite Scroll Up Header */}
+              {/* 10-message pagination controls at top */}
               {isLoadingOlder ? (
                 <div className="py-2.5 flex items-center justify-center text-xs text-slate-400 gap-2 select-none animate-pulse">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-                  <span>Đang tải các đoạn chat trước ngày hôm qua...</span>
+                  <span>{t('chat.loading_older')}</span>
                 </div>
               ) : hasMoreOlder ? (
                 <div className="py-2 flex items-center justify-center select-none">
                   <button
                     type="button"
                     onClick={handleLoadOlderMessages}
-                    className="px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/70 text-[10px] font-semibold text-slate-300 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group"
+                    className="px-3 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/80 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group cursor-pointer"
                   >
                     <History className="w-3 h-3 text-emerald-400 group-hover:-rotate-45 transition-transform" />
-                    <span>Lăn chuột lên hoặc bấm để tải tin nhắn trước ngày hôm qua</span>
+                    <span>{t('chat.load_older_10')}</span>
                   </button>
                 </div>
               ) : visibleMessages.length > 0 ? (
-                <div className="py-2.5 text-center text-[11px] text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1">
+                <div className="py-2 text-center text-[10px] text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>Đã hiển thị toàn bộ lịch sử cuộc trò chuyện</span>
+                  <span>{t('chat.reached_beginning')}</span>
                 </div>
               ) : null}
 
-              {/* Empty State for today and yesterday */}
+              {/* Empty State */}
               {visibleMessages.length === 0 && (
                 <div className="h-44 flex flex-col items-center justify-center text-center p-4 space-y-2 text-slate-500">
                   <div className="w-10 h-10 rounded-xl bg-slate-800 text-emerald-400 flex items-center justify-center shadow-inner">
-                    <Calendar className="w-5 h-5" />
+                    <MessagesSquare className="w-5 h-5" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-slate-300">Chưa có tin nhắn nào trong hôm nay và hôm qua</p>
+                    <p className="text-xs font-semibold text-slate-300">{t('chat.empty')}</p>
                     <p className="text-[10px] text-slate-500 max-w-xs mt-0.5">
-                      Hệ thống chỉ tải sẵn tin nhắn hôm nay và hôm qua để tối ưu tốc độ và chống lag.
+                      {isEn ? 'Send a message or attach a file below!' : 'Gửi tin nhắn hoặc đính kèm ảnh bên dưới để bắt đầu!'}
                     </p>
                   </div>
-                  {hasMoreOlder && (
-                    <button
-                      type="button"
-                      onClick={handleLoadOlderMessages}
-                      disabled={isLoadingOlder}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm"
-                    >
-                      {isLoadingOlder ? (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
-                          <span>Đang tải tin nhắn cũ...</span>
-                        </>
-                      ) : (
-                        <>
-                          <History className="w-3 h-3 text-emerald-400" />
-                          <span>Tải tin nhắn trước ngày hôm qua</span>
-                        </>
-                      )}
-                    </button>
-                  )}
                 </div>
               )}
 
@@ -1590,12 +1542,13 @@ export const MobileChatView: React.FC = () => {
           className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
         />
 
-        {/* Send Button */}
+        {/* Send Button (INP Optimized < 16ms) */}
         <button
           type="button"
           onClick={() => handleSendMessage()}
           disabled={!inputText.trim()}
-          className="p-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold active:scale-95 transition-all shrink-0 shadow-sm cursor-pointer"
+          className="p-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shrink-0 shadow-sm cursor-pointer"
+          style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
         >
           <Send className="w-3.5 h-3.5" />
         </button>

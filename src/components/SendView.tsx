@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, startTransition } from 'react';
+import { yieldToMain } from '../utils/scheduler';
 import { useAuth, getClientDeviceId } from '../context/AuthContext';
 import { db, handleFirestoreError, OperationType } from '../firebase/config';
 import { 
@@ -338,7 +339,7 @@ export const SendView: React.FC = () => {
       console.warn('Presence listener notice:', error);
     });
 
-    // 2-second high-precision freshness ticker: automatically syncs devices in real-time without delay
+    // Background freshness ticker: runs continuously without pausing
     const tickerInterval = setInterval(() => {
       if (latestPresenceDocsRef.current.length > 0) {
         const { liveDevices } = processPresenceDocs(latestPresenceDocsRef.current, currentDevId, currentUser.uid);
@@ -360,7 +361,7 @@ export const SendView: React.FC = () => {
           return liveDevices;
         });
       }
-    }, 2000);
+    }, 5000);
 
     return () => {
       unsubscribe();
@@ -716,6 +717,7 @@ export const SendView: React.FC = () => {
     setSendingTargetId(target.uid);
     setTransferStatus(prev => ({ ...prev, [target.uid]: 'sending' }));
     setStatusMessage(null);
+    await yieldToMain();
 
     try {
       const payload: any = {
@@ -784,6 +786,7 @@ export const SendView: React.FC = () => {
     setSendingTargetId(target.uid);
     setTransferStatus(prev => ({ ...prev, [target.uid]: 'sending' }));
     setStatusMessage(null);
+    await yieldToMain();
 
     try {
       if (hasFiles) {
@@ -1468,9 +1471,10 @@ export const SendView: React.FC = () => {
                       e.stopPropagation();
                       fileInputRef.current?.click();
                     }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none"
+                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shadow-sm group focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none"
+                    style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                   >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-emerald-500/20 flex items-center justify-center text-slate-200 group-hover:text-emerald-400 transition-colors shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-emerald-500/20 flex items-center justify-center text-slate-200 group-hover:text-emerald-400 transition-colors duration-150 shrink-0">
                       <FileText className="w-4 h-4" />
                     </div>
                     <div>
@@ -1489,9 +1493,10 @@ export const SendView: React.FC = () => {
                       e.stopPropagation();
                       folderInputRef.current?.click();
                     }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-amber-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
+                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-amber-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shadow-sm group focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none"
+                    style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                   >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-amber-500/20 flex items-center justify-center text-slate-200 group-hover:text-amber-400 transition-colors shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-amber-500/20 flex items-center justify-center text-slate-200 group-hover:text-amber-400 transition-colors duration-150 shrink-0">
                       <Folder className="w-4 h-4" />
                     </div>
                     <div>
@@ -1502,17 +1507,20 @@ export const SendView: React.FC = () => {
                     </div>
                   </button>
 
-                  {/* 3. Văn bản -> opens Text Modal */}
+                  {/* 3. Văn bản -> opens Text Modal (INP optimized < 20ms) */}
                   <button
                     id="pick-text-btn"
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleOpenTextModal();
+                      startTransition(() => {
+                        handleOpenTextModal();
+                      });
                     }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-sky-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-sky-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shadow-sm group focus-visible:ring-2 focus-visible:ring-sky-400 focus-visible:outline-none"
+                    style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                   >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-sky-500/20 flex items-center justify-center text-slate-200 group-hover:text-sky-400 transition-colors shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-sky-500/20 flex items-center justify-center text-slate-200 group-hover:text-sky-400 transition-colors duration-150 shrink-0">
                       <AlignLeft className="w-4 h-4" />
                     </div>
                     <div>
@@ -1529,11 +1537,14 @@ export const SendView: React.FC = () => {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      handlePasteAction();
+                      startTransition(() => {
+                        handlePasteAction();
+                      });
                     }}
-                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-teal-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer transition-all active:scale-95 shadow-sm group focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:outline-none"
+                    className="p-2.5 sm:p-3 rounded-xl bg-slate-850 hover:bg-slate-800 border border-slate-700/70 hover:border-teal-500/50 flex flex-col items-center justify-center gap-1.5 text-center cursor-pointer will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 shadow-sm group focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:outline-none"
+                    style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                   >
-                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-teal-500/20 flex items-center justify-center text-slate-200 group-hover:text-teal-400 transition-colors shrink-0">
+                    <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-teal-500/20 flex items-center justify-center text-slate-200 group-hover:text-teal-400 transition-colors duration-150 shrink-0">
                       <Clipboard className="w-4 h-4" />
                     </div>
                     <div>
@@ -1727,13 +1738,14 @@ export const SendView: React.FC = () => {
                       type="button"
                       disabled={isSendingToThis}
                       onClick={() => handleDeviceClick(device)}
-                      className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                      className={`w-full py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 will-change-transform transform-gpu select-none transition-transform duration-75 ease-out ${
                         status === 'success'
                           ? 'bg-emerald-500 text-slate-950 font-bold'
                           : status === 'error'
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
                           : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm active:scale-[0.98]'
                       }`}
+                      style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
                     >
                       {status === 'sending' ? (
                         <>

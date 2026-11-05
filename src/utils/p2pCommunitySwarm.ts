@@ -25,8 +25,8 @@ export function getCommunityNodeStats(): CommunityNodeStats {
     console.warn('Failed to read community node stats:', err);
   }
   return {
-    isActive: true, // Enabled by default to accelerate network
-    maxCacheMb: 500, // Default 500 MB shared cache
+    isActive: false, // Disabled by default to protect user device storage
+    maxCacheMb: 25, // Conservative 25 MB shared cache limit (not 500 MB)
     usedCacheBytes: 0,
     relayedTransfersCount: 0,
     sharedFilesCount: 0,

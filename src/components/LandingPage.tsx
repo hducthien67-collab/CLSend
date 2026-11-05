@@ -67,7 +67,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-xl sm:text-2xl font-black tracking-tight bg-gradient-to-r from-emerald-400 via-teal-300 to-white bg-clip-text text-transparent">
-                CLSend
+                ClSend
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-semibold border border-emerald-500/30 hidden sm:inline-block">
                 Mobile & PC
@@ -132,13 +132,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             {/* Left Column: Heading, Checklist, and 1-Click Mobile & PC Action Buttons */}
             <div className="lg:col-span-6 xl:col-span-7 flex flex-col justify-center text-left">
               <h1 className="text-2xl sm:text-3xl lg:text-[35px] font-extrabold text-white leading-[1.2] tracking-tight mb-2">
-                {isMobile ? 'Tải CLSend Về Điện Thoại' : 'Tải CLSend Cho Máy Tính & Điện Thoại'}
+                {isMobile ? 'Tải ClSend Về Điện Thoại' : 'Tải ClSend Cho Máy Tính & Điện Thoại'}
               </h1>
 
               <p className="text-sm sm:text-base font-semibold text-slate-300 mb-6 sm:mb-8">
                 {isMobile 
                   ? 'Cài đặt trực tiếp vào điện thoại Android & iPhone chỉ với 1-chạm' 
-                  : 'Ứng dụng CLSend đã có mặt trên Windows, Mac OS, Android & iOS'}
+                  : 'Ứng dụng ClSend đã có mặt trên Windows, Mac OS, Android & iOS'}
               </p>
 
               {/* Checklist items with EMERALD GREEN checkmarks */}
@@ -260,7 +260,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                       <div className="h-4 sm:h-5 bg-slate-900 border-b border-slate-800 px-2 flex items-center justify-between">
                         <div className="flex items-center gap-1">
                           <div className="w-2 h-2 rounded bg-emerald-500" />
-                          <span className="font-bold text-white text-[7.5px]">CLSend Desktop</span>
+                          <span className="font-bold text-white text-[7.5px]">ClSend Desktop</span>
                         </div>
                         <div className="flex items-center gap-1.5 text-[6.5px] text-slate-400">
                           <span className="text-emerald-400 font-semibold">• Trực tuyến</span>
@@ -317,7 +317,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   {/* Phone Screen View */}
                   <div className="flex-1 bg-slate-950 rounded-[10px] overflow-hidden flex flex-col text-[6px] text-slate-300">
                     <div className="h-3 bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-1 flex items-center justify-between shrink-0 font-bold">
-                      <span>CLSend</span>
+                      <span>ClSend</span>
                       <span className="w-1 h-1 rounded-full bg-white" />
                     </div>
                     <div className="p-1 space-y-1 flex-1">
@@ -347,7 +347,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Footer in Dark Theme */}
       <footer className="w-full py-6 text-center text-xs text-slate-500 border-t border-slate-900/80 bg-slate-950/60 backdrop-blur-xs">
         <p>
-          © 2012 - 2026 Một sản phẩm của CLSend -{' '}
+          © 2012 - 2026 Một sản phẩm của ClSend -{' '}
           {onOpenRules ? (
             <button
               type="button"

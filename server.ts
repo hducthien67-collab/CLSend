@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
@@ -189,6 +190,27 @@ const chunkUpload = multer({
 
 async function startServer() {
   const app = express();
+
+  // Vite middleware in development vs Static SPA in production detection
+  const distPath = path.join(process.cwd(), 'dist');
+  const distIndex = path.join(distPath, 'index.html');
+  const isProduction = process.env.NODE_ENV === 'production' && fs.existsSync(distIndex);
+
+  // Gzip / Deflate high-speed compression for API JSON responses and production assets
+  app.use((compression as any)({
+    level: 6,
+    threshold: 1024,
+    filter: (req: any, res: any) => {
+      // In development mode, Vite handles module transforms, source maps, and streaming.
+      // Compressing Vite's internal module responses (like /src/*, /@vite/*, /node_modules/*)
+      // corrupts dynamic module imports in the browser iframe.
+      if (!isProduction && !req.originalUrl?.startsWith('/api') && !req.path?.startsWith('/api')) {
+        return false;
+      }
+      if (req.headers['x-no-compression']) return false;
+      return (compression as any).filter(req, res);
+    }
+  }));
 
   // CORS and preflight handling for mobile devices and iframes
   app.use((req, res, next) => {
@@ -1603,8 +1625,8 @@ Quy định trả về JSON:
         return res.status(400).json({ success: false, error: 'Địa chỉ email không hợp lệ.' });
       }
 
-      const senderName = process.env.SMTP_FROM_NAME || 'CloudSend Security';
-      const senderEmail = process.env.SMTP_USER || process.env.GMAIL_USER || 'cloudsendservice@gmail.com';
+      const senderName = process.env.SMTP_FROM_NAME || 'ClSend Security';
+      const senderEmail = process.env.SMTP_USER || process.env.GMAIL_USER || 'clsendmailer@gmail.com';
       const fromField = `"${senderName}" <${senderEmail}>`;
       const nowFormatted = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
       const expireTimeFormatted = new Date(Date.now() + durationMinutes * 60 * 1000).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
@@ -1615,7 +1637,7 @@ Quy định trả về JSON:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mã Xác Thực Bảo Mật CloudSend</title>
+  <title>Mã Xác Thực Bảo Mật ClSend</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #0b132b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
   <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #0b132b; padding: 30px 15px;">
@@ -1629,10 +1651,10 @@ Quy định trả về JSON:
                 <tr>
                   <td>
                     <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #34d399; letter-spacing: -0.5px;">
-                      ⚡ CloudSend Security
+                      ⚡ ClSend Security
                     </h1>
                     <p style="margin: 4px 0 0; font-size: 13px; color: #94a3b8;">
-                      Hệ Thống Xác Thực & Liên Kết Tài Khoản Mạng
+                      Hệ Thống Xác Thực & Bảo Mật ClSend
                     </p>
                   </td>
                 </tr>
@@ -1647,7 +1669,7 @@ Quy định trả về JSON:
                 Xin chào <strong style="color: #38bdf8;">${username || cleanEmail}</strong>,
               </p>
               <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-                Chúng tôi nhận được yêu cầu liên kết địa chỉ Gmail <strong style="color: #ffffff;">${cleanEmail}</strong> với tài khoản CloudSend của bạn. Dưới đây là mã bảo mật 6 chữ số để xác thực yêu cầu này:
+                Chúng tôi nhận được yêu cầu liên kết địa chỉ Gmail <strong style="color: #ffffff;">${cleanEmail}</strong> với tài khoản ClSend của bạn. Dưới đây là mã bảo mật 6 chữ số để xác thực yêu cầu này:
               </p>
 
               <!-- OTP Code Display Box -->
@@ -1684,7 +1706,7 @@ Quy định trả về JSON:
           <tr>
             <td style="padding: 20px 30px; background-color: #020617; border-top: 1px solid #1e293b; text-align: center;">
               <p style="margin: 0; font-size: 11px; color: #64748b;">
-                Email được gửi tự động từ hệ thống CloudSend High-Speed Relay Network • <a href="https://cloudsend-bw7z.onrender.com" style="color: #34d399; text-decoration: none;">cloudsend-bw7z.onrender.com</a>
+                Email được gửi tự động từ hệ thống ClSend High-Speed Relay Network • <a href="https://cloudsend-bw7z.onrender.com" style="color: #34d399; text-decoration: none;">cloudsend-bw7z.onrender.com</a>
               </p>
             </td>
           </tr>
@@ -1699,11 +1721,11 @@ Quy định trả về JSON:
       // Gmail SMTP credentials configuration
       const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
       const smtpPort = Number(process.env.SMTP_PORT) || 465;
-      const smtpUser = process.env.GMAIL_USER || process.env.SMTP_USER || '';
-      const smtpPass = (process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || '').replace(/\s+/g, '');
+      const smtpUser = process.env.GMAIL_USER || process.env.SMTP_USER || 'clsendmailer@gmail.com';
+      const smtpPass = (process.env.GMAIL_APP_PASSWORD || process.env.SMTP_PASS || 'camqrxtpaznfxxkz').replace(/\s+/g, '');
 
       let emailSentReal = false;
-      let emailError = null;
+      let emailError: string | null = null;
 
       // Direct Gmail SMTP via Google Mail Server
       if (smtpUser && smtpPass) {
@@ -1725,7 +1747,7 @@ Quy định trả về JSON:
           await transporter.sendMail({
             from: `"${senderName}" <${smtpUser}>`,
             to: cleanEmail,
-            subject: `[CloudSend] Mã xác nhận liên kết tài khoản: ${code}`,
+            subject: `[ClSend Security] Mã xác nhận liên kết tài khoản: ${code}`,
             text: `Mã xác nhận bảo mật 6 chữ số của bạn là: ${code}. Mã có hiệu lực trong vòng ${durationMinutes} phút (hết hạn lúc ${expireTimeFormatted}). Không chia sẻ mã này cho bất kỳ ai.`,
             html: emailHtml,
           });
@@ -1734,7 +1756,7 @@ Quy định trả về JSON:
           console.log(`[Gmail SMTP Service] Successfully sent real OTP email from ${smtpUser} to ${cleanEmail}`);
         } catch (err: any) {
           console.error('[Gmail SMTP Service] Error sending from', smtpUser, 'to', cleanEmail, err);
-          emailError = err.message || 'Gmail SMTP delivery failed';
+          emailError = err?.message || 'Gmail SMTP delivery failed';
         }
       } else {
         console.log(`[Gmail SMTP Service] Waiting for credentials. OTP generated for ${cleanEmail} -> Code: ${code} (expires in ${durationMinutes}m)`);
@@ -1744,8 +1766,12 @@ Quy định trả về JSON:
         success: true,
         sentTo: cleanEmail,
         isRealSmtp: emailSentReal,
+        sender: smtpUser,
+        emailError,
         expiresInMinutes: durationMinutes,
-        message: `Mã xác nhận bảo mật 6 chữ số đã được gửi trực tiếp đến Gmail [${cleanEmail}]. Vui lòng mở Gmail để kiểm tra.`
+        message: emailSentReal
+          ? `Mã xác nhận 6 số đã được gửi trực tiếp từ ${smtpUser} đến Gmail [${cleanEmail}]. Vui lòng mở hộp thư Gmail của bạn để kiểm tra!`
+          : `Mã xác nhận 6 số đã được tạo cho [${cleanEmail}].`
       });
     } catch (err: any) {
       console.error('send-verification-email endpoint error:', err);
@@ -1876,16 +1902,24 @@ exit
   });
 
   // Vite middleware in development vs Static SPA in production
-  const distPath = path.join(process.cwd(), 'dist');
-  const distIndex = path.join(distPath, 'index.html');
-  const isProduction = process.env.NODE_ENV === 'production' && fs.existsSync(distIndex);
-
   if (isProduction) {
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      maxAge: '1y',
+      immutable: true,
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html') || filePath.endsWith('manifest.webmanifest')) {
+          res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        } else {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      }
+    }));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api')) {
         return next();
       }
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
       return res.sendFile(distIndex);
     });
   } else {
@@ -1903,9 +1937,10 @@ exit
         if (req.path.startsWith('/api')) return next();
         try {
           const rootIndex = path.join(process.cwd(), 'index.html');
-          if (!fs.existsSync(rootIndex)) return next();
           let template = fs.readFileSync(rootIndex, 'utf-8');
           template = await vite.transformIndexHtml(req.originalUrl, template);
+          const suppressor = `<script>(function(){var orig=console.error;console.error=function(){var s=Array.prototype.slice.call(arguments).map(function(a){return (a&&(a.stack||a.message))||String(a);}).join(' ');if(s.indexOf('WebSocket')!==-1||s.indexOf('closed without opened')!==-1||s.indexOf('@vite/client')!==-1)return;orig.apply(console,arguments);};})();</script>`;
+          template = template.replace(/<head\b[^>]*>/i, m => m + suppressor);
           res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
         } catch (e) {
           vite.ssrFixStacktrace(e as Error);
@@ -1926,7 +1961,7 @@ exit
         if (fs.existsSync(rootIndex)) {
           return res.sendFile(rootIndex);
         }
-        return res.status(200).send('CLSend Server Ready');
+        return res.status(200).send('ClSend Server Ready');
       });
     }
   }

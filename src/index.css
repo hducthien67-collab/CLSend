@@ -150,8 +150,14 @@ main, div {
   -webkit-overflow-scrolling: touch;
   scroll-behavior: auto;
   overscroll-behavior-y: contain;
-  transform: translateZ(0);
-  will-change: scroll-position;
+  contain: content;
+}
+
+/* Skip layout & paint for off-screen messages to ensure silky smooth scrolling */
+.chat-bubble-item {
+  contain: layout style;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 70px;
 }
 
 /* ==========================================================
@@ -194,8 +200,6 @@ main, div {
 
 .animate-tab-switch {
   animation: tabEnter 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, opacity;
-  transform: translateZ(0);
 }
 
 @keyframes fadeIn {
@@ -453,8 +457,6 @@ input:focus, textarea:focus, select:focus {
 
 .animate-message-enter {
   animation: messageEnter 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  will-change: transform, opacity;
-  transform: translateZ(0);
 }
 
 /* 6. Hiệu ứng nút cách & chữ chuyển động ĐÀN HỒI SIÊU MƯỢT (Elastic Spring & Kinetic Typography) */
@@ -775,4 +777,37 @@ html, body, #root {
   .animate-cyber-grid {
     animation: none !important;
   }
+}
+
+/* ==========================================================
+   ULTRA-PERFORMANCE GPU HARDWARE ACCELERATION & SMOOTHNESS
+   Enforces 60 FPS rendering on all interactive elements
+   ========================================================== */
+button, 
+input, 
+select, 
+textarea, 
+.modal-overlay, 
+.gpu-accelerated,
+[role="dialog"],
+header,
+nav {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  perspective: 1000px;
+  -webkit-perspective: 1000px;
+}
+
+/* Instant active feedback for lightning-fast button response */
+button:active, 
+.active\:scale-98:active {
+  transform: scale(0.98) translateZ(0);
+  transition: transform 0.05s ease-out;
+}
+
+/* Smooth layout containment */
+.content-contained {
+  contain: layout style paint;
 }

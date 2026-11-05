@@ -88,7 +88,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <h1 className="font-bold text-white text-sm sm:text-base tracking-tight m-0 p-0 inline-block leading-none">CLSend</h1>
+                <h1 className="font-bold text-white text-sm sm:text-base tracking-tight m-0 p-0 inline-block leading-none">ClSend</h1>
                 <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-mono font-medium px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   <Radio className="w-2 h-2 animate-pulse" />
                   Relay

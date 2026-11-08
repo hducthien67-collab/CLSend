@@ -40,19 +40,24 @@ import {
   Edit2,
   X,
   Link as LinkIcon,
-  Zap
+  Zap,
+  Play,
+  Film
 } from 'lucide-react';
-import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../utils/fileUpload';
+import { uploadFileToServer, isImageFile, isVideoFile, generateImageThumbnail, generateVideoThumbnail, createClientFallbackFileInfo } from '../utils/fileUpload';
+import { VideoPreviewPlayer } from './VideoPreviewPlayer';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { getTelegramConfig, uploadToTelegram } from '../utils/telegramStorage';
 import { cacheFileInCommunitySwarm, getFileFromCommunitySwarm } from '../utils/p2pCommunitySwarm';
 import { showGlobalToast } from '../utils/toast';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
+import { getVideoWebWatchUrl, openVideoInWebTab } from '../utils/videoWatch';
+import { PersistentVideoPlayerModal } from './PersistentVideoPlayerModal';
 
 const MAX_QUOTA_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB personal storage quota
 
-export const CloudDriveView: React.FC = () => {
+const CloudDriveViewComponent: React.FC = () => {
   const { currentUser, settings } = useAuth();
   const { t } = useLanguage();
   const [files, setFiles] = useState<CloudDriveFile[]>([]);
@@ -68,6 +73,7 @@ export const CloudDriveView: React.FC = () => {
   const [editFileExtension, setEditFileExtension] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [isPersistentVideoModalOpen, setIsPersistentVideoModalOpen] = useState(false);
 
   // Cloud URL Modal states
   const [isCloudUrlModalOpen, setIsCloudUrlModalOpen] = useState(false);
@@ -268,7 +274,7 @@ export const CloudDriveView: React.FC = () => {
           break;
         }
 
-        // Generate client thumbnail for images if possible
+        // Generate client thumbnail for images and videos if possible
         let clientThumb: string | undefined = undefined;
         if (isImageFile(file)) {
           try {
@@ -276,6 +282,13 @@ export const CloudDriveView: React.FC = () => {
             if (t) clientThumb = t;
           } catch {
             // ignore thumbnail failure
+          }
+        } else if (isVideoFile(file)) {
+          try {
+            const t = await generateVideoThumbnail(file);
+            if (t) clientThumb = t;
+          } catch {
+            // ignore video thumbnail failure
           }
         }
 
@@ -315,18 +328,21 @@ export const CloudDriveView: React.FC = () => {
               fileThumbnail = uploadedFile.thumbnail;
             }
           } catch (uploadErr: any) {
-            console.warn(`Server upload notice for "${file.name}", activating instant resilient direct storage:`, uploadErr);
-            const fallback = await createClientFallbackFileInfo(file);
-            fileUrl = fallback.url || '';
-            fileViewUrl = fallback.viewUrl || '';
-            fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
+            console.warn(`Server upload notice for "${file.name}":`, uploadErr);
+            // Only try fallback client info for small files or images
+            if (isImageFile(file) || file.size <= 400 * 1024) {
+              const fallback = await createClientFallbackFileInfo(file);
+              fileUrl = fallback.url || '';
+              fileViewUrl = fallback.viewUrl || '';
+              fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
+            }
           }
         }
 
         // Critical safety check: Do NOT save broken entries with empty URLs to Firestore
         if (!fileUrl || !fileUrl.trim()) {
-          console.error(`Không thể lưu trữ tệp "${file.name}" do lỗi kết nối.`);
-          alert(`Không thể tải tệp "${file.name}" lên máy chủ lưu trữ. Vui lòng thử lại.`);
+          console.warn(`Không thể lưu trữ tệp "${file.name}" do máy chủ lưu trữ chưa hoàn tất ghép tệp.`);
+          showBottomToast(`Không thể tải "${file.name}" lên máy chủ lưu trữ. Vui lòng thử lại.`, true);
           continue;
         }
 
@@ -338,8 +354,8 @@ export const CloudDriveView: React.FC = () => {
         const safeThumbnail = (fileThumbnail && fileThumbnail.length < 700000) ? fileThumbnail : null;
 
         if (!safeUrl || !safeUrl.trim()) {
-          console.error(`Không thể lưu trữ tệp "${file.name}" do liên kết tải về rỗng.`);
-          alert(`Không thể lưu tệp "${file.name}" lên Cloud do dữ liệu bị gián đoạn. Vui lòng thử lại.`);
+          console.warn(`Không thể lưu trữ tệp "${file.name}" do liên kết tải về vượt quá giới hạn.`);
+          showBottomToast(`Không thể lưu tệp "${file.name}" lên Cloud do dữ liệu bị gián đoạn. Vui lòng thử lại.`, true);
           continue;
         }
 
@@ -478,11 +494,62 @@ export const CloudDriveView: React.FC = () => {
         type: 'error',
         text: err.message || 'Lỗi khi tải lại tệp lên máy chủ.'
       });
-      alert(`Không thể tải lại tệp: ${err.message || 'Vui lòng thử lại'}`);
+      showBottomToast(`Không thể tải lại tệp: ${err.message || 'Vui lòng thử lại'}`, true);
     } finally {
       setUploading(false);
       setUploadProgress(null);
       setReuploadingFile(null);
+    }
+  };
+
+  // Direct reupload when user picks file directly inside Preview Player
+  const performDirectReupload = async (targetFile: CloudDriveFile, file: File) => {
+    setUploading(true);
+    setUploadProgress(5);
+    showBottomToast(`Đang đồng bộ tệp "${file.name}" vào Kho Cloud...`);
+
+    try {
+      const uploaded = await uploadFileToServer(file, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      if (!uploaded.url || !uploaded.url.trim()) {
+        throw new Error('Máy chủ chưa trả về đường dẫn tải.');
+      }
+
+      const safeUrl = uploaded.url;
+      const safeViewUrl = uploaded.viewUrl || safeUrl;
+      const safeThumbnail = uploaded.thumbnail || null;
+      const category = getFileCategory(file.type, file.name);
+
+      await updateDoc(doc(db, 'cloud_files', targetFile.id), {
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        url: safeUrl,
+        viewUrl: safeViewUrl,
+        thumbnail: safeThumbnail,
+        category: category,
+        createdAt: new Date().toISOString()
+      });
+
+      setPreviewFile(prev => prev && prev.id === targetFile.id ? {
+        ...prev,
+        name: file.name,
+        size: file.size,
+        type: file.type || 'application/octet-stream',
+        url: safeUrl,
+        viewUrl: safeViewUrl,
+        thumbnail: safeThumbnail || undefined
+      } : prev);
+
+      showBottomToast(`Đã lưu tệp "${file.name}" vĩnh viễn vào Kho Cloud!`);
+    } catch (err: any) {
+      console.warn('Direct reupload error:', err);
+      showBottomToast(`Lỗi khi lưu lên Cloud: ${err.message || 'Thử lại sau'}`, true);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -804,8 +871,19 @@ export const CloudDriveView: React.FC = () => {
           })}
         </div>
 
-        {/* Right tools: Delete All & Search Input */}
+        {/* Right tools: Delete All & Search Input & Video Player Frame */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Nút mở Khung Xem Video Trực Tiếp (Offline / IndexedDB) */}
+          <button
+            type="button"
+            onClick={() => setIsPersistentVideoModalOpen(true)}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm whitespace-nowrap cursor-pointer shrink-0"
+            title="Mở khung xem video trực tiếp từ máy tính hoặc phát lại video đã lưu (F5 không mất)"
+          >
+            <Film className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Khung xem Video (F5 không mất)</span>
+          </button>
+
           {files.length > 0 && (
             <div className="flex items-center gap-1.5 shrink-0">
               {selectedCategory !== 'all' && filteredFiles.length > 0 && (
@@ -925,9 +1003,13 @@ export const CloudDriveView: React.FC = () => {
                       loading="lazy"
                     />
                   ) : file.category === 'video' ? (
-                    <div className="flex flex-col items-center gap-1.5 text-slate-400">
-                      <FileDocIcon fileName={file.name} mimeType={file.type} size="md" />
-                      <span className="text-[10px] text-slate-400">Xem video</span>
+                    <div className="flex flex-col items-center gap-2 text-slate-300">
+                      <div className="w-11 h-11 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-all shadow-lg">
+                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                      </div>
+                      <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1 group-hover:underline">
+                        Mở xem trên Web <ExternalLink className="w-3 h-3" />
+                      </span>
                     </div>
                   ) : file.category === 'audio' ? (
                     <div className="flex flex-col items-center gap-1.5 text-slate-400">
@@ -1073,6 +1155,19 @@ export const CloudDriveView: React.FC = () => {
                     <Share2 className="w-4 h-4" />
                   </button>
 
+                  {/* Direct Web Player Link for Videos */}
+                  {file.category === 'video' && (
+                    <a
+                      href={getVideoWebWatchUrl(file)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Mở video trên tab Web riêng (siêu mượt)"
+                      className="p-1.5 rounded-lg hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+
                   {/* Preview */}
                   <button
                     type="button"
@@ -1129,7 +1224,7 @@ export const CloudDriveView: React.FC = () => {
                   type="button"
                   onClick={() => {
                     if (!previewFile.url) {
-                      alert(`Tệp "${previewFile.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                      showBottomToast(`Tệp "${previewFile.name}" không có dữ liệu do lần tải trước bị gián đoạn. Bạn hãy tải lại nhé!`, true);
                       return;
                     }
                     downloadFileSafely(previewFile.url, previewFile.name);
@@ -1139,6 +1234,18 @@ export const CloudDriveView: React.FC = () => {
                   <Download className="w-3.5 h-3.5" />
                   <span>Tải về</span>
                 </button>
+                {previewFile.category === 'video' && (
+                  <a
+                    href={getVideoWebWatchUrl(previewFile)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+                    title="Mở xem trên Web riêng (Tab mới)"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Mở xem trên Web ↗</span>
+                  </a>
+                )}
                 <button
                   type="button"
                   title="Xóa tệp này khỏi Cloud"
@@ -1167,11 +1274,19 @@ export const CloudDriveView: React.FC = () => {
                   className="max-h-[65vh] max-w-full object-contain rounded-xl shadow-lg"
                 />
               ) : previewFile.category === 'video' ? (
-                <video
+                <VideoPreviewPlayer
                   src={previewFile.viewUrl || previewFile.url}
-                  controls
-                  autoPlay
-                  className="max-h-[65vh] max-w-full rounded-xl shadow-lg"
+                  fallbackUrl={previewFile.url}
+                  fileId={previewFile.id}
+                  fileName={previewFile.name}
+                  fileSize={previewFile.size}
+                  onDownload={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                  onReupload={() => {
+                    const target = previewFile;
+                    setPreviewFile(null);
+                    handleTriggerReupload(target);
+                  }}
+                  onFileSelected={(file) => performDirectReupload(previewFile, file)}
                 />
               ) : previewFile.category === 'audio' ? (
                 <AudioPreviewPlayer
@@ -1433,6 +1548,15 @@ export const CloudDriveView: React.FC = () => {
         </div>
       )}
 
+      {/* Khung Xem Video Trực Tiếp & IndexedDB Bền Vững */}
+      {isPersistentVideoModalOpen && (
+        <PersistentVideoPlayerModal
+          onClose={() => setIsPersistentVideoModalOpen(false)}
+        />
+      )}
+
     </>
   );
 };
+
+export const CloudDriveView = React.memo(CloudDriveViewComponent);

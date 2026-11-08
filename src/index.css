@@ -780,34 +780,31 @@ html, body, #root {
 }
 
 /* ==========================================================
-   ULTRA-PERFORMANCE GPU HARDWARE ACCELERATION & SMOOTHNESS
-   Enforces 60 FPS rendering on all interactive elements
+   ULTRA-PERFORMANCE SMOOTHNESS & INSTANT TAP RESPONSE
    ========================================================== */
-button, 
-input, 
-select, 
-textarea, 
+/* Disable mobile 300ms double-tap click delay across all clickable elements */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+
 .modal-overlay, 
 .gpu-accelerated,
-[role="dialog"],
-header,
-nav {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  perspective: 1000px;
-  -webkit-perspective: 1000px;
+[role="dialog"] {
+  will-change: transform, opacity;
 }
 
 /* Instant active feedback for lightning-fast button response */
 button:active, 
 .active\:scale-98:active {
-  transform: scale(0.98) translateZ(0);
-  transition: transform 0.05s ease-out;
+  opacity: 0.88;
 }
 
 /* Smooth layout containment */
 .content-contained {
-  contain: layout style paint;
+  contain: layout style;
 }

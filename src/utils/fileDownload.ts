@@ -146,6 +146,8 @@ export async function downloadFileSafely(
     let fileIdOrKey = '';
     if (resolvedSource.includes('/api/files/download/')) {
       fileIdOrKey = resolvedSource.split('/api/files/download/')[1]?.split('?')[0];
+    } else if (resolvedSource.includes('/api/files/view/')) {
+      fileIdOrKey = resolvedSource.split('/api/files/view/')[1]?.split('?')[0];
     } else if (telegramOriginalUrl) {
       fileIdOrKey = telegramOriginalUrl.split('/').pop()?.split('?')[0] || '';
     }
@@ -214,6 +216,10 @@ export async function downloadFileSafely(
               return true;
             }
 
+            if (res.status === 404) {
+              throw new Error('FILE_NOT_FOUND_ON_SERVER');
+            }
+
             throw new Error(errorMsg);
           }
 
@@ -222,7 +228,7 @@ export async function downloadFileSafely(
           if (contentType.includes('application/json')) {
             const errData = await res.json();
             if (errData?.error || errData?.success === false) {
-              throw new Error(errData?.message || errData?.error || 'Lỗi khi tải tệp từ Telegram.');
+              throw new Error(errData?.message || errData?.error || 'Lỗi khi tải tệp.');
             }
           }
 
@@ -231,14 +237,14 @@ export async function downloadFileSafely(
           // Guard against HTML error pages / 404 responses being saved as files
           if (blob.type.includes('text/html') || blob.size < 2000) {
             const textCheck = await blob.text().catch(() => '');
-            if (textCheck.startsWith('<') || textCheck.includes('<!DOCTYPE') || textCheck.includes('<html') || textCheck.includes('Cannot GET') || textCheck.includes('404 Not Found')) {
+            if (textCheck.startsWith('<') || textCheck.includes('<!DOCTYPE') || textCheck.includes('<html') || textCheck.includes('Cannot GET') || textCheck.includes('404 Not Found') || textCheck.includes('Tệp không tồn tại')) {
               if (telegramOriginalUrl) {
                 window.open(telegramOriginalUrl, '_blank');
                 if (onProgress) onProgress('completed');
                 notifyDownload(`Đang mở tải về trực tiếp "${safeFileName}"...`, 'info');
                 return true;
               }
-              throw new Error('Máy chủ trả về trang lỗi HTML thay vì tệp dữ liệu thực tế.');
+              throw new Error('FILE_NOT_FOUND_ON_SERVER');
             }
           }
 
@@ -249,8 +255,12 @@ export async function downloadFileSafely(
 
           blobUrl = URL.createObjectURL(blob);
           createdBlobUrl = true;
-        } catch (fetchErr) {
-          console.warn('Fetch fallback, trying direct Telegram/anchor download:', fetchErr);
+        } catch (fetchErr: any) {
+          if (fetchErr?.message === 'FILE_NOT_FOUND_ON_SERVER') {
+            throw fetchErr;
+          }
+
+          console.warn('Fetch fallback, trying direct download:', fetchErr);
           
           const targetUrl = telegramOriginalUrl || fetchUrl;
           const a = document.createElement('a');
@@ -282,29 +292,10 @@ export async function downloadFileSafely(
       throw new Error('Không thể tạo liên kết tải về cho tệp.');
     }
 
-    let finalHref = source.startsWith('data:') ? source : blobUrl;
-
-    if (!source.startsWith('data:') && blobUrl) {
-      try {
-        let targetBlob = localBlob;
-        if (!targetBlob && blobUrl.startsWith('blob:')) {
-          const resp = await fetch(blobUrl);
-          targetBlob = await resp.blob();
-        }
-        if (targetBlob) {
-          const base64Data = await blobToBase64(targetBlob);
-          if (base64Data) {
-            finalHref = base64Data;
-          }
-        }
-      } catch (e) {
-        console.warn('Base64 conversion fallback to blob URL:', e);
-      }
-    }
-
-    // Trigger local download via invisible anchor tag using Base64 Data URL mechanism
+    // Direct, zero-memory download via native Blob URL or Data URL (Never convert blob to base64!)
+    const downloadHref = blobUrl || source;
     const a = document.createElement('a');
-    a.href = finalHref;
+    a.href = downloadHref;
     a.download = safeFileName;
     a.rel = 'noopener noreferrer';
     a.style.display = 'none';
@@ -313,7 +304,10 @@ export async function downloadFileSafely(
 
     setTimeout(() => {
       try { document.body.removeChild(a); } catch {}
-    }, 1000);
+      if (createdBlobUrl && blobUrl) {
+        try { URL.revokeObjectURL(blobUrl); } catch {}
+      }
+    }, 4000);
 
     // Free memory object URL (Disabled to prevent stale blob URLs in browser downloads)
     // if (createdBlobUrl && blobUrl) {
@@ -329,6 +323,13 @@ export async function downloadFileSafely(
     notifyDownload(`Đã tải về thành công "${safeFileName}"!`, 'success');
     return true;
   } catch (err: any) {
+    if (err?.message === 'FILE_NOT_FOUND_ON_SERVER') {
+      console.warn(`[ClSend] Tệp "${safeFileName}" không còn trên bộ nhớ tạm của máy chủ.`);
+      if (onProgress) onProgress('error');
+      notifyDownload(`Tệp "${safeFileName}" không còn trên máy chủ tạm (phiên lưu trữ tạm đã làm mới sau khi cập nhật). Hãy chọn tệp từ máy để xem hoặc đồng bộ lại.`, 'error');
+      return false;
+    }
+
     console.error('Safe download error:', err);
 
     // Ultimate fallback for strict environments: Direct hidden navigation & window.open

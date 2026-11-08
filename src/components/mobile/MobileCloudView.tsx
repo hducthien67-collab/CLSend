@@ -32,14 +32,19 @@ import {
   Loader2, 
   Check, 
   Camera, 
-  FolderPlus 
+  FolderPlus,
+  Play,
+  ExternalLink
 } from 'lucide-react';
-import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
+import { uploadFileToServer, isImageFile, isVideoFile, generateImageThumbnail, generateVideoThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
+import { VideoPreviewPlayer } from '../VideoPreviewPlayer';
 import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { MobileBottomSheet } from './MobileBottomSheet';
 import { useLanguage } from '../../context/LanguageContext';
+import { getVideoWebWatchUrl, openVideoInWebTab } from '../../utils/videoWatch';
+import { PersistentVideoPlayerModal } from '../PersistentVideoPlayerModal';
 
 const MAX_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB
 
@@ -54,6 +59,7 @@ export const MobileCloudView: React.FC = () => {
   const [isUploadSheetOpen, setIsUploadSheetOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
+  const [isPersistentVideoModalOpen, setIsPersistentVideoModalOpen] = useState(false);
   const [toastText, setToastText] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -271,6 +277,15 @@ export const MobileCloudView: React.FC = () => {
             {cat.label} ({cat.count})
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setIsPersistentVideoModalOpen(true)}
+          className="px-2.5 py-1 rounded-lg font-medium text-[11px] whitespace-nowrap bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1 shrink-0"
+          title="Mở khung xem video lưu IndexedDB (F5 không mất)"
+        >
+          <Play className="w-3 h-3 text-indigo-400" />
+          <span>Khung Video F5</span>
+        </button>
       </div>
 
       {/* Uploading progress banner */}
@@ -305,13 +320,20 @@ export const MobileCloudView: React.FC = () => {
               className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-1.5 shadow-sm active:scale-98 transition-all cursor-pointer relative group"
             >
               {/* Thumbnail */}
-              <div className="w-full h-20 rounded-lg bg-slate-950 flex items-center justify-center overflow-hidden border border-slate-800">
+              <div className="w-full h-20 rounded-lg bg-slate-950 flex items-center justify-center overflow-hidden border border-slate-800 relative">
                 {file.thumbnail || (file.url && isImageFile({ name: file.name, type: file.type })) ? (
                   <img
                     src={file.thumbnail || file.url}
                     alt={file.name}
                     className="w-full h-full object-cover"
                   />
+                ) : (file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) ? (
+                  <div className="flex flex-col items-center gap-1 text-emerald-400">
+                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shadow">
+                      <Play className="w-4 h-4 fill-emerald-400 ml-0.5" />
+                    </div>
+                    <span className="text-[9px] font-bold">Xem Web ↗</span>
+                  </div>
                 ) : (
                   <FileDocIcon fileName={file.name} mimeType={file.type} size="sm" />
                 )}
@@ -396,7 +418,7 @@ export const MobileCloudView: React.FC = () => {
               type="button"
               onClick={() => {
                 if (!selectedFileAction.url || !selectedFileAction.url.trim()) {
-                  alert(`Tệp "${selectedFileAction.name}" không có dữ liệu tải về do lần tải lên trước đó bị gián đoạn. Bạn hãy xóa tệp này và tải lại nhé!`);
+                  showToast(`Tệp "${selectedFileAction.name}" không có dữ liệu do bị gián đoạn khi tải lên.`);
                   setSelectedFileAction(null);
                   return;
                 }
@@ -408,6 +430,20 @@ export const MobileCloudView: React.FC = () => {
               <Download className="w-4 h-4" />
               <span>Tải về máy tính / điện thoại</span>
             </button>
+
+            {/* Watch Video on Dedicated Web Tab */}
+            {(selectedFileAction.category === 'video' || (selectedFileAction.type && selectedFileAction.type.startsWith('video/')) || selectedFileAction.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) && (
+              <a
+                href={getVideoWebWatchUrl(selectedFileAction)}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setSelectedFileAction(null)}
+                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all"
+              >
+                <ExternalLink className="w-4 h-4 stroke-[2.5]" />
+                <span>Xem video trên Web riêng (Mượt mà)</span>
+              </a>
+            )}
 
             {/* Preview if image */}
             {(selectedFileAction.thumbnail || selectedFileAction.category === 'image') && (
@@ -450,25 +486,94 @@ export const MobileCloudView: React.FC = () => {
         )}
       </MobileBottomSheet>
 
-      {/* Fullscreen Image Preview */}
+      {/* Fullscreen Media & Video Preview */}
       {previewFile && (
         <div
           onClick={() => setPreviewFile(null)}
-          className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-4 animate-in fade-in"
         >
-          <img
-            src={previewFile.url || previewFile.thumbnail || ''}
-            alt={previewFile.name}
-            className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
-          />
-          <button
-            type="button"
-            onClick={() => setPreviewFile(null)}
-            className="absolute top-4 right-4 p-2 rounded-full bg-slate-800 text-white font-bold"
-          >
-            ✕ Đóng
-          </button>
+          {/* Header Bar */}
+          <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-10" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 min-w-0 pr-2">
+              <FileDocIcon fileName={previewFile.name} mimeType={previewFile.type} size="sm" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white truncate max-w-[200px]">{previewFile.name}</p>
+                <p className="text-[10px] text-slate-400">{formatFileSize(previewFile.size)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                className="p-2 rounded-xl bg-slate-800/90 text-emerald-400 hover:text-white flex items-center gap-1 text-xs font-semibold border border-slate-700 shadow-md active:scale-95"
+                title="Tải về máy"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">Tải về</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreviewFile(null)}
+                className="p-2 rounded-xl bg-slate-800/90 text-slate-300 hover:text-white border border-slate-700 shadow-md active:scale-95"
+                title="Đóng"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Media Content */}
+          <div className="w-full flex-1 flex items-center justify-center p-2" onClick={(e) => e.stopPropagation()}>
+            {previewFile.category === 'video' || (previewFile.type && previewFile.type.startsWith('video/')) || previewFile.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i) ? (
+              <VideoPreviewPlayer
+                src={previewFile.viewUrl || previewFile.url}
+                fallbackUrl={previewFile.url}
+                fileId={previewFile.id}
+                fileName={previewFile.name}
+                fileSize={previewFile.size}
+                onDownload={() => downloadFileSafely(previewFile.url, previewFile.name)}
+              />
+            ) : previewFile.category === 'audio' || (previewFile.type && previewFile.type.startsWith('audio/')) || previewFile.name.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/i) ? (
+              <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center gap-4 w-full max-w-sm shadow-2xl">
+                <Music className="w-12 h-12 text-emerald-400 animate-pulse" />
+                <p className="text-sm font-bold text-white text-center truncate w-full">{previewFile.name}</p>
+                <audio
+                  src={previewFile.viewUrl || previewFile.url}
+                  controls
+                  autoPlay
+                  className="w-full"
+                />
+              </div>
+            ) : previewFile.category === 'image' || (previewFile.type && previewFile.type.startsWith('image/')) || previewFile.name.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/i) ? (
+              <img
+                src={previewFile.viewUrl || previewFile.url || previewFile.thumbnail || ''}
+                alt={previewFile.name}
+                className="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl"
+              />
+            ) : (
+              <div className="p-8 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center gap-3 text-center max-w-sm">
+                <FileDocIcon fileName={previewFile.name} mimeType={previewFile.type} size="hero" />
+                <p className="text-sm font-bold text-white truncate w-full">{previewFile.name}</p>
+                <p className="text-xs text-slate-400">{formatFileSize(previewFile.size)}</p>
+                <button
+                  type="button"
+                  onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                  className="mt-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-2 shadow-lg"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Tải tệp về máy</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
+      )}
+
+      {/* Khung Xem Video Trực Tiếp & IndexedDB Bền Vững trên Mobile */}
+      {isPersistentVideoModalOpen && (
+        <PersistentVideoPlayerModal
+          onClose={() => setIsPersistentVideoModalOpen(false)}
+        />
       )}
     </div>
   );

@@ -48,33 +48,38 @@ import {
   Inbox,
   ArrowDownCircle,
   HelpCircle,
-  AlertCircle
+  AlertCircle,
+  Film,
+  Play
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playReceiveSound } from '../utils/sound';
-import { isImageFile } from '../utils/fileUpload';
+import { isImageFile, isVideoFile } from '../utils/fileUpload';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { extractUrls, hasUrls, renderClickableText } from '../utils/textFormat';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { showGlobalToast } from '../utils/toast';
+import { VideoPreviewPlayer } from './VideoPreviewPlayer';
 
 type ReceiveCategoryTab = 'all' | 'files' | 'text' | 'saved_cloud' | 'pending';
 
 function getFileCategory(mimeType: string, fileName: string): 'image' | 'video' | 'audio' | 'document' | 'other' {
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
   if (mimeType.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'heic', 'heif'].includes(ext)) return 'image';
-  if (mimeType.startsWith('video/') || ['mp4', 'mkv', 'avi', 'mov', 'webm'].includes(ext)) return 'video';
+  if (mimeType.startsWith('video/') || ['mp4', 'mkv', 'avi', 'mov', 'webm', 'm4v', '3gp'].includes(ext)) return 'video';
   if (mimeType.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return 'audio';
   if (mimeType.includes('pdf') || mimeType.includes('word') || mimeType.includes('excel') || mimeType.includes('document') || ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt'].includes(ext)) return 'document';
   return 'other';
 }
 
-export const ReceiveView: React.FC = () => {
+const ReceiveViewComponent: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
   const { t, currentLang } = useLanguage();
   const [transfers, setTransfers] = useState<DirectTransfer[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<{ type: 'image' | 'video'; url: string; name?: string } | null>(null);
+  const setPreviewImage = (url: string | null) => setPreviewMedia(url ? { type: 'image', url } : null);
+  const previewImage = previewMedia?.type === 'image' ? previewMedia.url : null;
   const [downloadingIds, setDownloadingIds] = useState<Record<string, 'downloading' | 'done'>>({});
   const [savedCloudIds, setSavedCloudIds] = useState<Record<string, 'saving' | 'saved'>>({});
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
@@ -910,8 +915,10 @@ export const ReceiveView: React.FC = () => {
               const isDeclined = item.status === 'declined';
               const hasFile = !!(item.fileData || item.fileUrl);
               const isImage = (item.fileType?.startsWith('image/') || isImageFile({ name: item.fileName, type: item.fileType })) && hasFile;
+              const isVideo = (item.fileType?.startsWith('video/') || isVideoFile({ name: item.fileName, type: item.fileType })) && hasFile;
               const viewUrl = item.fileUrl ? item.fileUrl.replace('/api/files/download/', '/api/files/view/') : '';
-              const imageSrc = item.fileData || viewUrl || item.fileUrl;
+              const mediaSrc = item.fileData || viewUrl || item.fileUrl;
+              const imageSrc = mediaSrc;
               const isSavedInCloud = savedCloudIds[item.id] === 'saved';
               const isSavingInCloud = savedCloudIds[item.id] === 'saving';
 
@@ -926,20 +933,31 @@ export const ReceiveView: React.FC = () => {
                   }`}
                 >
                   <div className="flex items-start gap-3.5 min-w-0">
-                    {/* Actual Image Thumbnail or Document Icon */}
+                    {/* Actual Image / Video Thumbnail or Document Icon */}
                     {isImage ? (
                       <div 
-                        onClick={() => imageSrc && setPreviewImage(imageSrc)}
+                        onClick={() => mediaSrc && setPreviewMedia({ type: 'image', url: mediaSrc, name: item.fileName })}
                         className="relative group/thumb cursor-pointer w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 shrink-0 shadow-md hover:ring-2 hover:ring-emerald-500 transition-all"
                         title="Nhấn để xem ảnh phóng to"
                       >
                         <img 
-                          src={imageSrc} 
+                          src={mediaSrc} 
                           alt={item.fileName || 'Ảnh'} 
                           className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity">
                           <Eye className="w-4 h-4 text-white drop-shadow" />
+                        </div>
+                      </div>
+                    ) : isVideo ? (
+                      <div 
+                        onClick={() => mediaSrc && setPreviewMedia({ type: 'video', url: mediaSrc, name: item.fileName })}
+                        className="relative group/thumb cursor-pointer w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-emerald-500/40 bg-black shrink-0 shadow-md hover:ring-2 hover:ring-emerald-400 transition-all flex items-center justify-center"
+                        title="Nhấn để phát video"
+                      >
+                        <Film className="w-6 h-6 text-emerald-400" />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
+                          <Play className="w-4 h-4 text-white fill-white drop-shadow" />
                         </div>
                       </div>
                     ) : item.fileName ? (
@@ -1139,30 +1157,43 @@ export const ReceiveView: React.FC = () => {
                                 <span>Mở TeraBox (1TB)</span>
                               </a>
                             ) : (
-                              <button
-                                id={`download-file-${item.id}`}
-                                type="button"
-                                onClick={() => handleDownloadFile(item)}
-                                disabled={downloadingIds[item.id] === 'downloading'}
-                                className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-700/60 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
-                              >
-                                {downloadingIds[item.id] === 'downloading' ? (
-                                  <>
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                    {t('receive.download')}...
-                                  </>
-                                ) : downloadingIds[item.id] === 'done' ? (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 text-white" />
-                                    {t('receive.saved')}
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="w-3.5 h-3.5" />
-                                    {t('receive.download')}
-                                  </>
+                              <>
+                                {isVideo && mediaSrc && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPreviewMedia({ type: 'video', url: mediaSrc, name: item.fileName })}
+                                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-emerald-400 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
+                                    title="Xem và phát video trực tiếp"
+                                  >
+                                    <Play className="w-3.5 h-3.5 fill-current" />
+                                    <span>Xem video</span>
+                                  </button>
                                 )}
-                              </button>
+                                <button
+                                  id={`download-file-${item.id}`}
+                                  type="button"
+                                  onClick={() => handleDownloadFile(item)}
+                                  disabled={downloadingIds[item.id] === 'downloading'}
+                                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-700/60 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
+                                >
+                                  {downloadingIds[item.id] === 'downloading' ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      {t('receive.download')}...
+                                    </>
+                                  ) : downloadingIds[item.id] === 'done' ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-white" />
+                                      {t('receive.saved')}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Download className="w-3.5 h-3.5" />
+                                      {t('receive.download')}
+                                    </>
+                                  )}
+                                </button>
+                              </>
                             )}
                           </>
                         )}
@@ -1185,23 +1216,46 @@ export const ReceiveView: React.FC = () => {
         )}
       </div>
 
-      {/* Image Preview Modal */}
-      {previewImage && (
+      {/* Media Preview Modal (Image & Video) */}
+      {previewMedia && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm"
-          onClick={() => setPreviewImage(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 backdrop-blur-sm"
+          onClick={() => setPreviewMedia(null)}
         >
-          <div className="relative max-w-2xl max-h-[85vh] bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden p-2">
-            <button
-              onClick={() => setPreviewImage(null)}
-              className="absolute top-4 right-4 p-2 rounded-full bg-slate-950/80 text-white hover:bg-slate-850 cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <img src={previewImage} alt="Xem trước" className="max-w-full max-h-[80vh] rounded-xl object-contain mx-auto" />
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-4xl w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden p-3 sm:p-4 flex flex-col items-center shadow-2xl"
+          >
+            <div className="w-full flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
+              <span className="text-xs sm:text-sm font-semibold text-white truncate max-w-[80%]">
+                {previewMedia.name || (previewMedia.type === 'video' ? 'Phát video' : 'Xem trước hình ảnh')}
+              </span>
+              <button
+                onClick={() => setPreviewMedia(null)}
+                className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 transition-colors cursor-pointer"
+                title="Đóng xem trước"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {previewMedia.type === 'video' ? (
+              <VideoPreviewPlayer 
+                src={previewMedia.url} 
+                fileName={previewMedia.name || 'Video'}
+                onDownload={() => downloadFileSafely(previewMedia.url, previewMedia.name || 'video.mp4')}
+              />
+            ) : (
+              <img 
+                src={previewMedia.url} 
+                alt="Xem trước" 
+                className="max-w-full max-h-[75vh] rounded-xl object-contain mx-auto shadow-lg" 
+              />
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
+
+export const ReceiveView = React.memo(ReceiveViewComponent);

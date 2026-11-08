@@ -50,7 +50,9 @@ import {
   Clipboard,
   AlignLeft,
   Edit3,
-  HardDrive
+  HardDrive,
+  Film,
+  Play
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playSendSound } from '../utils/sound';
@@ -59,8 +61,10 @@ import { extractUrls, hasUrls, renderClickableText } from '../utils/textFormat';
 import { 
   uploadFileToServer, 
   generateImageThumbnail, 
+  generateVideoThumbnail,
   compressImageForDirectTransfer,
   isImageFile,
+  isVideoFile,
   fileToBase64,
   createClientFallbackFileInfo,
   MAX_FILE_SIZE, 
@@ -70,6 +74,7 @@ import { downloadFileSafely } from '../utils/fileDownload';
 import { inspectFileSecurity } from '../utils/fileSecurity';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { CloudDrivePickerModal } from './CloudDrivePickerModal';
+import { VideoPreviewPlayer } from './VideoPreviewPlayer';
 import { SmoothSpaceTextarea } from './SmoothSpaceTextarea';
 import { RichChatInput } from './RichChatInput';
 import { CloudDriveFile } from './types';
@@ -89,7 +94,7 @@ export interface SendFileItem {
   isTeraBox?: boolean;
 }
 
-export const SendView: React.FC = () => {
+const SendViewComponent: React.FC = () => {
   const { currentUser, userProfile, settings, updatePresence } = useAuth();
   const { t, currentLang } = useLanguage();
   const activeAvatarUrl = settings.customAvatarUrl || userProfile?.customAvatarUrl || currentUser?.photoURL;
@@ -186,10 +191,11 @@ export const SendView: React.FC = () => {
   // Sent history and modal
   const [sentTransfers, setSentTransfers] = useState<any[]>([]);
   const [viewingImage, setViewingImage] = useState<string | null>(null);
+  const [viewingVideo, setViewingVideo] = useState<SendFileItem | null>(null);
 
   // Lock body & container scroll when modals are open to prevent background scrolling
   useEffect(() => {
-    if (isTextModalOpen || showQuickChoiceModal || isCloudPickerOpen || viewingImage || isUrlModalOpen) {
+    if (isTextModalOpen || showQuickChoiceModal || isCloudPickerOpen || viewingImage || viewingVideo || isUrlModalOpen) {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       document.body.classList.add('modal-open');
@@ -212,7 +218,7 @@ export const SendView: React.FC = () => {
         window.removeEventListener('touchmove', preventBackgroundScroll);
       };
     }
-  }, [isTextModalOpen, showQuickChoiceModal, isCloudPickerOpen, viewingImage]);
+  }, [isTextModalOpen, showQuickChoiceModal, isCloudPickerOpen, viewingImage, viewingVideo, isUrlModalOpen]);
 
   // Cached raw presence docs ref for periodic 5s freshness ticker
   const latestPresenceDocsRef = useRef<any[]>([]);
@@ -513,7 +519,7 @@ export const SendView: React.FC = () => {
       return [...prev, ...nonDuplicates];
     });
 
-    // Generate thumbnails for image files
+    // Generate thumbnails for image & video files
     for (const file of validFiles) {
       if (isImageFile(file)) {
         try {
@@ -523,6 +529,15 @@ export const SendView: React.FC = () => {
           }
         } catch {
           // ignore thumbnail errors
+        }
+      } else if (isVideoFile(file)) {
+        try {
+          const thumb = await generateVideoThumbnail(file);
+          if (thumb) {
+            setFileThumbnails(prev => ({ ...prev, [file.name]: thumb }));
+          }
+        } catch {
+          // ignore video thumbnail errors
         }
       }
     }
@@ -553,7 +568,7 @@ export const SendView: React.FC = () => {
     for (const cf of chosen) {
       if (cf.thumbnail) {
         newThumbs[cf.name] = cf.thumbnail;
-      } else if (isImageFile(cf) && (cf.viewUrl || cf.url)) {
+      } else if ((isImageFile(cf) || isVideoFile(cf)) && (cf.viewUrl || cf.url)) {
         newThumbs[cf.name] = cf.viewUrl || cf.url;
       }
     }
@@ -1378,6 +1393,7 @@ export const SendView: React.FC = () => {
                   <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
                     {selectedFiles.map((file, idx) => {
                       const isImg = isImageFile(file);
+                      const isVid = isVideoFile(file);
                       const thumb = fileThumbnails[file.name];
 
                       return (
@@ -1408,6 +1424,28 @@ export const SendView: React.FC = () => {
                                     <Eye className="w-3 h-3 text-white" />
                                   </div>
                                 )}
+                              </div>
+                            ) : isVid ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewingVideo(file);
+                                }}
+                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-emerald-500/50 bg-black shrink-0 cursor-pointer shadow-xs flex items-center justify-center active:scale-95 transition-transform"
+                                title={currentLang === 'en' ? 'Click to preview video' : 'Bấm để xem video'}
+                              >
+                                {thumb ? (
+                                  <img src={thumb} alt={file.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center bg-slate-950 text-emerald-400">
+                                    <Film className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 bg-black/40 group-hover:bg-emerald-950/60 flex items-center justify-center transition-all">
+                                  <div className="w-5 h-5 rounded-full bg-emerald-500/90 text-slate-950 flex items-center justify-center shadow-md">
+                                    <Play className="w-2.5 h-2.5 fill-slate-950 ml-0.5" />
+                                  </div>
+                                </div>
                               </div>
                             ) : (
                               <FileDocIcon fileName={file.name} mimeType={file.type} size="sm" />
@@ -1889,6 +1927,57 @@ export const SendView: React.FC = () => {
         </div>
       )}
 
+      {/* Video Preview Modal */}
+      {viewingVideo && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-200"
+          onClick={() => setViewingVideo(null)}
+        >
+          <div 
+            className="relative max-w-3xl w-full bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="p-3 sm:p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                  <Film className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs sm:text-sm font-bold text-white truncate max-w-[200px] sm:max-w-md" title={viewingVideo.name}>
+                    {viewingVideo.name}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    {formatFileSize(viewingVideo.size)} • {currentLang === 'en' ? 'Previewing before send' : 'Xem thử video trước khi gửi'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setViewingVideo(null)}
+                className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                title={currentLang === 'en' ? 'Close' : 'Đóng'}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Video Player */}
+            <div className="p-2 sm:p-4 bg-black flex items-center justify-center">
+              <VideoPreviewPlayer
+                file={viewingVideo.file}
+                src={viewingVideo.viewUrl || viewingVideo.cloudUrl}
+                fallbackUrl={viewingVideo.cloudUrl}
+                fileName={viewingVideo.name}
+                fileSize={viewingVideo.size}
+                autoPlay={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Quick Choice Modal when clicking an online device without pre-selected content */}
       {showQuickChoiceModal && targetDeviceForQuickChoice && (
         <div 
@@ -2202,3 +2291,5 @@ export const SendView: React.FC = () => {
     </div>
   );
 };
+
+export const SendView = React.memo(SendViewComponent);

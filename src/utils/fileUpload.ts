@@ -49,6 +49,17 @@ export function isImageFile(file?: { name?: string; type?: string } | null): boo
 }
 
 /**
+ * Checks if a file is a video based on mimeType or common video extensions
+ * (handles MP4, WebM, MOV, MKV, AVI, M4V, 3GP, FLV, TS, etc.)
+ */
+export function isVideoFile(file?: { name?: string; type?: string } | null): boolean {
+  if (!file) return false;
+  if (file.type && file.type.startsWith('video/')) return true;
+  const ext = (file.name || '').toLowerCase();
+  return /\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)$/i.test(ext);
+}
+
+/**
  * Formats file size in readable units
  */
 export function formatFileSize(bytes?: number): string {
@@ -116,6 +127,94 @@ export function generateImageThumbnail(file: File, maxDim: number = 480, quality
     };
     reader.onerror = () => resolve('');
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Captures a crisp video poster frame from a video File or Blob (at ~0.5s or 15% duration)
+ * Returns a lightweight base64 JPEG thumbnail (< 60KB) for instant UI preview and send queue display.
+ */
+export function generateVideoThumbnail(file: File | Blob): Promise<string> {
+  return new Promise((resolve) => {
+    if (!isVideoFile({ name: (file as File).name, type: file.type })) {
+      resolve('');
+      return;
+    }
+
+    // Skip client canvas frame capture on heavy videos (> 40MB) to prevent GPU decoder freezing on mobile/desktop
+    if (file.size > 40 * 1024 * 1024) {
+      resolve('');
+      return;
+    }
+
+    try {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      const url = URL.createObjectURL(file);
+      video.src = url;
+
+      let finished = false;
+      const cleanup = () => {
+        if (!finished) {
+          finished = true;
+          try { URL.revokeObjectURL(url); } catch {}
+          video.remove();
+        }
+      };
+
+      video.onloadedmetadata = () => {
+        // Seek to 0.5s or 15% to skip initial black frames
+        const seekTime = Math.min(1.5, Math.max(0.2, (video.duration || 3) * 0.15));
+        video.currentTime = seekTime;
+      };
+
+      video.onseeked = () => {
+        try {
+          const maxDim = 400;
+          let w = video.videoWidth || 400;
+          let h = video.videoHeight || 225;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(16, w);
+          canvas.height = Math.max(16, h);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const thumb = canvas.toDataURL('image/jpeg', 0.75);
+            cleanup();
+            resolve(thumb);
+            return;
+          }
+        } catch (e) {
+          console.warn('Video frame capture error:', e);
+        }
+        cleanup();
+        resolve('');
+      };
+
+      video.onerror = () => {
+        cleanup();
+        resolve('');
+      };
+
+      // Timeout safety: 3.5s max
+      setTimeout(() => {
+        cleanup();
+        resolve('');
+      }, 3500);
+    } catch {
+      resolve('');
+    }
   });
 }
 
@@ -382,76 +481,140 @@ export async function uploadViaChunks(
   file: File,
   onProgress?: (percent: number) => void
 ): Promise<UploadedFileInfo> {
-  const CHUNK_SIZE = 8 * 1024 * 1024; // 8MB per chunk
+  // Adaptive chunk size: 8MB for files up to 300MB, 16MB for very large files (> 300MB)
+  const CHUNK_SIZE = file.size > 300 * 1024 * 1024 ? 16 * 1024 * 1024 : 8 * 1024 * 1024;
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   let assembledFile: UploadedFileInfo | null = null;
+  let completedChunks = 0;
 
-  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-    const start = chunkIndex * CHUNK_SIZE;
-    const end = Math.min(file.size, start + CHUNK_SIZE);
-    const chunkBlob = file.slice(start, end);
+  // Maximum stability: Send up to 2 chunks simultaneously to prevent socket congestion on reverse proxies
+  const CONCURRENCY = Math.min(2, totalChunks);
+  let nextChunkIndex = 0;
+  let fatalError: Error | null = null;
 
-    let chunkSuccess = false;
-    let lastChunkError: any = null;
+  async function chunkWorker() {
+    while (nextChunkIndex < totalChunks && !fatalError && !assembledFile) {
+      const chunkIndex = nextChunkIndex++;
+      const start = chunkIndex * CHUNK_SIZE;
+      const end = Math.min(file.size, start + CHUNK_SIZE);
+      const chunkBlob = file.slice(start, end);
 
-    // Retry each chunk up to 3 times on transient network error
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const formData = new FormData();
-        formData.append('chunk', chunkBlob, `${file.name}.part${chunkIndex}`);
-        formData.append('uploadId', uploadId);
-        formData.append('chunkIndex', chunkIndex.toString());
-        formData.append('totalChunks', totalChunks.toString());
-        formData.append('fileName', file.name);
-        formData.append('fileSize', file.size.toString());
-        formData.append('fileType', file.type || 'application/octet-stream');
+      let chunkSuccess = false;
+      let lastChunkError: any = null;
 
-        const res = await fetch('/api/upload-chunk', {
-          method: 'POST',
-          body: formData
-        });
-
-        const rawText = await res.text();
-        if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
-          throw new Error('HTML_RESPONSE');
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (assembledFile) {
+          chunkSuccess = true;
+          break;
         }
 
-        let data: any;
         try {
-          data = JSON.parse(rawText);
-        } catch {
-          throw new Error('INVALID_JSON');
-        }
+          // IMPORTANT: Append text metadata BEFORE binary chunk to guarantee parsing on streaming servers
+          const formData = new FormData();
+          formData.append('uploadId', uploadId);
+          formData.append('chunkIndex', chunkIndex.toString());
+          formData.append('totalChunks', totalChunks.toString());
+          formData.append('fileName', file.name);
+          formData.append('fileSize', file.size.toString());
+          formData.append('fileType', file.type || 'application/octet-stream');
+          formData.append('chunk', chunkBlob, `${file.name}.part${chunkIndex}`);
 
-        if (!res.ok || !data.success) {
-          throw new Error(data?.error || `Lỗi tải mảnh HTTP ${res.status}`);
-        }
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s safety timeout per chunk
 
-        if (data.assembled && data.file) {
-          assembledFile = data.file;
-        }
+          const res = await fetch('/api/upload-chunk', {
+            method: 'POST',
+            body: formData,
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
 
-        chunkSuccess = true;
-        break;
-      } catch (err: any) {
-        lastChunkError = err;
-        await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+          const rawText = await res.text();
+          if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
+            throw new Error('HTML_RESPONSE');
+          }
+
+          let data: any;
+          try {
+            data = JSON.parse(rawText);
+          } catch {
+            throw new Error('INVALID_JSON');
+          }
+
+          if (!res.ok || !data.success) {
+            throw new Error(data?.error || `Lỗi tải mảnh HTTP ${res.status}`);
+          }
+
+          if (data.assembled && data.file) {
+            assembledFile = data.file;
+          }
+
+          chunkSuccess = true;
+          completedChunks++;
+          if (onProgress) {
+            const currentPct = Math.min(98, Math.round((completedChunks / totalChunks) * 100));
+            onProgress(currentPct);
+          }
+          break;
+        } catch (err: any) {
+          lastChunkError = err;
+          // Check if server is already assembling or already assembled the file
+          try {
+            const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
+            const statusData = await statusRes.json();
+            if (statusData.success && statusData.assembled && statusData.file) {
+              assembledFile = statusData.file;
+              chunkSuccess = true;
+              break;
+            }
+          } catch {}
+          await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+        }
+      }
+
+      if (!chunkSuccess && !assembledFile) {
+        // Final sanity check on assembly status before declaring fatal error
+        try {
+          const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
+          const statusData = await statusRes.json();
+          if (statusData.success && statusData.assembled && statusData.file) {
+            assembledFile = statusData.file;
+            return;
+          }
+        } catch {}
+
+        fatalError = new Error(lastChunkError?.message || `Lỗi tải lên phần ${chunkIndex + 1}/${totalChunks}`);
+        throw fatalError;
       }
     }
+  }
 
-    if (!chunkSuccess) {
-      throw new Error(lastChunkError?.message || `Lỗi tải lên phần ${chunkIndex + 1}/${totalChunks}`);
-    }
+  // Execute concurrent chunk worker streams
+  const workers = Array.from({ length: CONCURRENCY }, () => chunkWorker());
+  await Promise.all(workers);
 
-    if (onProgress) {
-      const currentPct = Math.min(99, Math.round(((chunkIndex + 1) / totalChunks) * 100));
-      onProgress(currentPct);
+  // If assembledFile wasn't returned in the last chunk response, poll the assembly status route
+  if (!assembledFile) {
+    // Up to 30 attempts (each 800ms = 24 seconds) to give large files (up to 2GB) plenty of time to assemble on disk
+    for (let check = 0; check < 30; check++) {
+      try {
+        const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
+        const statusData = await statusRes.json();
+        if (statusData.success && statusData.assembled && statusData.file) {
+          assembledFile = statusData.file;
+          break;
+        }
+        if (statusData.isAssembling && onProgress) {
+          onProgress(99);
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 800));
     }
   }
 
   if (!assembledFile) {
-    throw new Error('Máy chủ chưa nhận đủ dữ liệu các phần của tệp.');
+    throw new Error('Máy chủ đang xử lý ghép tệp hoặc chưa nhận đủ các phần dữ liệu.');
   }
 
   if (onProgress) onProgress(100);
@@ -532,32 +695,34 @@ export async function uploadFileToServer(
         if (onProgress) onProgress(100);
         return await cacheAndReturn(file, res);
       } catch (chunkErr: any) {
-        console.warn(`Primary chunked upload strategy notice for "${file.name}":`, chunkErr?.message || chunkErr);
+        console.warn(`Primary chunked upload notice for "${file.name}":`, chunkErr?.message || chunkErr);
+      }
+
+      // Retry Chunked Upload once for heavy files (> 15MB)
+      try {
+        const res = await uploadViaChunks(file, reportProgress);
+        clearProgressTimer();
+        if (onProgress) onProgress(100);
+        return await cacheAndReturn(file, res);
+      } catch (retryChunkErr: any) {
+        console.warn(`Retry chunked upload notice for "${file.name}":`, retryChunkErr?.message || retryChunkErr);
       }
     }
 
-    // Strategy 2: Standard Fetch multipart upload
-    try {
-      const res = await uploadViaFetch(file, reportProgress);
-      clearProgressTimer();
-      if (onProgress) onProgress(100);
-      return await cacheAndReturn(file, res);
-    } catch (err: any) {
-      console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
+    // Strategy 2: Standard Fetch multipart upload (only for files <= 25MB to respect cloud proxy limits)
+    if (file.size <= 25 * 1024 * 1024) {
+      try {
+        const res = await uploadViaFetch(file, reportProgress);
+        clearProgressTimer();
+        if (onProgress) onProgress(100);
+        return await cacheAndReturn(file, res);
+      } catch (err: any) {
+        console.warn(`Fetch upload strategy notice for "${file.name}":`, err?.message || err);
+      }
     }
 
-    // Strategy 3: Fallback to Chunked Upload
-    try {
-      const res = await uploadViaChunks(file, reportProgress);
-      clearProgressTimer();
-      if (onProgress) onProgress(100);
-      return await cacheAndReturn(file, res);
-    } catch (fallbackChunkErr: any) {
-      console.warn(`Fallback chunked upload notice for "${file.name}":`, fallbackChunkErr?.message || fallbackChunkErr);
-    }
-
-    // Strategy 4: Base64 JSON upload (<= 30MB)
-    if (file.size <= 30 * 1024 * 1024) {
+    // Strategy 3: Base64 JSON upload (<= 25MB)
+    if (file.size <= 25 * 1024 * 1024) {
       try {
         const res = await uploadViaBase64(file, reportProgress);
         clearProgressTimer();
@@ -568,14 +733,16 @@ export async function uploadFileToServer(
       }
     }
 
-    // Strategy 5: XHR multipart upload
-    try {
-      const res = await uploadViaMultipart(file, reportProgress);
-      clearProgressTimer();
-      if (onProgress) onProgress(100);
-      return await cacheAndReturn(file, res);
-    } catch (xhrErr: any) {
-      console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
+    // Strategy 4: XHR multipart upload (<= 25MB)
+    if (file.size <= 25 * 1024 * 1024) {
+      try {
+        const res = await uploadViaMultipart(file, reportProgress);
+        clearProgressTimer();
+        if (onProgress) onProgress(100);
+        return await cacheAndReturn(file, res);
+      } catch (xhrErr: any) {
+        console.warn(`XHR upload strategy notice for "${file.name}":`, xhrErr?.message || xhrErr);
+      }
     }
 
     // Strategy 5.5: External Free Web Hosting Services

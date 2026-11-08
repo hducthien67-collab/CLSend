@@ -13,6 +13,11 @@ import { SilkFabricBackground } from '../SilkFabricBackground';
 import { db } from '../../firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
+const MemoMobileSendView = React.memo(MobileSendView);
+const MemoMobileReceiveView = React.memo(MobileReceiveView);
+const MemoMobileChatView = React.memo(MobileChatView);
+const MemoMobileCloudView = React.memo(MobileCloudView);
+
 interface MobileLayoutProps {
   onToggleViewMode: () => void;
   onOpenRules: () => void;
@@ -72,32 +77,67 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
 
       {/* Centered Main Tab Content Area (Symmetrically balanced, never skewed or shifted) */}
       <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col overflow-hidden">
-        <main className="flex-1 min-h-0 w-full flex flex-col overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom,0px))]">
+        <main className="flex-1 min-h-0 w-full relative overflow-hidden pb-[calc(52px+env(safe-area-inset-bottom,0px))]">
           <React.Suspense fallback={
-            <div className="flex-1 flex items-center justify-center p-8 text-emerald-400">
+            <div className="w-full h-full flex items-center justify-center p-8 text-emerald-400">
               <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
             </div>
           }>
-            {activeTab === 'send' && (
-              <div key="m-send" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-                <MobileSendView />
-              </div>
-            )}
-            {activeTab === 'receive' && (
-              <div key="m-receive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-                <MobileReceiveView />
-              </div>
-            )}
-            {activeTab === 'chat' && (
-              <div key="m-chat" className="flex-1 min-h-0 h-full flex flex-col overflow-hidden animate-in fade-in duration-150">
-                <MobileChatView />
-              </div>
-            )}
-            {activeTab === 'drive' && (
-              <div key="m-drive" className="flex-1 min-h-0 h-full overflow-y-auto no-scrollbar animate-in fade-in duration-150">
-                <MobileCloudView />
-              </div>
-            )}
+            <div 
+              style={{ 
+                contain: activeTab === 'send' ? 'layout paint' : 'strict',
+                contentVisibility: activeTab === 'send' ? 'visible' : 'hidden'
+              }}
+              className={`w-full h-full overflow-y-auto no-scrollbar transition-opacity duration-100 ${
+                activeTab === 'send' 
+                  ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                  : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+              }`}
+            >
+              <MemoMobileSendView />
+            </div>
+
+            <div 
+              style={{ 
+                contain: activeTab === 'receive' ? 'layout paint' : 'strict',
+                contentVisibility: activeTab === 'receive' ? 'visible' : 'hidden'
+              }}
+              className={`w-full h-full overflow-y-auto no-scrollbar transition-opacity duration-100 ${
+                activeTab === 'receive' 
+                  ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                  : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+              }`}
+            >
+              <MemoMobileReceiveView />
+            </div>
+
+            <div 
+              style={{ 
+                contain: activeTab === 'chat' ? 'layout paint' : 'strict',
+                contentVisibility: activeTab === 'chat' ? 'visible' : 'hidden'
+              }}
+              className={`w-full h-full flex flex-col overflow-hidden transition-opacity duration-100 ${
+                activeTab === 'chat' 
+                  ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                  : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+              }`}
+            >
+              <MemoMobileChatView />
+            </div>
+
+            <div 
+              style={{ 
+                contain: activeTab === 'drive' ? 'layout paint' : 'strict',
+                contentVisibility: activeTab === 'drive' ? 'visible' : 'hidden'
+              }}
+              className={`w-full h-full overflow-y-auto no-scrollbar transition-opacity duration-100 ${
+                activeTab === 'drive' 
+                  ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                  : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+              }`}
+            >
+              <MemoMobileCloudView />
+            </div>
           </React.Suspense>
         </main>
       </div>

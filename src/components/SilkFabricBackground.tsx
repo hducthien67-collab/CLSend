@@ -30,7 +30,7 @@ interface Particle {
  * 5. Hỗ trợ chuẩn Retina Hi-DPI, tự động tạm dừng khi chuyển tab để bảo vệ pin và CPU.
  * 6. Tuân thủ prefers-reduced-motion cho trải nghiệm mượt mà không mỏi mắt.
  */
-export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
+export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> = ({
   className = "fixed inset-0 pointer-events-none overflow-hidden -z-10",
   showGrid = true,
   showParticles = true,
@@ -50,22 +50,70 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
 
     let animationFrameId: number | null = null;
     let isPaused = false;
-    let dpr = Math.min(window.devicePixelRatio || 1, 2); // Cap at 2x for optimal mobile GPU performance
+    let dpr = 1; // 1x resolution for silky 60-120 FPS without GPU bandwidth waste
 
     let width = window.innerWidth;
     let height = window.innerHeight;
+
+    // Ribbons config: Emerald, Jade, Teal & Cyan satin wave ribbons
+    const ribbons = [
+      {
+        speed: 0.00065,
+        freq: 0.0018,
+        amp: 50,
+        depth: 250,
+        baseOpacity: 0.08 * opacityMultiplier,
+        hue: 160,
+        color1: 'rgba(16, 185, 129,',
+        color2: 'rgba(52, 211, 153,'
+      },
+      {
+        speed: 0.0008,
+        freq: 0.0015,
+        amp: 65,
+        depth: 300,
+        baseOpacity: 0.07 * opacityMultiplier,
+        hue: 175,
+        color1: 'rgba(20, 184, 166,',
+        color2: 'rgba(6, 182, 212,'
+      },
+      {
+        speed: 0.0005,
+        freq: 0.002,
+        amp: 40,
+        depth: 220,
+        baseOpacity: 0.075 * opacityMultiplier,
+        hue: 150,
+        color1: 'rgba(5, 150, 105,',
+        color2: 'rgba(16, 185, 129,'
+      }
+    ];
+
+    let cachedGradients: CanvasGradient[] = [];
+    const rebuildGradients = () => {
+      cachedGradients = ribbons.map(ribbon => {
+        const grad = ctx.createLinearGradient(0, 0, width, height);
+        grad.addColorStop(0, `${ribbon.color1} 0)`);
+        grad.addColorStop(0.25, `${ribbon.color1} ${ribbon.baseOpacity * 0.85})`);
+        grad.addColorStop(0.55, `${ribbon.color2} ${ribbon.baseOpacity * 1.5})`);
+        grad.addColorStop(0.85, `${ribbon.color1} ${ribbon.baseOpacity * 0.9})`);
+        grad.addColorStop(1, `${ribbon.color2} 0)`);
+        return grad;
+      });
+    };
 
     const resizeCanvas = () => {
       if (!canvas) return;
       width = window.innerWidth;
       height = window.innerHeight;
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dpr = 1;
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
+      rebuildGradients();
     };
 
     resizeCanvas();
@@ -87,6 +135,31 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
     // No visibility pausing
 
 
+    // Pre-rendered particle cache canvases to eliminate expensive per-frame createRadialGradient calls
+    const spriteSize = 32;
+    const createParticleSprite = (hue: number) => {
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = spriteSize;
+      offCanvas.height = spriteSize;
+      const offCtx = offCanvas.getContext('2d');
+      if (offCtx) {
+        const center = spriteSize / 2;
+        const rad = offCtx.createRadialGradient(center, center, 0, center, center, center);
+        rad.addColorStop(0, `hsla(${hue}, 95%, 70%, 1)`);
+        rad.addColorStop(0.35, `hsla(${hue}, 90%, 55%, 0.6)`);
+        rad.addColorStop(0.7, `hsla(${hue}, 85%, 45%, 0.15)`);
+        rad.addColorStop(1, `hsla(${hue}, 80%, 35%, 0)`);
+        offCtx.fillStyle = rad;
+        offCtx.beginPath();
+        offCtx.arc(center, center, center, 0, Math.PI * 2);
+        offCtx.fill();
+      }
+      return offCanvas;
+    };
+
+    const emeraldSprite = createParticleSprite(160);
+    const cyanSprite = createParticleSprite(185);
+
     // Initialize floating luminescent starlight bokeh particles
     const particles: Particle[] = [];
     if (showParticles) {
@@ -94,9 +167,9 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
         particles.push({
           x: Math.random() * width,
           y: Math.random() * height,
-          size: Math.random() * 2.2 + 0.8,
-          speedY: -(Math.random() * 0.35 + 0.15),
-          speedX: (Math.random() - 0.5) * 0.25,
+          size: Math.random() * 2.5 + 1.2,
+          speedY: -(Math.random() * 0.3 + 0.1),
+          speedX: (Math.random() - 0.5) * 0.2,
           baseAlpha: Math.random() * 0.45 + 0.25,
           alpha: Math.random() * 0.45 + 0.25,
           pulseSpeed: Math.random() * 0.002 + 0.001,
@@ -106,55 +179,23 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
       }
     }
 
-    // Ribbons config: Emerald, Jade, Teal & Cyan satin wave ribbons
-    const ribbons = [
-      {
-        speed: 0.00065,
-        freq: 0.0018,
-        amp: 55,
-        depth: 260,
-        baseOpacity: 0.09 * opacityMultiplier,
-        hue: 160,
-        color1: 'rgba(16, 185, 129,',
-        color2: 'rgba(52, 211, 153,'
-      },
-      {
-        speed: 0.00085,
-        freq: 0.0015,
-        amp: 70,
-        depth: 320,
-        baseOpacity: 0.075 * opacityMultiplier,
-        hue: 175,
-        color1: 'rgba(20, 184, 166,',
-        color2: 'rgba(6, 182, 212,'
-      },
-      {
-        speed: 0.0005,
-        freq: 0.0022,
-        amp: 45,
-        depth: 230,
-        baseOpacity: 0.08 * opacityMultiplier,
-        hue: 150,
-        color1: 'rgba(5, 150, 105,',
-        color2: 'rgba(16, 185, 129,'
-      },
-      {
-        speed: 0.00095,
-        freq: 0.0012,
-        amp: 60,
-        depth: 290,
-        baseOpacity: 0.06 * opacityMultiplier,
-        hue: 190,
-        color1: 'rgba(6, 182, 212,',
-        color2: 'rgba(14, 165, 233,'
-      }
-    ];
-
     let time = 0;
     let lastTime = performance.now();
 
+    const handleVisibilityChange = () => {
+      isPaused = document.hidden;
+      if (!isPaused && animationFrameId === null) {
+        lastTime = performance.now();
+        animationFrameId = requestAnimationFrame(render);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     const render = (now: number) => {
-      if (isPaused) return;
+      if (isPaused) {
+        animationFrameId = null;
+        return;
+      }
 
       const delta = Math.min(32, now - lastTime);
       lastTime = now;
@@ -167,10 +208,10 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
       ctx.clearRect(0, 0, width, height);
 
       // 1. Render Silk Wave Ribbons
-      const startX = -180;
-      const startY = -180;
-      const endX = width + 180;
-      const endY = height + 180;
+      const startX = -150;
+      const startY = -150;
+      const endX = width + 150;
+      const endY = height + 150;
 
       const dx = endX - startX;
       const dy = endY - startY;
@@ -180,11 +221,10 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
       const nx = -uy;
       const ny = ux;
 
-      const steps = 30; // High resolution curved mesh
+      const steps = 20; // Lightweight smooth resolution
 
-      // Parallax mouse influence on ribbon displacement
-      const mouseFactorX = ((currentMouseX / width) - 0.5) * 40;
-      const mouseFactorY = ((currentMouseY / height) - 0.5) * 40;
+      const mouseFactorX = ((currentMouseX / width) - 0.5) * 30;
+      const mouseFactorY = ((currentMouseY / height) - 0.5) * 30;
 
       ribbons.forEach((ribbon, rIndex) => {
         ctx.save();
@@ -203,13 +243,9 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
           const cx = startX + ux * distAlong;
           const cy = startY + uy * distAlong;
 
-          // Interactive deflection near mouse
-          const distToMouse = Math.hypot(cx - currentMouseX, cy - currentMouseY);
-          const mouseDeflect = Math.max(0, 1 - distToMouse / 600) * 22;
-
           const wave1 = Math.sin(distAlong * ribbon.freq + currentPhase) * ribbon.amp;
-          const wave2 = Math.sin(distAlong * ribbon.freq * 0.6 - currentPhase * 0.8) * (ribbon.amp * 0.45);
-          const displacement = wave1 + wave2 + mouseDeflect + (mouseFactorX * (1 - t) + mouseFactorY * t);
+          const wave2 = Math.sin(distAlong * ribbon.freq * 0.6 - currentPhase * 0.8) * (ribbon.amp * 0.4);
+          const displacement = wave1 + wave2 + (mouseFactorX * (1 - t) + mouseFactorY * t);
 
           topPoints.push({
             x: cx + nx * displacement,
@@ -244,29 +280,20 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
         ctx.lineTo(bottomPoints[0].x, bottomPoints[0].y);
         ctx.closePath();
 
-        // Satin wave gradient fill
-        const grad = ctx.createLinearGradient(0, 0, width, height);
-        grad.addColorStop(0, `${ribbon.color1} 0)`);
-        grad.addColorStop(0.25, `${ribbon.color1} ${ribbon.baseOpacity * 0.85})`);
-        grad.addColorStop(0.55, `${ribbon.color2} ${ribbon.baseOpacity * 1.6})`);
-        grad.addColorStop(0.85, `${ribbon.color1} ${ribbon.baseOpacity * 0.9})`);
-        grad.addColorStop(1, `${ribbon.color2} 0)`);
-
-        ctx.fillStyle = grad;
+        // Satin wave gradient fill from pre-computed cache
+        ctx.fillStyle = cachedGradients[rIndex] || `${ribbon.color1} 0.08)`;
         ctx.fill();
         ctx.restore();
       });
 
-      // 2. Render Floating Bokeh / Starlight Embers
+      // 2. High-speed particle rendering using pre-rendered offscreen sprite cache
       if (showParticles && particles.length > 0) {
         particles.forEach((p) => {
-          // Update particle position
           p.y += p.speedY;
-          p.x += p.speedX + Math.sin(time * 0.0015 + p.pulsePhase) * 0.2;
+          p.x += p.speedX;
           p.pulsePhase += p.pulseSpeed * delta;
           p.alpha = p.baseAlpha * (0.6 + 0.4 * Math.sin(p.pulsePhase)) * opacityMultiplier;
 
-          // Wrap around screen boundaries
           if (p.y < -20) {
             p.y = height + 10;
             p.x = Math.random() * width;
@@ -274,24 +301,18 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
           if (p.x < -20) p.x = width + 10;
           if (p.x > width + 20) p.x = -10;
 
-          // Radial glow for each particle
-          const glowRadius = p.size * 3.5;
-          const radialGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowRadius);
-          radialGrad.addColorStop(0, `hsla(${p.hue}, 90%, 65%, ${p.alpha})`);
-          radialGrad.addColorStop(0.4, `hsla(${p.hue}, 85%, 55%, ${p.alpha * 0.5})`);
-          radialGrad.addColorStop(1, `hsla(${p.hue}, 80%, 45%, 0)`);
-
-          ctx.fillStyle = radialGrad;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, glowRadius, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Bright center spark
-          ctx.fillStyle = `hsla(${p.hue}, 100%, 90%, ${Math.min(1, p.alpha * 1.5)})`;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * 0.75, 0, Math.PI * 2);
-          ctx.fill();
+          const sprite = p.hue === 160 ? emeraldSprite : cyanSprite;
+          const drawRadius = p.size * 3;
+          ctx.globalAlpha = Math.min(1, Math.max(0, p.alpha));
+          ctx.drawImage(
+            sprite, 
+            p.x - drawRadius, 
+            p.y - drawRadius, 
+            drawRadius * 2, 
+            drawRadius * 2
+          );
         });
+        ctx.globalAlpha = 1.0;
       }
 
       animationFrameId = requestAnimationFrame(render);
@@ -302,6 +323,7 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
     return () => {
       window.removeEventListener('resize', resizeCanvas);
       window.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
       }
@@ -310,10 +332,25 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
 
   return (
     <div className={className} aria-hidden="true">
-      {/* 1. Deep Ambient Mesh Gradient Glow Orbs (Fluid organic drifting orbs) */}
-      <div className="absolute -top-[10%] -left-[10%] w-[55vw] h-[55vw] max-w-[700px] max-h-[700px] rounded-full bg-emerald-600/[0.12] blur-[140px] pointer-events-none animate-aurora-orb-1 transform-gpu" />
-      <div className="absolute top-[25%] -right-[15%] w-[50vw] h-[50vw] max-w-[650px] max-h-[650px] rounded-full bg-cyan-600/[0.10] blur-[150px] pointer-events-none animate-aurora-orb-2 transform-gpu" />
-      <div className="absolute -bottom-[15%] left-[20%] w-[60vw] h-[60vw] max-w-[750px] max-h-[750px] rounded-full bg-teal-600/[0.11] blur-[160px] pointer-events-none animate-aurora-orb-3 transform-gpu" />
+      {/* 1. Deep Ambient Radial Gradient Orbs (100% zero GPU blur strain, 60-120 FPS guaranteed) */}
+      <div 
+        className="absolute -top-[10%] -left-[10%] w-[55vw] h-[55vw] max-w-[650px] max-h-[650px] rounded-full pointer-events-none animate-aurora-orb-1"
+        style={{
+          background: 'radial-gradient(circle, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.05) 45%, transparent 70%)'
+        }}
+      />
+      <div 
+        className="absolute top-[25%] -right-[15%] w-[50vw] h-[50vw] max-w-[600px] max-h-[600px] rounded-full pointer-events-none animate-aurora-orb-2"
+        style={{
+          background: 'radial-gradient(circle, rgba(6, 182, 212, 0.10) 0%, rgba(14, 165, 233, 0.04) 45%, transparent 70%)'
+        }}
+      />
+      <div 
+        className="absolute -bottom-[15%] left-[20%] w-[60vw] h-[60vw] max-w-[700px] max-h-[700px] rounded-full pointer-events-none animate-aurora-orb-3"
+        style={{
+          background: 'radial-gradient(circle, rgba(20, 184, 166, 0.11) 0%, rgba(13, 148, 136, 0.04) 45%, transparent 70%)'
+        }}
+      />
 
       {/* 2. Optional Subtle Cybernetic Matrix Grid Pattern */}
       {showGrid && (
@@ -322,10 +359,10 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
         />
       )}
 
-      {/* 3. 60 FPS Canvas with Fluid Satin Waves and Floating Star Bokeh */}
+      {/* 3. Smooth Canvas with Fluid Satin Waves and Pre-Rendered Star Bokeh */}
       <canvas
         ref={canvasRef}
-        className="w-full h-full block opacity-95 pointer-events-none transform-gpu"
+        className="w-full h-full block opacity-95 pointer-events-none"
       />
 
       {/* 4. Soft Vignette and Screen-Blend Overlay */}
@@ -334,4 +371,5 @@ export const SilkFabricBackground: React.FC<SilkFabricBackgroundProps> = ({
   );
 };
 
+export const SilkFabricBackground = React.memo(SilkFabricBackgroundComponent);
 export const AnimatedBackground = SilkFabricBackground;

@@ -157,10 +157,11 @@ const storage = multer.diskStorage({
   }
 });
 
+// Multer storage engine - supports heavy direct uploads up to 2 GB
 const upload = multer({
   storage,
   limits: {
-    fileSize: 250 * 1024 * 1024, // 250 MB limit
+    fileSize: 2 * 1024 * 1024 * 1024, // 2 GB direct limit
   },
   fileFilter: (_req, file, cb) => {
     const check = checkDangerousExtension(file.originalname);
@@ -184,7 +185,7 @@ const chunkStorage = multer.diskStorage({
 const chunkUpload = multer({
   storage: chunkStorage,
   limits: {
-    fileSize: 35 * 1024 * 1024 // 35 MB limit per individual chunk
+    fileSize: 50 * 1024 * 1024 // 50 MB limit per individual chunk
   }
 });
 
@@ -363,6 +364,10 @@ async function startServer() {
     });
   };
 
+  // Assembled chunk cache & concurrency lock for race-free multi-worker uploads
+  const assembledFilesMap = new Map<string, any>();
+  const assemblingSet = new Set<string>();
+
   const processChunkUpload = async (req: express.Request, res: express.Response) => {
     try {
       const chunkFile = req.file;
@@ -379,6 +384,16 @@ async function startServer() {
       if (!uploadId || isNaN(chunkIndex) || isNaN(totalChunks) || totalChunks <= 0) {
         try { fs.unlinkSync(chunkFile.path); } catch {}
         return res.status(400).json({ success: false, error: 'Thông tin phân mảnh tệp không hợp lệ' });
+      }
+
+      // Check if file was already assembled by another concurrent chunk worker
+      if (assembledFilesMap.has(uploadId)) {
+        try { fs.unlinkSync(chunkFile.path); } catch {}
+        return res.json({
+          success: true,
+          assembled: true,
+          file: assembledFilesMap.get(uploadId)
+        });
       }
 
       const safeName = sanitizeServerFilename(fileName);
@@ -416,74 +431,106 @@ async function startServer() {
         });
       }
 
-      // All chunks present -> assemble them in order
-      const ext = path.extname(safeName).toLowerCase();
-      const safeExt = ext.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 10);
-      const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}${safeExt}`;
-      const finalFilePath = path.join(UPLOADS_DIR, uniqueId);
-
-      const writeStream = fs.createWriteStream(finalFilePath);
-      let totalBytesWritten = 0;
-
-      for (let i = 0; i < totalChunks; i++) {
-        const partPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
-        const chunkBuf = fs.readFileSync(partPath);
-        writeStream.write(chunkBuf);
-        totalBytesWritten += chunkBuf.length;
-        try { fs.unlinkSync(partPath); } catch {}
+      // If already assembled
+      if (assembledFilesMap.has(uploadId)) {
+        return res.json({
+          success: true,
+          assembled: true,
+          file: assembledFilesMap.get(uploadId)
+        });
       }
 
-      await new Promise<void>((resolve, reject) => {
-        writeStream.end(() => resolve());
-        writeStream.on('error', reject);
-      });
+      // Concurrency lock: If another worker is already actively assembling, report success and let client poll status
+      if (assemblingSet.has(uploadId)) {
+        return res.json({
+          success: true,
+          assembled: false,
+          isAssembling: true,
+          chunkIndex,
+          totalChunks
+        });
+      }
 
-      // SVG sanitization
-      const isSvg = ext === '.svg' || fileType === 'image/svg+xml';
-      if (isSvg) {
-        try {
-          const rawBuf = fs.readFileSync(finalFilePath);
-          const cleanBuf = sanitizeSvgBuffer(rawBuf);
-          fs.writeFileSync(finalFilePath, cleanBuf);
-        } catch (svgErr) {
-          console.warn('SVG sanitization error on assembled file:', svgErr);
+      assemblingSet.add(uploadId);
+
+      try {
+        // Double-check if finished during lock acquisition
+        if (assembledFilesMap.has(uploadId)) {
+          return res.json({
+            success: true,
+            assembled: true,
+            file: assembledFilesMap.get(uploadId)
+          });
         }
-      }
 
-      const isHeic = ext === '.heic' || ext === '.heif' || fileType === 'image/heic' || fileType === 'image/heif';
-      const isImage = fileType.startsWith('image/') || isHeic || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(ext);
+        // All chunks present -> assemble them in order safely
+        const ext = path.extname(safeName).toLowerCase();
+        const safeExt = ext.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 10);
+        const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}${safeExt}`;
+        const finalFilePath = path.join(UPLOADS_DIR, uniqueId);
 
-      let thumbnailBase64: string | undefined = undefined;
-      if (isImage) {
-        try {
-          const thumbBuffer = await sharp(finalFilePath)
-            .rotate()
-            .resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 80 })
-            .toBuffer();
-          thumbnailBase64 = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
-        } catch (thumbErr) {
-          console.warn('Could not generate server thumbnail for assembled file:', thumbErr);
+        // Initialize empty file
+        fs.writeFileSync(finalFilePath, Buffer.alloc(0));
+        let totalBytesWritten = 0;
+
+        for (let i = 0; i < totalChunks; i++) {
+          const partPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
+          if (!fs.existsSync(partPath)) {
+            throw new Error(`Mảnh tệp ${i + 1}/${totalChunks} chưa sẵn sàng để ghép`);
+          }
+          const chunkBuf = fs.readFileSync(partPath);
+          fs.appendFileSync(finalFilePath, chunkBuf);
+          totalBytesWritten += chunkBuf.length;
         }
-      }
 
-      fileMetaMap[uniqueId] = {
-        originalName: safeName,
-        size: totalBytesWritten,
-        mimeType: isHeic ? 'image/heic' : fileType,
-        createdAt: new Date().toISOString(),
-        isHeic: isHeic,
-        thumbnail: thumbnailBase64
-      };
-      saveMetaFile();
+        // Clean up temporary chunk files only after whole file is assembled successfully
+        for (let i = 0; i < totalChunks; i++) {
+          try { fs.unlinkSync(path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`)); } catch {}
+        }
 
-      const downloadUrl = `/api/files/download/${uniqueId}`;
-      const viewUrl = `/api/files/view/${uniqueId}`;
+        // SVG sanitization
+        const isSvg = ext === '.svg' || fileType === 'image/svg+xml';
+        if (isSvg) {
+          try {
+            const rawBuf = fs.readFileSync(finalFilePath);
+            const cleanBuf = sanitizeSvgBuffer(rawBuf);
+            fs.writeFileSync(finalFilePath, cleanBuf);
+          } catch (svgErr) {
+            console.warn('SVG sanitization error on assembled file:', svgErr);
+          }
+        }
 
-      return res.json({
-        success: true,
-        assembled: true,
-        file: {
+        const isHeic = ext === '.heic' || ext === '.heif' || fileType === 'image/heic' || fileType === 'image/heif';
+        const isImage = fileType.startsWith('image/') || isHeic || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(ext);
+
+        let thumbnailBase64: string | undefined = undefined;
+        if (isImage) {
+          try {
+            const thumbBuffer = await sharp(finalFilePath)
+              .rotate()
+              .resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 80 })
+              .toBuffer();
+            thumbnailBase64 = `data:image/jpeg;base64,${thumbBuffer.toString('base64')}`;
+          } catch (thumbErr) {
+            console.warn('Could not generate server thumbnail for assembled file:', thumbErr);
+          }
+        }
+
+        fileMetaMap[uniqueId] = {
+          originalName: safeName,
+          size: totalBytesWritten,
+          mimeType: isHeic ? 'image/heic' : fileType,
+          createdAt: new Date().toISOString(),
+          isHeic: isHeic,
+          thumbnail: thumbnailBase64
+        };
+        saveMetaFile();
+
+        const downloadUrl = `/api/files/download/${uniqueId}`;
+        const viewUrl = `/api/files/view/${uniqueId}`;
+
+        const fileObj = {
           id: uniqueId,
           name: safeName,
           originalName: safeName,
@@ -494,8 +541,18 @@ async function startServer() {
           viewUrl: viewUrl,
           thumbnail: thumbnailBase64,
           isHeic: isHeic
-        }
-      });
+        };
+
+        assembledFilesMap.set(uploadId, fileObj);
+
+        return res.json({
+          success: true,
+          assembled: true,
+          file: fileObj
+        });
+      } finally {
+        assemblingSet.delete(uploadId);
+      }
     } catch (err: any) {
       console.error('Process chunk upload error:', err);
       return res.status(500).json({ success: false, error: err.message || 'Lỗi khi ghép mảnh tệp tải lên' });
@@ -504,6 +561,16 @@ async function startServer() {
 
   app.post('/api/upload-chunk', handleChunkUploadMiddleware, processChunkUpload);
   app.post('/api/upload-chunk/', handleChunkUploadMiddleware, processChunkUpload);
+
+  // Status check for chunk assembly
+  app.get(['/api/upload-chunk-status/:uploadId', '/api/upload-chunk-status/:uploadId/'], (req: express.Request, res: express.Response) => {
+    const uploadId = req.params.uploadId;
+    if (assembledFilesMap.has(uploadId)) {
+      return res.json({ success: true, assembled: true, file: assembledFilesMap.get(uploadId) });
+    }
+    const isAssembling = assemblingSet.has(uploadId);
+    return res.json({ success: true, assembled: false, isAssembling });
+  });
 
   // Direct Base64 / JSON Upload Endpoint (Fail-safe fallback when multipart is blocked by Cloud Run proxy/IFrame)
   app.post('/api/upload-base64', async (req: express.Request, res: express.Response) => {
@@ -1055,20 +1122,338 @@ async function startServer() {
         }
       }
 
-      const mimeType = meta?.mimeType || 'application/octet-stream';
+      let mimeType = meta?.mimeType;
+      const videoMimeMap: Record<string, string> = {
+        '.mp4': 'video/mp4',
+        '.webm': 'video/webm',
+        '.mov': 'video/quicktime',
+        '.m4v': 'video/mp4',
+        '.mkv': 'video/x-matroska',
+        '.avi': 'video/x-msvideo',
+        '.3gp': 'video/3gpp',
+        '.flv': 'video/x-flv',
+        '.wmv': 'video/x-ms-wmv',
+        '.ts': 'video/mp2t',
+        '.ogv': 'video/ogg',
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4',
+        '.flac': 'audio/flac',
+      };
+
+      if (videoMimeMap[ext]) {
+        mimeType = videoMimeMap[ext];
+      } else if (!mimeType || mimeType === 'application/octet-stream') {
+        if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+        else if (ext === '.png') mimeType = 'image/png';
+        else if (ext === '.gif') mimeType = 'image/gif';
+        else if (ext === '.webp') mimeType = 'image/webp';
+        else if (ext === '.svg') mimeType = 'image/svg+xml';
+        else if (ext === '.pdf') mimeType = 'application/pdf';
+        else mimeType = 'application/octet-stream';
+      }
 
       // Security: For SVGs and other active content, enforce sandbox CSP to prevent XSS
       if (ext === '.svg' || mimeType === 'image/svg+xml' || ext === '.html' || mimeType === 'text/html') {
         res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox;");
       }
+
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
 
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+        if (start >= fileSize || end >= fileSize) {
+          res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+          return res.end();
+        }
+
+        const chunksize = (end - start) + 1;
+        const fileStream = fs.createReadStream(filePath, { start, end });
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': mimeType,
+          'Content-Disposition': 'inline',
+          'X-Content-Type-Options': 'nosniff',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
+        });
+
+        req.on('close', () => {
+          fileStream.destroy();
+        });
+
+        return fileStream.pipe(res);
+      }
+
+      res.setHeader('Content-Length', fileSize);
       return res.sendFile(filePath);
     } catch (err: any) {
       console.error('View file error:', err);
       return res.status(500).send('Lỗi khi xem tệp.');
+    }
+  });
+
+  // Dedicated Standalone Web Video Player Route (/watch/:id)
+  app.get('/watch/:id', (req, res) => {
+    try {
+      const rawId = path.basename(req.params.id);
+      const customSrc = (req.query.src as string) || '';
+      const filePath = path.join(UPLOADS_DIR, rawId);
+      const meta = fileMetaMap[rawId];
+      const title = (req.query.name as string) || meta?.originalName || rawId;
+      const fileExists = fs.existsSync(filePath);
+      const canPlay = Boolean(customSrc) || fileExists;
+      const streamUrl = customSrc || `/api/files/view/${encodeURIComponent(rawId)}`;
+      const downloadUrl = customSrc || `/api/files/download/${encodeURIComponent(rawId)}`;
+
+      const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} - Trình phát Video Web ClSend</title>
+  <link rel="icon" type="image/svg+xml" href="/vite.svg">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #050811;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+    header {
+      padding: 12px 20px;
+      background: rgba(11, 17, 32, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      backdrop-filter: blur(12px);
+      z-index: 20;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #10b981;
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+    .video-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f1f5f9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 50vw;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.15s ease;
+    }
+    .btn-download {
+      background: #10b981;
+      color: #022c22;
+    }
+    .btn-download:hover {
+      background: #34d399;
+      transform: translateY(-1px);
+    }
+    .btn-app {
+      background: #1e293b;
+      color: #cbd5e1;
+      border: 1px solid #334155;
+    }
+    .btn-app:hover {
+      background: #334155;
+      color: #fff;
+    }
+    .main-stage {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: radial-gradient(circle at 50% 30%, #0f172a 0%, #030712 100%);
+    }
+    .player-box {
+      width: 100%;
+      max-width: 1200px;
+      max-height: calc(100vh - 120px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    video {
+      width: 100%;
+      max-height: calc(100vh - 130px);
+      border-radius: 14px;
+      background: #000;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.08);
+      outline: none;
+    }
+    .hints-bar {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #64748b;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+    }
+    .hints-bar kbd {
+      background: #1e293b;
+      color: #cbd5e1;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+      font-family: monospace;
+      font-size: 10px;
+    }
+    .error-card {
+      text-align: center;
+      padding: 36px 28px;
+      max-width: 480px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 20px;
+      box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.6);
+    }
+    .error-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+    .error-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #f59e0b;
+      margin-bottom: 8px;
+    }
+    .error-desc {
+      font-size: 13px;
+      color: #94a3b8;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" class="brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      <span>ClSend Web Player</span>
+    </a>
+    <div class="video-title" title="${title}">${title}</div>
+    <div class="actions">
+      ${canPlay ? `<a href="${downloadUrl}" class="btn btn-download" download>⬇️ Tải video</a>` : ''}
+      <a href="/" class="btn btn-app">🏠 Về Kho Cloud</a>
+    </div>
+  </header>
+  <main class="main-stage">
+    ${canPlay ? `
+      <div class="player-box">
+        <video id="video-element" src="${streamUrl}" controls autoplay playsinline preload="auto"></video>
+      </div>
+      <div class="hints-bar">
+        <span>Phím tắt: <kbd>Space</kbd> Phát/Dừng</span>
+        <span><kbd>←</kbd> <kbd>→</kbd> Tua ±5 giây</span>
+        <span><kbd>↑</kbd> <kbd>↓</kbd> Âm lượng</span>
+        <span><kbd>F</kbd> Toàn màn hình</span>
+        <span><kbd>M</kbd> Bật/Tắt tiếng</span>
+      </div>
+    ` : `
+      <div class="error-card">
+        <div class="error-icon">🎬</div>
+        <div class="error-title">Tệp video chưa có trên máy chủ</div>
+        <p class="error-desc">Tệp "${title}" được tải lên trước phiên làm mới của máy chủ. Bạn hãy quay về ứng dụng để phát trực tiếp hoặc tải lại tệp nhé!</p>
+        <a href="/" class="btn btn-download">Quay về ClSend</a>
+      </div>
+    `}
+  </main>
+
+  <script>
+    const vid = document.getElementById('video-element');
+    if (vid) {
+      window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.code === 'Space') {
+          e.preventDefault();
+          if (vid.paused) vid.play(); else vid.pause();
+        } else if (e.code === 'ArrowLeft') {
+          e.preventDefault();
+          vid.currentTime = Math.max(0, vid.currentTime - 5);
+        } else if (e.code === 'ArrowRight') {
+          e.preventDefault();
+          vid.currentTime = Math.min(vid.duration || Infinity, vid.currentTime + 5);
+        } else if (e.code === 'ArrowUp') {
+          e.preventDefault();
+          vid.volume = Math.min(1, vid.volume + 0.1);
+        } else if (e.code === 'ArrowDown') {
+          e.preventDefault();
+          vid.volume = Math.max(0, vid.volume - 0.1);
+        } else if (e.code === 'KeyF') {
+          e.preventDefault();
+          if (document.fullscreenElement) {
+            document.exitFullscreen();
+          } else {
+            vid.requestFullscreen?.() || vid.webkitRequestFullscreen?.();
+          }
+        } else if (e.code === 'KeyM') {
+          e.preventDefault();
+          vid.muted = !vid.muted;
+        }
+      });
+    }
+  </script>
+</body>
+</html>`;
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(html);
+    } catch (e: any) {
+      return res.status(500).send('Lỗi khi mở trình phát video.');
     }
   });
 

@@ -61,7 +61,8 @@ import {
   Calendar,
   Zap,
   Loader2,
-  History
+  History,
+  Film
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playSendSound, playReceiveSound, playDestructSound, playShieldAlertSound } from '../utils/sound';
@@ -102,6 +103,7 @@ import {
   generateImageThumbnail, 
   compressImageForDirectTransfer,
   isImageFile,
+  isVideoFile,
   MAX_FILE_SIZE, 
   MAX_FILE_SIZE_LABEL 
 } from '../utils/fileUpload';
@@ -122,7 +124,7 @@ const DEFAULT_GLOBAL_LOUNGE_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http:/
 
 const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#6366f1'];
 
-export const ChatRoomView: React.FC = () => {
+const ChatRoomViewComponent: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
   const { currentLang, t } = useLanguage();
   
@@ -273,6 +275,7 @@ export const ChatRoomView: React.FC = () => {
   const [isDraggingOverChat, setIsDraggingOverChat] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
@@ -845,7 +848,7 @@ export const ChatRoomView: React.FC = () => {
         size: file.size,
         type: file.type || 'application/octet-stream',
         data: '',
-        url: uploaded.url
+        url: uploaded.viewUrl || uploaded.url
       };
     } catch (err: any) {
       setModerationWarning(err?.message || 'Lỗi khi tải tệp lên máy chủ.');
@@ -1560,7 +1563,8 @@ export const ChatRoomView: React.FC = () => {
                   }
 
                   const imageAttachments = msgAttachments.filter(a => isImageFile(a));
-                  const otherAttachments = msgAttachments.filter(a => !isImageFile(a));
+                  const videoAttachments = msgAttachments.filter(a => isVideoFile(a));
+                  const otherAttachments = msgAttachments.filter(a => !isImageFile(a) && !isVideoFile(a));
 
                   return (
                     <React.Fragment key={msg.id ? `${msg.id}_${index}` : index}>
@@ -1838,6 +1842,53 @@ export const ChatRoomView: React.FC = () => {
                       )
                     )}
 
+                    {/* Attached Videos - Native high-performance inline video player */}
+                    {videoAttachments.length > 0 && (
+                      <div className="space-y-2 mt-1.5">
+                        {videoAttachments.map((vid, idx) => {
+                          const viewUrl = vid.url 
+                            ? (vid.url.includes('/api/telegram/download') 
+                                ? (vid.url.includes('inline=true') ? vid.url : vid.url + '&inline=true') 
+                                : vid.url.replace('/api/files/download/', '/api/files/view/')) 
+                            : '';
+                          const vidSrc = vid.data || viewUrl || vid.url;
+                          const vidDownload = vid.url 
+                            ? vid.url.replace('/api/files/view/', '/api/files/download/').replace('&inline=true', '') 
+                            : vid.data;
+                          return (
+                            <div key={idx} className="rounded-xl overflow-hidden bg-black/75 border border-slate-700/80 shadow-md">
+                              <div className="relative group/vid bg-black max-h-80 w-full flex items-center justify-center">
+                                <video
+                                  src={vidSrc}
+                                  controls
+                                  preload="metadata"
+                                  playsInline
+                                  className="w-full max-h-80 object-contain rounded-t-xl"
+                                />
+                              </div>
+                              <div className="p-2 bg-slate-900/95 border-t border-slate-800 flex items-center justify-between gap-2">
+                                <div className="min-w-0 flex items-center gap-2">
+                                  <Film className="w-4 h-4 text-emerald-400 shrink-0" />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-white truncate max-w-[200px]">{vid.name}</p>
+                                    <p className="text-[10px] text-slate-400 font-mono">{formatFileSize(vid.size)} • Video</p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadFileSafely(vidDownload, vid.name)}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
+                                  title="Tải video về máy"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     {/* Non-image File Attachments */}
                     {otherAttachments.length > 0 && (
                       <div className="space-y-1">
@@ -1928,12 +1979,13 @@ export const ChatRoomView: React.FC = () => {
             <div className="flex items-center gap-3 overflow-x-auto pb-1 pt-0.5">
               {attachments.map((att, idx) => {
                 const isImg = isImageFile(att);
+                const isVid = isVideoFile(att);
                 const viewUrl = att.url ? att.url.replace('/api/files/download/', '/api/files/view/') : '';
                 const displaySrc = att.data || viewUrl;
                 return (
                   <div 
                     key={idx} 
-                    className="relative group shrink-0 w-20 h-20 rounded-xl overflow-hidden bg-slate-900 border border-emerald-500/40 shadow-md"
+                    className="relative group shrink-0 w-20 h-20 rounded-xl overflow-hidden bg-slate-900 border border-emerald-500/40 shadow-md flex items-center justify-center"
                   >
                     {isImg && displaySrc ? (
                       <img 
@@ -1941,6 +1993,11 @@ export const ChatRoomView: React.FC = () => {
                         alt={att.name} 
                         className="w-full h-full object-cover"
                       />
+                    ) : isVid ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center p-1 text-center bg-slate-900/90 text-emerald-400">
+                        <Film className="w-6 h-6 text-emerald-400 mb-1" />
+                        <span className="text-[9px] text-slate-300 truncate w-full px-1 font-medium">{att.name}</span>
+                      </div>
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center p-1 text-center bg-slate-900">
                         <FileDocIcon fileName={att.name} mimeType={att.type} size="sm" />
@@ -2140,6 +2197,16 @@ export const ChatRoomView: React.FC = () => {
                 className="hidden"
               />
 
+              {/* Hidden dedicated video input (MP4, WebM, MOV, MKV, AVI, etc.) */}
+              <input
+                type="file"
+                multiple
+                accept="video/*,.mp4,.webm,.mov,.mkv,.avi,.m4v,.3gp,.flv,.wmv,.ts,.ogv"
+                ref={videoInputRef}
+                onChange={(e) => e.target.files && processAndAttachFiles(e.target.files)}
+                className="hidden"
+              />
+
               {/* Quick Image Picker Button */}
               <button
                 id="attach-image-btn"
@@ -2151,12 +2218,23 @@ export const ChatRoomView: React.FC = () => {
                 <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
               </button>
 
+              {/* Dedicated Video Picker Button */}
+              <button
+                id="attach-video-btn"
+                type="button"
+                onClick={() => videoInputRef.current?.click()}
+                title="Chọn một hoặc nhiều video để gửi (hỗ trợ MP4, WebM, MOV, MKV... lên tới 2GB)"
+                className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-emerald-400 border border-slate-700 transition-colors shrink-0"
+              >
+                <Film className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
               {/* General File Attachment Button */}
               <button
                 id="attach-file-btn"
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                title="Đính kèm tệp tin dung lượng lớn lên tới 250MB (tài liệu, video, ZIP, phần mềm...)"
+                title="Đính kèm tệp tin dung lượng lớn lên tới 2GB (tài liệu, ZIP, ứng dụng...)"
                 className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-colors shrink-0"
               >
                 <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2475,3 +2553,5 @@ export const ChatRoomView: React.FC = () => {
     </div>
   );
 };
+
+export const ChatRoomView = React.memo(ChatRoomViewComponent);

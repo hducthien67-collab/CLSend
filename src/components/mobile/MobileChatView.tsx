@@ -51,7 +51,8 @@ import {
   History,
   Clipboard,
   AlertTriangle,
-  Copy
+  Copy,
+  Video
 } from 'lucide-react';
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { downloadFileSafely } from '../../utils/fileDownload';
@@ -1205,7 +1206,13 @@ export const MobileChatView: React.FC = () => {
                   (msg.fileType && msg.fileType.startsWith('image/')) ||
                   (msg.fileName && msg.fileName.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/i))
                 );
-                const imgSrc = msg.fileData || msg.fileUrl || '';
+                const isVideo = Boolean(
+                  (msg.fileData && msg.fileData.startsWith('data:video')) ||
+                  (msg.fileType && msg.fileType.startsWith('video/')) ||
+                  (msg.fileName && msg.fileName.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)$/i))
+                );
+                const mediaSrc = msg.fileData || msg.fileUrl || '';
+                const imgSrc = isImage ? mediaSrc : '';
                 const canDelete = isMe || activeRoom?.ownerId === currentUser?.uid || activeRoom?.createdBy === currentUser?.uid || isDevUser(currentUser?.email);
 
                 // Date separator logic
@@ -1334,8 +1341,38 @@ export const MobileChatView: React.FC = () => {
                           </div>
                         )}
 
-                        {/* File Download Action for non-images */}
-                        {msg.fileName && !isImage && (
+                        {/* Video Player */}
+                        {isVideo && mediaSrc && (
+                          <div className="rounded-xl overflow-hidden mb-1.5 border border-black/20 bg-black">
+                            <video
+                              src={mediaSrc}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="w-full max-h-64 object-contain rounded-t-xl"
+                            />
+                            <div className="p-2 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between gap-2">
+                              <div className="min-w-0 flex items-center gap-1.5">
+                                <Video className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-semibold text-white truncate max-w-[170px]">{msg.fileName || 'Video'}</p>
+                                  <p className="text-[9px] text-slate-400 font-mono">{formatFileSize(msg.fileSize)} • Video</p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => downloadFileSafely(mediaSrc, msg.fileName || 'video.mp4')}
+                                className="p-1 rounded-lg bg-white/20 hover:bg-emerald-600 text-white cursor-pointer"
+                                title="Tải video"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* File Download Action for other non-media files */}
+                        {msg.fileName && !isImage && !isVideo && (
                           <div className="p-2.5 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between gap-2">
                             <div className="min-w-0">
                               <p className="font-bold truncate">{msg.fileName}</p>
@@ -1344,7 +1381,7 @@ export const MobileChatView: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => downloadFileSafely(msg.fileUrl || msg.fileData || '', msg.fileName || 'file')}
-                              className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white"
+                              className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
                             </button>

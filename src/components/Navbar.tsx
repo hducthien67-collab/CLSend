@@ -40,7 +40,7 @@ interface NavbarProps {
   onOpenDesignStudio?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({
+const NavbarComponent: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   onOpenSettings,
@@ -106,10 +106,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="nav-send-tab"
               type="button"
               onClick={() => setActiveTab('send')}
-              onMouseEnter={() => {
-                // Zalo-style anti-lag hover pre-activation
-              }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 transform-gpu active:scale-95 cursor-pointer ${
                 activeTab === 'send'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -123,10 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="nav-receive-tab"
               type="button"
               onClick={() => setActiveTab('receive')}
-              onMouseEnter={() => {
-                // Zalo-style anti-lag hover pre-activation
-              }}
-              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 transform-gpu active:scale-95 cursor-pointer ${
                 activeTab === 'receive'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -145,10 +139,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="nav-chat-tab"
               type="button"
               onClick={() => setActiveTab('chat')}
-              onMouseEnter={() => {
-                // Zalo-style anti-lag hover pre-activation
-              }}
-              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 transform-gpu active:scale-95 cursor-pointer ${
                 activeTab === 'chat'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -172,10 +163,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               id="nav-drive-tab"
               type="button"
               onClick={() => setActiveTab('drive')}
-              onMouseEnter={() => {
-                // Zalo-style anti-lag hover pre-activation
-              }}
-              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 transform-gpu active:scale-95 cursor-pointer ${
                 activeTab === 'drive'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -540,3 +528,5 @@ export const Navbar: React.FC<NavbarProps> = ({
     </header>
   );
 };
+
+export const Navbar = React.memo(NavbarComponent);

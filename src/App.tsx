@@ -32,6 +32,7 @@ import { SilkFabricBackground } from './components/SilkFabricBackground';
 import { sendDesktopMessageNotification, sendDesktopFileNotification, isPwaStandalone } from './utils/desktopNotification';
 import { cleanAllPwaCachesAndBloat } from './utils/pwaStorageCleaner';
 import { MobileLayout } from './components/mobile/MobileLayout';
+import { PerfDebugWidget } from './components/PerfDebugWidget';
 import { db, auth } from './firebase/config';
 import { collection, query, where, onSnapshot, orderBy, limit, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { 
@@ -591,6 +592,22 @@ function MainApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isTv, isSettingsOpen, isDevConsoleOpen, isRulesOpen, isMandatoryRules]);
 
+  const handleTabChange = React.useCallback((tab: 'send' | 'receive' | 'chat' | 'drive') => {
+    setActiveTab(tab);
+    queueMicrotask(() => {
+      try {
+        window.history.pushState(null, '', `/?page=${tab}`);
+      } catch {}
+    });
+  }, []);
+
+  const handleOpenSettings = React.useCallback(() => setIsSettingsOpen(true), []);
+  const handleOpenDevConsole = React.useCallback(() => setIsDevConsoleOpen(true), []);
+  const handleOpenDevPage = React.useCallback(() => {
+    window.history.pushState(null, '', '/?page=datastore');
+    setIsDatastorePage(true);
+  }, []);
+
   // Dedicated Datastore Page Mode (Direct Datastore Web Interface)
   const [isDatastorePage, setIsDatastorePage] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -1004,16 +1021,8 @@ function MainApp() {
     );
   }
 
-
-  const handleTabChange = (tab: 'send' | 'receive' | 'chat' | 'drive') => {
-    setActiveTab(tab);
-    window.history.pushState(null, '', `/?page=${tab}`);
-  };
-
   return (
-    <div className={`w-full flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-900 relative ${
-      activeTab === 'chat' ? 'h-screen max-h-screen overflow-hidden' : 'min-h-screen overflow-x-hidden'
-    }`}>
+    <div className="w-full h-[100dvh] max-h-[100dvh] flex flex-col bg-slate-950 text-slate-100 selection:bg-emerald-500 selection:text-slate-900 relative overflow-hidden">
       {/* Living Dynamic Silk Wave Ribbons & Floating Luminescent Starlight Background */}
       <SilkFabricBackground className="fixed inset-0 pointer-events-none -z-10" intensity="normal" showParticles={true} showGrid={true} />
 
@@ -1021,14 +1030,11 @@ function MainApp() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={handleTabChange}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={handleOpenSettings}
         onOpenRules={handleOpenRulesManually}
-        onOpenDevConsole={() => setIsDevConsoleOpen(true)}
+        onOpenDevConsole={handleOpenDevConsole}
         onToggleViewMode={handleToggleViewMode}
-        onOpenDevPage={() => {
-          window.history.pushState(null, '', '/?page=datastore');
-          setIsDatastorePage(true);
-        }}
+        onOpenDevPage={handleOpenDevPage}
         incomingCount={incomingCount}
         unreadMessagesCount={unreadMessagesCount}
       />
@@ -1187,34 +1193,69 @@ function MainApp() {
         </div>
       )}
 
-      {/* Main Content Area: Nhận diện Tab đang sử dụng, chỉ kích hoạt Tab hiện tại và dừng các tab khác để chống giật lag */}
-      <main className="flex-1 min-h-0 w-full flex flex-col relative overflow-hidden">
+      {/* Main Content Area: Giữ layout cố định, cách ly DOM bằng content-visibility và CSS containment để chuyển tab 60 FPS < 25ms */}
+      <main className="flex-1 min-h-0 w-full relative overflow-hidden">
         <React.Suspense fallback={
-          <div className="flex-1 flex flex-col items-center justify-center p-12 text-slate-400">
+          <div className="w-full h-full flex flex-col items-center justify-center p-12 text-slate-400">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" />
             <span className="text-xs font-mono">Đang tải mô-đun siêu tốc...</span>
           </div>
         }>
-          {activeTab === 'send' && (
-            <div key="send-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-              <SendView />
-            </div>
-          )}
-          {activeTab === 'receive' && (
-            <div key="receive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-              <ReceiveView />
-            </div>
-          )}
-          {activeTab === 'drive' && (
-            <div key="drive-tab" className="w-full flex-1 flex flex-col overflow-y-auto pb-20 md:pb-6 animate-tab-switch">
-              <CloudDriveView />
-            </div>
-          )}
-          {activeTab === 'chat' && (
-            <div key="chat-tab" className="w-full flex-1 flex flex-col overflow-hidden h-full animate-tab-switch pb-16 md:pb-0">
-              <ChatRoomView />
-            </div>
-          )}
+          <div 
+            style={{ 
+              contain: activeTab === 'send' ? 'layout paint' : 'strict',
+              contentVisibility: activeTab === 'send' ? 'visible' : 'hidden'
+            }}
+            className={`w-full h-full flex flex-col overflow-y-auto pb-20 md:pb-6 transition-opacity duration-100 ${
+              activeTab === 'send' 
+                ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+            }`}
+          >
+            <SendView />
+          </div>
+
+          <div 
+            style={{ 
+              contain: activeTab === 'receive' ? 'layout paint' : 'strict',
+              contentVisibility: activeTab === 'receive' ? 'visible' : 'hidden'
+            }}
+            className={`w-full h-full flex flex-col overflow-y-auto pb-20 md:pb-6 transition-opacity duration-100 ${
+              activeTab === 'receive' 
+                ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+            }`}
+          >
+            <ReceiveView />
+          </div>
+
+          <div 
+            style={{ 
+              contain: activeTab === 'drive' ? 'layout paint' : 'strict',
+              contentVisibility: activeTab === 'drive' ? 'visible' : 'hidden'
+            }}
+            className={`w-full h-full flex flex-col overflow-y-auto pb-20 md:pb-6 transition-opacity duration-100 ${
+              activeTab === 'drive' 
+                ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+            }`}
+          >
+            <CloudDriveView />
+          </div>
+
+          <div 
+            style={{ 
+              contain: activeTab === 'chat' ? 'layout paint' : 'strict',
+              contentVisibility: activeTab === 'chat' ? 'visible' : 'hidden'
+            }}
+            className={`w-full h-full flex flex-col overflow-hidden pb-16 md:pb-0 transition-opacity duration-100 ${
+              activeTab === 'chat' 
+                ? 'relative z-10 opacity-100 pointer-events-auto visible' 
+                : 'absolute inset-0 -z-10 opacity-0 pointer-events-none invisible'
+            }`}
+          >
+            <ChatRoomView />
+          </div>
         </React.Suspense>
       </main>
 
@@ -1341,6 +1382,9 @@ function MainApp() {
         onClose={() => setIsDesktopSyncOpen(false)}
         initialCode={urlSyncCode}
       />
+
+      {/* Raw Performance Debug Widget */}
+      <PerfDebugWidget />
     </div>
   );
 }

@@ -35,7 +35,7 @@ import {
   Share2
 } from 'lucide-react';
 import { MobileBottomSheet } from './MobileBottomSheet';
-import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
+import { uploadFileToServer, isImageFile, isVideoFile, generateImageThumbnail, generateVideoThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { CloudDrivePickerModal } from '../CloudDrivePickerModal';
 import { useLanguage } from '../../context/LanguageContext';
 
@@ -126,6 +126,10 @@ export const MobileSendView: React.FC = () => {
         if (isImageFile(file)) {
           try {
             thumbnail = await generateImageThumbnail(file, 480, 0.75);
+          } catch {}
+        } else if (isVideoFile(file)) {
+          try {
+            thumbnail = await generateVideoThumbnail(file);
           } catch {}
         }
 

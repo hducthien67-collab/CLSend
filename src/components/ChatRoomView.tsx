@@ -62,7 +62,8 @@ import {
   Zap,
   Loader2,
   History,
-  Film
+  Film,
+  Cloud
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playSendSound, playReceiveSound, playDestructSound, playShieldAlertSound } from '../utils/sound';
@@ -116,6 +117,8 @@ import { ReportMessageModal } from './ReportMessageModal';
 import { ReportIncidentModal } from './ReportIncidentModal';
 import { RichChatInput, RichChatInputHandle } from './RichChatInput';
 import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
+import { CloudDrivePickerModal } from './CloudDrivePickerModal';
+import { CloudDriveFile } from './types';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
 import { triggerIncomingChatMessageNotification } from '../utils/tabNotification';
 
@@ -276,6 +279,7 @@ const ChatRoomViewComponent: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const [isCloudPickerOpen, setIsCloudPickerOpen] = useState(false);
 
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
@@ -902,6 +906,33 @@ const ChatRoomViewComponent: React.FC = () => {
 
   const handleRemoveAttachment = (indexToRemove: number) => {
     setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
+  // Handle files selected from Cloud Drive (direct attach without re-upload)
+  const handleCloudFilesSelected = (chosen: CloudDriveFile[]) => {
+    if (!chosen.length) return;
+    const newAttachments: ChatAttachment[] = chosen.map((cf) => ({
+      name: cf.name,
+      size: cf.size,
+      type: cf.type || 'application/octet-stream',
+      data: cf.thumbnail || '',
+      url: cf.viewUrl || cf.url
+    }));
+
+    setAttachments((prev) => {
+      const combined = [...prev];
+      for (const item of newAttachments) {
+        if (!combined.some(c => c.name === item.name && c.size === item.size)) {
+          combined.push(item);
+        }
+      }
+      return combined.slice(0, 10);
+    });
+
+    setIsCloudPickerOpen(false);
+    setTimeout(() => {
+      richInputRef.current?.focus();
+    }, 50);
   };
 
   // Handle drag & drop over chat
@@ -2079,100 +2110,19 @@ const ChatRoomViewComponent: React.FC = () => {
           )}
 
           <div className="p-2 sm:p-3 space-y-1.5">
-            {/* Quick Text Formatting Toolbar & Selection Helper */}
-            <div className="flex items-center justify-between gap-1 flex-wrap px-0.5">
-              <div className="flex items-center gap-1 flex-wrap">
-                {/* Bold */}
-                <button
-                  type="button"
-                  onClick={() => toggleFormatting('bold')}
-                  title="In đậm (Bôi đen + Bấm hoặc nhấn Ctrl + B)"
-                  className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] sm:text-xs font-bold flex items-center gap-1 transition-colors"
-                >
-                  <Bold className="w-3 h-3" />
-                  <span>Đậm <kbd className="hidden sm:inline-block px-1 py-0.2 bg-black/40 border border-white/10 rounded text-[9px] text-slate-400 font-sans">Ctrl+B</kbd></span>
-                </button>
-
-                {/* Italic */}
-                <button
-                  type="button"
-                  onClick={() => toggleFormatting('italic')}
-                  title="In nghiêng (Bôi đen + Bấm hoặc nhấn Ctrl + I)"
-                  className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 text-[11px] sm:text-xs italic flex items-center gap-1 transition-colors"
-                >
-                  <Italic className="w-3 h-3" />
-                  <span>Nghiêng <kbd className="hidden sm:inline-block px-1 py-0.2 bg-black/40 border border-white/10 rounded text-[9px] text-slate-400 font-sans">Ctrl+I</kbd></span>
-                </button>
-              </div>
-
-              {/* Typing Indicator & Smart Format / Clean Text Button */}
-              {inputText.trim().length > 0 && (
-                <div className="flex items-center gap-2 ml-auto animate-in fade-in slide-in-from-bottom-1 duration-150">
-                  <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                    <span className="flex items-center gap-0.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" />
-                    </span>
-                    <span className="italic">{t('chat.composing')}</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleCleanInputText}
-                    title="Tự động xóa khoảng trắng rác, dòng trống thừa, ký tự ẩn và căn chỉnh văn bản gọn gàng không bị hiện lung tung"
-                    className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm active:scale-95"
-                  >
-                    <Wand2 className="w-3 h-3 text-emerald-400" />
-                    <span>{t('chat.clean_text')}</span>
-                  </button>
+            {/* Typing Indicator & Character Count */}
+            {inputText.trim().length > 0 && (
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25">
+                  <span className="flex items-center gap-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-bounce" />
+                  </span>
+                  <span className="italic">{t('chat.composing')}</span>
                 </div>
-              )}
-            </div>
-
-            {/* Selection Quick Action Bubble */}
-            {hasSelection && (
-              <div className="text-[11px] sm:text-xs text-emerald-300 bg-slate-900/95 border border-emerald-500/40 rounded-xl px-2.5 py-1 flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-bottom-1 duration-150">
-                <span className="flex items-center gap-1 truncate">
-                  <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
-                  <span>{t('chat.selection_hint')}</span>
-                </span>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleFormatting('bold')}
-                    className="px-1.5 py-0.2 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]"
-                  >
-                    B {t('chat.bold')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => toggleFormatting('italic')}
-                    className="px-1.5 py-0.2 rounded bg-emerald-600 hover:bg-emerald-500 text-white italic text-[10px]"
-                  >
-                    I {t('chat.italic')}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Format Notification Toast */}
-            {formatNotice && (
-              <div className="text-[11px] sm:text-xs text-emerald-300 bg-emerald-950/60 border border-emerald-800/80 rounded-xl px-2.5 py-1 flex items-center gap-1.5 animate-in fade-in duration-150">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>{formatNotice}</span>
-              </div>
-            )}
-
-            {/* Auto-saved draft indicator */}
-            {inputText.trim() && (
-              <div className="flex items-center justify-between px-1 text-[10px] text-slate-400">
-                <span className="flex items-center gap-1 text-emerald-400/90 font-medium">
-                  <Check className="w-3 h-3 text-emerald-400" />
-                  {currentLang === 'en' ? 'Draft auto-saved' : 'Đã tự động lưu tin nhắn đang soạn'}
-                </span>
-                <span className="text-slate-500 font-mono">
-                  {inputText.length} ký tự
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {inputText.length} {currentLang === 'en' ? (inputText.length === 1 ? 'character' : 'characters') : t('chat.characters')}
                 </span>
               </div>
             )}
@@ -2234,10 +2184,21 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="attach-file-btn"
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                title="Đính kèm tệp tin dung lượng lớn lên tới 2GB (tài liệu, ZIP, ứng dụng...)"
-                className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-colors shrink-0"
+                title={currentLang === 'en' ? "Attach files from computer / phone (up to 2GB)" : "Đính kèm tệp tin từ máy tính / điện thoại (tài liệu, ZIP, ứng dụng...)"}
+                className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-colors shrink-0 cursor-pointer"
               >
                 <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
+              </button>
+
+              {/* Cloud Drive File Picker Button */}
+              <button
+                id="attach-cloud-btn"
+                type="button"
+                onClick={() => setIsCloudPickerOpen(true)}
+                title={currentLang === 'en' ? "Attach files from Cloud Drive (zero upload bandwidth)" : "Chọn tệp từ Kho Cloud (gửi ngay không tốn dung lượng upload)"}
+                className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-sky-400 border border-slate-700 hover:border-sky-500/40 transition-all shrink-0 cursor-pointer group"
+              >
+                <Cloud className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400 group-hover:scale-110 transition-transform" />
               </button>
 
               {/* Smart Rich Input with WYSIWYG Bold / Italic / Code & Gliding Neon Caret */}
@@ -2550,6 +2511,14 @@ const ChatRoomViewComponent: React.FC = () => {
           isAutoWeeklyEnabled={Boolean((activeRoom as any)?.autoWeeklyReset)}
         />
       )}
+
+      {/* Cloud Drive Picker Modal */}
+      <CloudDrivePickerModal
+        isOpen={isCloudPickerOpen}
+        onClose={() => setIsCloudPickerOpen(false)}
+        onSelectFiles={handleCloudFilesSelected}
+        alreadySelectedUrls={attachments.filter(a => a.url).map(a => a.url!)}
+      />
     </div>
   );
 };

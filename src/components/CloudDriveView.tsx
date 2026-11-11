@@ -54,14 +54,35 @@ import { showGlobalToast } from '../utils/toast';
 import { AudioPreviewPlayer } from './AudioPreviewPlayer';
 import { getVideoWebWatchUrl, openVideoInWebTab } from '../utils/videoWatch';
 import { PersistentVideoPlayerModal } from './PersistentVideoPlayerModal';
+import { saveVideoToIndexedDB } from './AllInOneVideoPlayer';
+import { storeFileBlobLocally } from '../utils/idbStorage';
 
-const MAX_QUOTA_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB personal storage quota
+const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB personal storage quota
 
 const CloudDriveViewComponent: React.FC = () => {
   const { currentUser, settings } = useAuth();
   const { t } = useLanguage();
-  const [files, setFiles] = useState<CloudDriveFile[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState<CloudDriveFile[]>(() => {
+    try {
+      const userRaw = localStorage.getItem('cloudsend_current_user');
+      const uid = (userRaw ? JSON.parse(userRaw)?.uid : '') || '';
+      if (uid) {
+        const cached = localStorage.getItem(`cloudsend_cache_files_${uid}`);
+        if (cached) return JSON.parse(cached);
+      }
+    } catch {}
+    return [];
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      const userRaw = localStorage.getItem('cloudsend_current_user');
+      const uid = (userRaw ? JSON.parse(userRaw)?.uid : '') || '';
+      if (uid && localStorage.getItem(`cloudsend_cache_files_${uid}`)) {
+        return false;
+      }
+    } catch {}
+    return true;
+  });
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -187,6 +208,11 @@ const CloudDriveViewComponent: React.FC = () => {
         // Sort descending by creation date
         loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setFiles(loaded);
+        try {
+          if (currentUser?.uid) {
+            localStorage.setItem(`cloudsend_cache_files_${currentUser.uid}`, JSON.stringify(loaded.slice(0, 100)));
+          }
+        } catch {}
         setLoading(false);
       },
       (err) => {
@@ -252,7 +278,7 @@ const CloudDriveViewComponent: React.FC = () => {
     }
   };
 
-  // Upload file to personal Cloud
+  // Upload file to personal Cloud with 3-worker parallel pipeline
   const handleUploadFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0 || !currentUser) return;
 
@@ -261,102 +287,64 @@ const CloudDriveViewComponent: React.FC = () => {
     setStatusMessage(null);
 
     try {
-      const totalFiles = fileList.length;
-      for (let i = 0; i < totalFiles; i++) {
-        const file = fileList[i];
-        
+      const filesToUpload = Array.from(fileList);
+      const totalFiles = filesToUpload.length;
+      let completedCount = 0;
+      let totalFailed = 0;
+
+      const uploadOne = async (file: File) => {
         // Quota check
         if (totalSizeBytes + file.size > MAX_QUOTA_BYTES) {
-          setStatusMessage({
-            type: 'error',
-            text: `Kho lưu trữ không đủ dung lượng để chứa "${file.name}" (Giới hạn: 100 GB).`
-          });
-          break;
+          totalFailed++;
+          return;
         }
 
-        // Generate client thumbnail for images and videos if possible
+        // Generate client thumbnail in parallel without blocking
         let clientThumb: string | undefined = undefined;
         if (isImageFile(file)) {
-          try {
-            const t = await generateImageThumbnail(file, 480, 0.8);
-            if (t) clientThumb = t;
-          } catch {
-            // ignore thumbnail failure
-          }
+          generateImageThumbnail(file, 480, 0.8).then(t => { if (t) clientThumb = t; }).catch(() => {});
         } else if (isVideoFile(file)) {
-          try {
-            const t = await generateVideoThumbnail(file);
-            if (t) clientThumb = t;
-          } catch {
-            // ignore video thumbnail failure
-          }
+          generateVideoThumbnail(file).then(t => { if (t) clientThumb = t; }).catch(() => {});
         }
 
         let fileUrl = '';
         let fileViewUrl = '';
-        let fileThumbnail = clientThumb || null;
+        let fileThumbnail: string | null = clientThumb || null;
 
-        let tgFileId: string | undefined = undefined;
-        let tgBotToken: string | undefined = undefined;
-
-        // 1. Check if Telegram Cloud Storage is available (files <= 20MB)
-        if (file.size <= 20 * 1024 * 1024) {
-          try {
-            const tgRes = await uploadToTelegram(file);
-            if (tgRes.downloadUrl) {
-              fileUrl = tgRes.downloadUrl;
-              fileViewUrl = tgRes.viewUrl || tgRes.downloadUrl;
-              tgFileId = tgRes.fileId;
-              tgBotToken = tgRes.botToken;
-            }
-          } catch (tgErr: any) {
-            console.warn(`Telegram upload notice for "${file.name}", using high-speed CLSend storage:`, tgErr?.message || tgErr);
+        try {
+          const uploadedFile = await uploadFileToServer(file, (pct) => {
+            const overall = Math.min(99, Math.round(((completedCount + (pct / 100)) / totalFiles) * 100));
+            setUploadProgress(overall);
+          });
+          fileUrl = uploadedFile.url;
+          fileViewUrl = uploadedFile.viewUrl || uploadedFile.url;
+          if (uploadedFile.thumbnail) {
+            fileThumbnail = uploadedFile.thumbnail;
+          }
+        } catch (uploadErr: any) {
+          console.warn(`Server upload fallback notice for "${file.name}":`, uploadErr);
+          if (isImageFile(file) || file.size <= 400 * 1024) {
+            const fallback = await createClientFallbackFileInfo(file);
+            fileUrl = fallback.url || '';
+            fileViewUrl = fallback.viewUrl || '';
+            fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
           }
         }
 
-        // 2. Standard server/fallback upload if not uploaded to Telegram
-        if (!fileUrl) {
-          try {
-            const uploadedFile = await uploadFileToServer(file, (pct) => {
-              const fileShare = 100 / totalFiles;
-              const overall = Math.min(99, Math.round(i * fileShare + (pct / 100) * fileShare));
-              setUploadProgress(overall);
-            });
-            fileUrl = uploadedFile.url;
-            fileViewUrl = uploadedFile.viewUrl || uploadedFile.url;
-            if (uploadedFile.thumbnail) {
-              fileThumbnail = uploadedFile.thumbnail;
-            }
-          } catch (uploadErr: any) {
-            console.warn(`Server upload notice for "${file.name}":`, uploadErr);
-            // Only try fallback client info for small files or images
-            if (isImageFile(file) || file.size <= 400 * 1024) {
-              const fallback = await createClientFallbackFileInfo(file);
-              fileUrl = fallback.url || '';
-              fileViewUrl = fallback.viewUrl || '';
-              fileThumbnail = fallback.thumbnail || (isImageFile(file) ? fallback.url : null);
-            }
-          }
-        }
-
-        // Critical safety check: Do NOT save broken entries with empty URLs to Firestore
         if (!fileUrl || !fileUrl.trim()) {
-          console.warn(`Không thể lưu trữ tệp "${file.name}" do máy chủ lưu trữ chưa hoàn tất ghép tệp.`);
-          showBottomToast(`Không thể tải "${file.name}" lên máy chủ lưu trữ. Vui lòng thử lại.`, true);
-          continue;
+          console.warn(`Không thể lưu trữ tệp "${file.name}" do liên kết tải về rỗng.`);
+          totalFailed++;
+          return;
         }
 
         const category = getFileCategory(file.type, file.name);
-
-        // Safety guard: Ensure properties never exceed Firestore limits (1,048,487 bytes)
         const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
         const safeViewUrl = (fileViewUrl && fileViewUrl.length < 700000) ? fileViewUrl : safeUrl;
-        const safeThumbnail = (fileThumbnail && fileThumbnail.length < 700000) ? fileThumbnail : null;
+        const safeThumbnail: string | null = (fileThumbnail && typeof fileThumbnail === 'string' && fileThumbnail.length < 700000) ? fileThumbnail : null;
 
         if (!safeUrl || !safeUrl.trim()) {
-          console.warn(`Không thể lưu trữ tệp "${file.name}" do liên kết tải về vượt quá giới hạn.`);
-          showBottomToast(`Không thể lưu tệp "${file.name}" lên Cloud do dữ liệu bị gián đoạn. Vui lòng thử lại.`, true);
-          continue;
+          totalFailed++;
+          return;
         }
 
         // Save metadata into Firestore
@@ -377,21 +365,52 @@ const CloudDriveViewComponent: React.FC = () => {
           createdAt: new Date().toISOString()
         };
 
-        if (tgFileId) docData.telegramFileId = tgFileId;
-        if (tgBotToken) docData.telegramBotToken = tgBotToken;
-
         await setDoc(doc(db, 'cloud_files', docId), docData);
+
+        // Store video in IndexedDB for immediate offline viewing
+        if (category === 'video' || file.type.startsWith('video/')) {
+          saveVideoToIndexedDB({
+            id: docId,
+            title: file.name,
+            blob: file,
+            size: formatFileSize(file.size)
+          }).catch(() => {});
+          storeFileBlobLocally(docId, file).catch(() => {});
+          storeFileBlobLocally(file.name, file).catch(() => {});
+        }
 
         // Cache file in local P2P Community Swarm for instant peer acceleration
         cacheFileInCommunitySwarm(docId, file, file.name).catch(() => {});
 
-        setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
-      }
+        completedCount++;
+        setUploadProgress(Math.min(99, Math.round((completedCount / totalFiles) * 100)));
+      };
 
-      setStatusMessage({
-        type: 'success',
-        text: `Đã lưu ${fileList.length} tệp thành công vào Kho Cloud!`
+      // Parallel pool: up to 3 files uploaded concurrently
+      const CONCURRENCY = Math.min(3, filesToUpload.length);
+      const queue = [...filesToUpload];
+      const workers = Array.from({ length: CONCURRENCY }, async () => {
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (item) {
+            await uploadOne(item);
+          }
+        }
       });
+      await Promise.all(workers);
+
+      setUploadProgress(100);
+      if (totalFailed === 0) {
+        setStatusMessage({
+          type: 'success',
+          text: `Đã lưu thành công ${completedCount} tệp vào Kho Cloud siêu tốc!`
+        });
+      } else {
+        setStatusMessage({
+          type: 'info',
+          text: `Đã lưu ${completedCount}/${totalFiles} tệp vào Kho Cloud.`
+        });
+      }
     } catch (err: any) {
       console.error('Upload to Cloud error:', err);
       setStatusMessage({
@@ -565,6 +584,41 @@ const CloudDriveViewComponent: React.FC = () => {
     } catch (err) {
       console.error('Lỗi khi dọn tệp lỗi:', err);
     }
+  };
+
+  // Xử lý khi nhấn vào thẻ tệp trên Cloud Drive:
+  // Nếu là Video hoặc Hình ảnh, chuyển sang trang riêng biệt (0% Lag) theo đúng yêu cầu
+  const handleFileCardClick = (file: CloudDriveFile) => {
+    const isVideo = file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i);
+    const isImage = file.category === 'image' || (file.type && file.type.startsWith('image/')) || file.name.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i);
+
+    if (isVideo || isImage) {
+      try {
+        sessionStorage.setItem('clsend_player_video', JSON.stringify({
+          id: file.id,
+          name: file.name,
+          title: file.name,
+          src: file.viewUrl || file.url,
+          thumbnail: file.thumbnail || null,
+          size: file.size,
+          type: isVideo ? 'video' : 'image'
+        }));
+      } catch (e) {
+        console.warn(e);
+      }
+      const q = new URLSearchParams();
+      q.set('page', 'player');
+      q.set('id', file.id);
+      q.set('name', file.name);
+      q.set('src', file.viewUrl || file.url);
+      if (file.size) q.set('size', String(file.size));
+      q.set('type', isVideo ? 'video' : 'image');
+      window.history.pushState(null, '', `/?${q.toString()}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return;
+    }
+
+    setPreviewFile(file);
   };
 
   // Trigger single file deletion
@@ -746,7 +800,7 @@ const CloudDriveViewComponent: React.FC = () => {
               <HardDrive className="w-4 h-4 text-emerald-400" />
               <span>{t('drive.used')}</span>
               <span className="text-white font-semibold">{formatFileSize(totalSizeBytes)}</span>
-              <span>/ 100 GB</span>
+              <span>/ 5 GB</span>
             </div>
             <div className="flex items-center gap-2.5">
               <span className="font-mono text-emerald-400 font-bold">{quotaUsedPercent}%</span>
@@ -873,17 +927,6 @@ const CloudDriveViewComponent: React.FC = () => {
 
         {/* Right tools: Delete All & Search Input & Video Player Frame */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Nút mở Khung Xem Video Trực Tiếp (Offline / IndexedDB) */}
-          <button
-            type="button"
-            onClick={() => setIsPersistentVideoModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm whitespace-nowrap cursor-pointer shrink-0"
-            title="Mở khung xem video trực tiếp từ máy tính hoặc phát lại video đã lưu (F5 không mất)"
-          >
-            <Film className="w-3.5 h-3.5 text-indigo-400" />
-            <span>Khung xem Video (F5 không mất)</span>
-          </button>
-
           {files.length > 0 && (
             <div className="flex items-center gap-1.5 shrink-0">
               {selectedCategory !== 'all' && filteredFiles.length > 0 && (
@@ -989,7 +1032,7 @@ const CloudDriveViewComponent: React.FC = () => {
           {filteredFiles.map((file) => (
             <div
               key={file.id}
-              onClick={() => setPreviewFile(file)}
+              onClick={() => handleFileCardClick(file)}
               className="group bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 hover:bg-slate-850/80 rounded-2xl p-4 transition-all shadow-md hover:shadow-xl cursor-pointer flex flex-col justify-between"
             >
               {/* Card Header & Preview Thumbnail */}
@@ -1003,14 +1046,25 @@ const CloudDriveViewComponent: React.FC = () => {
                       loading="lazy"
                     />
                   ) : file.category === 'video' ? (
-                    <div className="flex flex-col items-center gap-2 text-slate-300">
-                      <div className="w-11 h-11 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-slate-950 transition-all shadow-lg">
-                        <Play className="w-5 h-5 fill-current ml-0.5" />
+                    file.thumbnail ? (
+                      <div className="relative w-full h-full flex items-center justify-center">
+                        <img
+                          src={file.thumbnail}
+                          alt={file.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full bg-emerald-500/90 text-slate-950 flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                            <Play className="w-5 h-5 fill-current ml-0.5" />
+                          </div>
+                        </div>
                       </div>
-                      <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1 group-hover:underline">
-                        Mở xem trên Web <ExternalLink className="w-3 h-3" />
-                      </span>
-                    </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                        <FileDocIcon fileName={file.name} mimeType={file.type || 'video/mp4'} size="md" />
+                      </div>
+                    )
                   ) : file.category === 'audio' ? (
                     <div className="flex flex-col items-center gap-1.5 text-slate-400">
                       <FileDocIcon fileName={file.name} mimeType={file.type} size="md" />

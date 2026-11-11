@@ -111,7 +111,7 @@ interface CloudLimitsCardProps {
  */
 export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
   usedBytes = 0,
-  maxBytes = 1024 * 1024 * 1024, // 1 GB
+  maxBytes = 5 * 1024 * 1024 * 1024, // 5 GB
   className = '',
 }) => {
   const percent = Math.min(100, Math.round((usedBytes / maxBytes) * 100));
@@ -156,7 +156,7 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
             <span>Dung lượng đã dùng:</span>
             <strong className="text-white font-bold">{formatSize(usedBytes)}</strong>
           </span>
-          <span className="text-slate-400">Hạn mức: 1 GB</span>
+          <span className="text-slate-400">Hạn mức: 5 GB</span>
         </div>
         <div className="w-full h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
           <div

@@ -335,7 +335,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                       className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
                     >
                       <Scale className="w-4 h-4 text-teal-400" />
-                      <span>Điều khoản & Quy định</span>
+                      <span>{t('nav.terms_rules')}</span>
                     </button>
                   )}
 

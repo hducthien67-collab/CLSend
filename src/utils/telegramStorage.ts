@@ -738,15 +738,103 @@ export async function uploadToTelegram(
   file: File, 
   customConfig?: TelegramStorageConfig
 ): Promise<TelegramUploadResult> {
-  // Telegram Bot API supports up to 50MB per file upload. For larger files, use P2P WebRTC direct transfer (unlimited size).
-  if (file.size > 50 * 1024 * 1024) {
-    throw new Error('Tệp vượt quá 50MB (giới hạn của Telegram Bot API). Vui lòng sử dụng truyền trực tiếp P2P / Local (không giới hạn dung lượng và tốc độ tối đa).');
-  }
-
   const isAud = isAudioFile(file.name, file.type);
   const isVid = isVideoFile(file.name, file.type);
   const isDoc = isDocumentFile(file.name, file.type);
   const isImg = isImageFile(file.name, file.type);
+
+  // If file size > 40MB, automatically chunk into 40MB parts for Telegram channel upload
+  const CHUNK_SIZE = 40 * 1024 * 1024;
+  if (file.size > CHUNK_SIZE) {
+    const allBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
+    const mainConfig = getTelegramConfig();
+    const targetChatId = mainConfig.chatId || '@ClsendStorage';
+    const bot = allBots[0] || MASTER_TELEGRAM_CONFIG;
+    const botToken = customConfig?.botToken || bot.botToken;
+    const chatId = customConfig?.chatId || bot.chatId || targetChatId;
+
+    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
+    const partFileIds: string[] = [];
+
+    for (let partIndex = 0; partIndex < totalParts; partIndex++) {
+      const start = partIndex * CHUNK_SIZE;
+      const end = Math.min(file.size, start + CHUNK_SIZE);
+      const chunkBlob = file.slice(start, end);
+      const chunkFile = new File([chunkBlob], `${file.name}.part${partIndex + 1}_of_${totalParts}`, { type: file.type });
+
+      const chunkForm = new FormData();
+      chunkForm.append('chat_id', chatId.trim());
+      chunkForm.append('document', chunkFile);
+      chunkForm.append('caption', `📦 CloudSend Chunk [${partIndex + 1}/${totalParts}]: ${file.name} (${(chunkFile.size / (1024 * 1024)).toFixed(2)} MB)`);
+
+      const res = await fetch(`https://api.telegram.org/bot${botToken.trim()}/sendDocument`, {
+        method: 'POST',
+        body: chunkForm
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.description || `Lỗi khi tải phần ${partIndex + 1}/${totalParts} lên Telegram.`);
+      }
+      const docObj = data.result?.document || data.result?.audio || data.result?.video;
+      if (!docObj?.file_id) {
+        throw new Error(`Không nhận được file_id cho phần ${partIndex + 1}/${totalParts}.`);
+      }
+      partFileIds.push(docObj.file_id);
+    }
+
+    const manifest = {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      totalParts,
+      parts: partFileIds
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const manifestFile = new File([manifestBlob], `${file.name}.clsend_manifest.json`, { type: 'application/json' });
+
+    const manifestForm = new FormData();
+    manifestForm.append('chat_id', chatId.trim());
+    manifestForm.append('document', manifestFile);
+    manifestForm.append('caption', `📋 CloudSend Manifest (Large File): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB, ${totalParts} parts)`);
+
+    const mRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/sendDocument`, {
+      method: 'POST',
+      body: manifestForm
+    });
+    const mData = await mRes.json();
+    if (!mData.ok) {
+      throw new Error(mData.description || 'Lỗi khi tải tệp cấu trúc manifest lên Telegram.');
+    }
+    const manifestDoc = mData.result?.document;
+    const fileId = manifestDoc?.file_id;
+    if (!fileId) {
+      throw new Error('Không nhận được file_id cho tệp cấu trúc manifest.');
+    }
+
+    const getFileRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/getFile?file_id=${fileId}`);
+    const getFileData = await getFileRes.json();
+    let rawTelegramUrl = '';
+    if (getFileData.ok && getFileData.result?.file_path) {
+      rawTelegramUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${getFileData.result.file_path}`;
+    }
+
+    const downloadProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}`;
+    const viewProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}&inline=true`;
+
+    return {
+      fileId,
+      botToken: botToken.trim(),
+      downloadUrl: downloadProxyUrl,
+      viewUrl: viewProxyUrl,
+      rawTelegramUrl,
+      fileSize: file.size,
+      fileName: file.name,
+      isAudio: isAud,
+      isVideo: isVid,
+      isImage: isImg,
+      mimeType: file.type
+    };
+  }
 
   // Determine list of candidate configs to attempt
   const candidateConfigs: TelegramStorageConfig[] = [];

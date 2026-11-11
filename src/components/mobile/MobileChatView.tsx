@@ -52,8 +52,11 @@ import {
   Clipboard,
   AlertTriangle,
   Copy,
-  Video
+  Video,
+  Cloud
 } from 'lucide-react';
+import { CloudDrivePickerModal } from '../CloudDrivePickerModal';
+import { CloudDriveFile } from '../../types';
 import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
@@ -137,6 +140,7 @@ export const MobileChatView: React.FC = () => {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
+  const [isCloudPickerOpen, setIsCloudPickerOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -560,6 +564,41 @@ export const MobileChatView: React.FC = () => {
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
+  };
+
+  // Handle files chosen from Cloud Drive
+  const handleCloudFilesSelected = async (chosen: CloudDriveFile[]) => {
+    setIsCloudPickerOpen(false);
+    if (!chosen.length || !currentUser) return;
+
+    for (const cf of chosen) {
+      const isImg = isImageFile(cf);
+      const isDev = isDevUser(currentUser.email);
+
+      const payload = cleanFirestoreObject({
+        roomId: activeRoomId,
+        senderId: currentUser.uid,
+        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Người dùng',
+        senderEmail: currentUser.email || '',
+        senderDevice: settings?.deviceName || 'Điện thoại',
+        senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
+        senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
+        text: isImg ? (isEn ? 'Shared an image from Cloud Drive' : 'Đã chia sẻ một hình ảnh từ Kho Cloud') : (isEn ? `Shared file from Cloud: ${cf.name}` : `Đã chia sẻ tệp từ Kho Cloud: ${cf.name}`),
+        fileName: cf.name,
+        fileSize: cf.size,
+        fileType: cf.type || 'application/octet-stream',
+        fileUrl: cf.viewUrl || cf.url,
+        fileData: cf.thumbnail || '',
+        isDevMessage: isDev,
+        createdAt: new Date().toISOString(),
+        serverTimestamp: serverTimestamp()
+      });
+
+      await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), payload);
+    }
+
+    if (settings?.soundEnabled) playSendSound();
+    scrollToBottom(true);
   };
 
   // Clipboard Paste Support on Mobile (Images and Text)
@@ -1547,9 +1586,19 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0"
-          title="Chọn tệp đính kèm"
+          title={isEn ? "Attach file from device" : "Chọn tệp đính kèm từ thiết bị"}
         >
           <Paperclip className="w-3.5 h-3.5 text-sky-400" />
+        </button>
+
+        {/* Cloud Drive Button */}
+        <button
+          type="button"
+          onClick={() => setIsCloudPickerOpen(true)}
+          className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0 cursor-pointer"
+          title={isEn ? "Select files from Cloud Drive" : "Chọn tệp từ Kho Cloud"}
+        >
+          <Cloud className="w-3.5 h-3.5 text-indigo-400" />
         </button>
 
         {/* Clipboard Image Paste Button */}
@@ -1557,7 +1606,7 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={handlePasteFromClipboard}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0"
-          title="Dán ảnh hoặc văn bản từ bộ nhớ tạm (Clipboard)"
+          title={isEn ? "Paste image or text from clipboard" : "Dán ảnh hoặc văn bản từ bộ nhớ tạm (Clipboard)"}
         >
           <Clipboard className="w-3.5 h-3.5 text-amber-400" />
         </button>
@@ -1645,6 +1694,13 @@ export const MobileChatView: React.FC = () => {
         roomName={activeRoom.name}
         totalMessagesCount={messages.length}
         isAutoWeeklyEnabled={Boolean((activeRoom as any)?.autoWeeklyReset)}
+      />
+
+      {/* Cloud Drive Picker Modal */}
+      <CloudDrivePickerModal
+        isOpen={isCloudPickerOpen}
+        onClose={() => setIsCloudPickerOpen(false)}
+        onSelectFiles={handleCloudFilesSelected}
       />
     </div>
   );

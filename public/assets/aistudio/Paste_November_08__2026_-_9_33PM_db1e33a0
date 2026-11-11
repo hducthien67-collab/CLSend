@@ -1,0 +1,849 @@
+import React, { useState, useRef, useEffect } from 'react';
+import {
+  Play, Pause, Volume2, VolumeX, Maximize, RotateCcw, RotateCw,
+  FolderOpen, Info, Link2, CheckCircle2, UploadCloud, Save, Trash2, X,
+  AlertCircle, Sparkles, Sliders, ShieldCheck, FileVideo
+} from 'lucide-react';
+
+/* 1. TYPES NỘI BỘ (Không cần file types riêng) */
+export interface VideoItem {
+  id: string;
+  title: string;
+  src: string;
+  type?: string;
+  size?: string;
+  resolution?: string;
+  isLocal?: boolean;
+  blob?: Blob;
+}
+
+export interface AllInOneVideoPlayerProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+  isEmbedded?: boolean;
+}
+
+/* 2. HỆ THỐNG LƯU TRỮ INDEXEDDB NỘI BỘ (F5 Không mất, không cần thư viện ngoài) */
+const DB_NAME = 'AllInOneVideoDB';
+const STORE_NAME = 'saved_videos';
+
+function openVideoDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB không được hỗ trợ'));
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function saveVideoToIndexedDB(item: { id: string; title: string; blob: Blob; size: string }): Promise<void> {
+  const db = await openVideoDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({ ...item, savedAt: Date.now() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function getAllSavedVideosFromDB(): Promise<Array<{ id: string; title: string; blob: Blob; size: string }>> {
+  const db = await openVideoDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deleteVideoFromIndexedDB(id: string): Promise<void> {
+  const db = await openVideoDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/* 3. VIDEO MẪU SẴN (CORS 100% không bị chặn) */
+const DEFAULT_SAMPLES: VideoItem[] = [
+  {
+    id: 'sample-1',
+    title: 'Phim Hoạt Họa W3C (Big Buck Bunny)',
+    src: 'https://www.w3schools.com/html/mov_bbb.mp4',
+    type: 'video/mp4',
+    size: '0.6 MB',
+    resolution: '320 × 240',
+    isLocal: false,
+  },
+  {
+    id: 'sample-2',
+    title: 'Đóa Hoa Nở (Mozilla MDN CC0)',
+    src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
+    type: 'video/mp4',
+    size: '2.5 MB',
+    resolution: '640 × 360',
+    isLocal: false,
+  },
+  {
+    id: 'sample-3',
+    title: 'Đại Dương Xanh (Video.js CDN 100% Mượt)',
+    src: 'https://vjs.zencdn.net/v/oceans.mp4',
+    type: 'video/mp4',
+    size: '46 MB',
+    resolution: '1280 × 720 (HD)',
+    isLocal: false,
+  },
+];
+
+/* 4. COMPONENT VIDEO CHÍNH (All-In-One Single File Component) */
+export default function AllInOneVideoPlayer({
+  isOpen = true,
+  onClose,
+  isEmbedded = false,
+}: AllInOneVideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [playlist, setPlaylist] = useState<VideoItem[]>(DEFAULT_SAMPLES);
+  const [currentVideo, setCurrentVideo] = useState<VideoItem>(DEFAULT_SAMPLES[0]);
+  const [pendingSaveFile, setPendingSaveFile] = useState<File | null>(null);
+  const [savedDbIds, setSavedDbIds] = useState<Set<string>>(new Set());
+
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [duration, setDuration] = useState<number>(0);
+  const [volume, setVolume] = useState<number>(0.9);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [playbackRate, setPlaybackRate] = useState<number>(1);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const [isBuffering, setIsBuffering] = useState<boolean>(false);
+  const [hoverSeekTime, setHoverSeekTime] = useState<number | null>(null);
+  const [hoverSeekPos, setHoverSeekPos] = useState<number>(0);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  // Tab dưới thanh công cụ: 'files' | 'details' | 'url' | 'tips' | null (đóng)
+  const [activeBottomTab, setActiveBottomTab] = useState<'files' | 'details' | 'url' | 'tips' | null>(null);
+  const [customUrlInput, setCustomUrlInput] = useState<string>('');
+  const [notification, setNotification] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  useEffect(() => {
+    getAllSavedVideosFromDB().then((savedItems) => {
+      if (savedItems.length > 0) {
+        const ids = new Set<string>();
+        const loadedVideos: VideoItem[] = savedItems.map((item) => {
+          ids.add(item.id);
+          return {
+            id: item.id,
+            title: item.title,
+            src: URL.createObjectURL(item.blob),
+            type: 'video/mp4',
+            size: item.size,
+            isLocal: true,
+            blob: item.blob,
+          };
+        });
+        setSavedDbIds(ids);
+        setPlaylist([...loadedVideos, ...DEFAULT_SAMPLES]);
+      }
+    }).catch(console.warn);
+  }, []);
+
+  const handleMouseMove = () => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    if (isPlaying) {
+      controlsTimeoutRef.current = setTimeout(() => setShowControls(false), 3500);
+    }
+  };
+
+  // Tải lại video an toàn khi đổi nguồn
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video && currentVideo.src) {
+      video.pause();
+      setIsPlaying(false);
+      setCurrentTime(0);
+      setPlaybackError(null);
+      setIsBuffering(true);
+      try {
+        video.load();
+      } catch (e) {
+        console.warn('Lỗi load video:', e);
+      }
+    }
+  }, [currentVideo.src]);
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (video.paused || video.ended) {
+      if (!currentVideo.src) {
+        setPlaybackError('Chưa có nguồn video. Vui lòng chọn tệp từ máy tính.');
+        return;
+      }
+      setPlaybackError(null);
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            setPlaybackError(null);
+          })
+          .catch((err: any) => {
+            console.warn('Lỗi phát:', err);
+            if (err.name === 'NotAllowedError') {
+              setPlaybackError('Trình duyệt chặn tự động phát. Hãy bấm nút Play ở giữa để xem.');
+            } else if (err.name === 'NotSupportedError' || err.message?.toLowerCase().includes('no supported sources')) {
+              setPlaybackError('Nguồn video này đang được chuẩn bị hoặc bị chặn mạng. Hãy thử chọn tệp MP4 trực tiếp từ máy của bạn.');
+            } else if (err.name !== 'AbortError') {
+              setPlaybackError('Không thể phát video: ' + (err.message || 'Lỗi không xác định'));
+            }
+            setIsPlaying(false);
+          });
+      }
+    } else {
+      video.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  // Nạp tệp từ máy tính bằng Blob URL (Không bao giờ lỗi mạng hay tốn server)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const objectUrl = URL.createObjectURL(file);
+      const sizeMB = (file.size / (1024 * 1024)).toFixed(1) + ' MB';
+      const newVideo: VideoItem = {
+        id: 'local-' + Date.now(),
+        title: file.name,
+        src: objectUrl,
+        type: file.type || 'video/mp4',
+        size: sizeMB,
+        isLocal: true,
+        blob: file,
+      };
+      setPendingSaveFile(file);
+      setPlaylist((prev) => [newVideo, ...prev.filter((v) => v.id !== newVideo.id)]);
+      setCurrentVideo(newVideo);
+      setPlaybackError(null);
+      setIsPlaying(false);
+      showToast(`Đã mở tệp "${file.name}" từ máy tính!`);
+    } catch (err: any) {
+      setPlaybackError('Lỗi khi nạp tệp: ' + err.message);
+    }
+  };
+
+  const handleSaveToDB = async () => {
+    if (!pendingSaveFile) return;
+    try {
+      const sizeMB = (pendingSaveFile.size / (1024 * 1024)).toFixed(1) + ' MB';
+      const id = 'saved-' + Date.now();
+      await saveVideoToIndexedDB({ id, title: pendingSaveFile.name, blob: pendingSaveFile, size: sizeMB });
+      setSavedDbIds((prev) => new Set(prev).add(id));
+      setPendingSaveFile(null);
+      showToast('Đã lưu video vĩnh viễn vào IndexedDB (F5 không mất)!');
+    } catch (err: any) {
+      showToast('Lỗi lưu: ' + err.message);
+    }
+  };
+
+  const handleDeleteFromDB = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await deleteVideoFromIndexedDB(id);
+      setSavedDbIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      setPlaylist((prev) => prev.filter((v) => v.id !== id));
+      if (currentVideo.id === id) setCurrentVideo(DEFAULT_SAMPLES[0]);
+      showToast('Đã xóa video khỏi bộ nhớ');
+    } catch (err: any) {
+      showToast('Không thể xóa: ' + err.message);
+    }
+  };
+
+  const handleLoadCustomUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customUrlInput.trim()) return;
+    const url = customUrlInput.trim();
+    const newVideo: VideoItem = {
+      id: 'url-' + Date.now(),
+      title: url.split('/').pop()?.split('?')[0] || 'Video URL',
+      src: url,
+      type: 'video/mp4',
+      isLocal: false,
+    };
+    setPlaylist((prev) => [newVideo, ...prev]);
+    setCurrentVideo(newVideo);
+    setPlaybackError(null);
+    setCustomUrlInput('');
+    setActiveBottomTab(null);
+    showToast('Đã nạp video từ đường dẫn mạng!');
+  };
+
+  const formatTime = (secs: number) => {
+    if (isNaN(secs)) return '00:00';
+    const mins = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${mins.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const toggleBottomTab = (tab: 'files' | 'details' | 'url' | 'tips') => {
+    setActiveBottomTab((prev) => (prev === tab ? null : tab));
+  };
+
+  const handleProgressBarMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current || !duration) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    setHoverSeekPos(ratio * 100);
+    setHoverSeekTime(ratio * duration);
+  };
+
+  const handleProgressBarMouseLeave = () => {
+    setHoverSeekTime(null);
+  };
+
+  const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!progressBarRef.current || !duration || !videoRef.current) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const targetTime = ratio * duration;
+    videoRef.current.currentTime = targetTime;
+    setCurrentTime(targetTime);
+  };
+
+  if (!isOpen) return null;
+
+  const playedPercent = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
+  const videoCardContent = (
+    <div
+      ref={containerRef}
+      onMouseMove={handleMouseMove}
+      className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col w-full max-w-5xl mx-auto transition-all select-none"
+    >
+      <input ref={fileInputRef} type="file" accept="video/*,.mp4,.webm,.mov,.ogg,.mkv" onChange={handleFileUpload} className="hidden" />
+
+      {notification && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-indigo-600/95 text-white text-xs font-semibold rounded-xl shadow-lg border border-indigo-400/40 backdrop-blur-md animate-in fade-in">
+          {notification}
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3 bg-slate-950/95 border-b border-slate-800 text-white">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-lg bg-indigo-600/30 text-indigo-400 flex items-center justify-center border border-indigo-500/30 shrink-0">
+            <FileVideo className="w-4 h-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold truncate max-w-xs sm:max-w-md">{currentVideo.title}</h2>
+              {currentVideo.isLocal ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                  Tệp trên máy
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
+                  Trực tuyến
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 truncate">
+              {currentVideo.resolution || 'Tự động thích ứng'} • {currentVideo.size || 'Stream'} • GPU Decode Không Giật Lag
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-500 transition-colors shadow-sm cursor-pointer"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>Mở tệp máy tính</span>
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer group"
+              title="Thoát xem video"
+            >
+              <span className="hidden sm:inline-block">Thoát</span>
+              <X className="w-4 h-4 transition-transform group-hover:rotate-90 duration-200" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Màn hình video tỉ lệ 16:9 ở chính giữa */}
+      <div className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden group select-none">
+        {playbackError && (
+          <div className="absolute inset-0 z-20 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mb-3 border border-rose-500/30">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-white mb-1">Không thể phát tệp video này</h3>
+            <p className="text-xs text-slate-300 max-w-md leading-relaxed mb-4">{playbackError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setCurrentVideo(DEFAULT_SAMPLES[0]);
+                setPlaybackError(null);
+              }}
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium cursor-pointer"
+            >
+              Xem video mẫu thử nghiệm
+            </button>
+          </div>
+        )}
+
+        {isBuffering && !playbackError && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-black/30">
+            <div className="w-12 h-12 border-3 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          </div>
+        )}
+
+        <video
+          key={currentVideo.src}
+          ref={videoRef}
+          src={currentVideo.src}
+          preload="metadata"
+          playsInline
+          onClick={togglePlay}
+          onTimeUpdate={() => videoRef.current && setCurrentTime(videoRef.current.currentTime)}
+          onLoadedMetadata={() => {
+            if (videoRef.current) {
+              setDuration(videoRef.current.duration);
+              setPlaybackError(null);
+              if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
+                const res = `${videoRef.current.videoWidth} × ${videoRef.current.videoHeight}`;
+                setCurrentVideo((prev) => ({ ...prev, resolution: res }));
+              }
+            }
+          }}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => {
+            setIsBuffering(false);
+            setIsPlaying(true);
+            setPlaybackError(null);
+          }}
+          onPause={() => setIsPlaying(false)}
+          onError={() => {
+            setPlaybackError('Trình duyệt không hỗ trợ định dạng này hoặc bị chặn CORS. Khuyên dùng tệp MP4 từ máy tính.');
+            setIsBuffering(false);
+          }}
+          className="w-full h-full object-contain cursor-pointer"
+        />
+
+        {!isPlaying && !playbackError && (
+          <button
+            type="button"
+            onClick={togglePlay}
+            className="absolute z-10 w-16 h-16 rounded-full bg-indigo-600/90 hover:bg-indigo-600 text-white flex items-center justify-center shadow-xl shadow-indigo-600/30 transition-all hover:scale-110 active:scale-95 cursor-pointer backdrop-blur-xs"
+          >
+            <Play className="w-8 h-8 translate-x-0.5 fill-current" />
+          </button>
+        )}
+
+        {/* 🎬 THANH TIẾN TRÌNH MINI Ở ĐÁY KHI CONTROLS TỰ ẨN (Luôn biết đã xem tới đâu) */}
+        {!showControls && isPlaying && (
+          <div className="absolute bottom-0 inset-x-0 h-1 bg-black/40 z-10 pointer-events-none">
+            <div
+              className="h-full bg-indigo-500 shadow-xs transition-all duration-100"
+              style={{ width: `${playedPercent}%` }}
+            />
+          </div>
+        )}
+
+        {/* Thanh điều khiển video */}
+        <div
+          className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-10 transition-opacity duration-300 flex flex-col gap-2 ${
+            showControls || !isPlaying ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+        >
+          {/* 🌟 THANH TIẾN TRÌNH TRỰC QUAN (Xem video tới đâu với chấm tròn tím & nhãn thời gian) */}
+          <div
+            ref={progressBarRef}
+            onClick={handleProgressBarClick}
+            onMouseMove={handleProgressBarMouseMove}
+            onMouseLeave={handleProgressBarMouseLeave}
+            className="relative group/bar py-2 flex items-center cursor-pointer select-none"
+          >
+            {/* Tooltip thời gian khi di chuột xem trước */}
+            {hoverSeekTime !== null && (
+              <div
+                className="absolute bottom-6 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900/95 border border-slate-700 text-[10px] font-mono text-white pointer-events-none shadow-xl z-30 transition-opacity whitespace-nowrap"
+                style={{ left: `${hoverSeekPos}%` }}
+              >
+                {formatTime(hoverSeekTime)}
+              </div>
+            )}
+
+            {/* Thanh ray (Track nền) */}
+            <div className="relative w-full h-1.5 group-hover/bar:h-2 bg-white/25 rounded-full overflow-hidden transition-all duration-150">
+              {/* Phần đã phát (Played Progress - màu tím/xanh nổi bật) */}
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-75 relative"
+                style={{ width: `${playedPercent}%` }}
+              />
+            </div>
+
+            {/* 🟣 CHẤM TRÒN ĐIỂM DỪNG (Scrubber Thumb / Knob) - Cho biết mình đã xem tới đâu đúng như ảnh mẫu */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-white shadow-md shadow-indigo-600/60 pointer-events-none group-hover/bar:scale-125 transition-transform"
+              style={{ left: `${playedPercent}%` }}
+            />
+
+            {/* Input range ẩn mượt mà để kéo thả tua mượt mà */}
+            <input
+              type="range"
+              min={0}
+              max={duration || 100}
+              value={currentTime}
+              step={0.1}
+              onChange={(e) => {
+                const target = parseFloat(e.target.value);
+                setCurrentTime(target);
+                if (videoRef.current) videoRef.current.currentTime = target;
+              }}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-white text-xs pt-1">
+            <div className="flex items-center gap-2">
+              <button onClick={togglePlay} className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer">
+                {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+              </button>
+              <button
+                onClick={() => {
+                  if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+                }}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 cursor-pointer"
+                title="Lùi 10s"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
+                }}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 cursor-pointer"
+                title="Tua 10s"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+              </button>
+
+              <div className="flex items-center gap-1.5 group/vol ml-1">
+                <button
+                  onClick={() => {
+                    if (videoRef.current) {
+                      videoRef.current.muted = !isMuted;
+                      setIsMuted(!isMuted);
+                    }
+                  }}
+                  className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
+                >
+                  {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setVolume(val);
+                    setIsMuted(val === 0);
+                    if (videoRef.current) videoRef.current.volume = val;
+                  }}
+                  className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+              </div>
+
+              <span className="font-mono text-[11px] text-slate-300 ml-2">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => {
+                  const rates = [1, 1.25, 1.5, 2];
+                  const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
+                  const nextRate = rates[nextIdx];
+                  setPlaybackRate(nextRate);
+                  if (videoRef.current) videoRef.current.playbackRate = nextRate;
+                }}
+                className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] font-semibold cursor-pointer"
+              >
+                {playbackRate}x
+              </button>
+              <button
+                onClick={() => {
+                  if (!document.fullscreenElement) {
+                    containerRef.current?.requestFullscreen?.();
+                  } else {
+                    document.exitFullscreen?.();
+                  }
+                }}
+                className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
+              >
+                <Maximize className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 🎛️ THANH CÔNG CỤ DƯỚI THU GỌN 44px (Compact Toolbar) */}
+      <div className="bg-slate-950/95 border-t border-slate-800/80 px-4 py-2.5 flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5">
+          <button
+            type="button"
+            onClick={() => toggleBottomTab('files')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeBottomTab === 'files' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>Tệp & Playlist ({playlist.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleBottomTab('details')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeBottomTab === 'details' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Info className="w-3.5 h-3.5" />
+            <span>Thông số</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleBottomTab('url')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeBottomTab === 'url' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Link2 className="w-3.5 h-3.5" />
+            <span>Nhập link (URL)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleBottomTab('tips')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeBottomTab === 'tips' ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Cơ chế chống lỗi</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {pendingSaveFile && (
+            <button
+              type="button"
+              onClick={handleSaveToDB}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-medium flex items-center gap-1.5 cursor-pointer animate-pulse"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Lưu IndexedDB</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            <UploadCloud className="w-3.5 h-3.5" />
+            <span>Chọn tệp từ máy</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Bảng tương ứng mở ra khi nhấn nút tab */}
+      {activeBottomTab && (
+        <div className="bg-slate-950 border-t border-slate-800/90 p-4 sm:p-5 animate-in slide-in-from-bottom-2 duration-150">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              {activeBottomTab === 'files' && <FolderOpen className="w-4 h-4 text-indigo-400" />}
+              {activeBottomTab === 'details' && <Info className="w-4 h-4 text-indigo-400" />}
+              {activeBottomTab === 'url' && <Link2 className="w-4 h-4 text-indigo-400" />}
+              {activeBottomTab === 'tips' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+              <span>
+                {activeBottomTab === 'files' && `Danh Sách Tệp Video (${playlist.length})`}
+                {activeBottomTab === 'details' && 'Thông Số Kỹ Thuật Tệp Đang Phát'}
+                {activeBottomTab === 'url' && 'Nạp Video Bằng Đường Dẫn Trực Tiếp'}
+                {activeBottomTab === 'tips' && 'Cơ Chế Chống Lỗi & Hướng Dẫn Lưu Trữ'}
+              </span>
+            </h3>
+
+            <button
+              type="button"
+              onClick={() => setActiveBottomTab(null)}
+              className="p-1 px-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-1 text-xs cursor-pointer"
+            >
+              <span>Đóng</span>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="max-h-[300px] overflow-y-auto pr-1 text-xs">
+            {activeBottomTab === 'files' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {playlist.map((video) => {
+                  const isSelected = currentVideo.id === video.id;
+                  const isSavedInDb = savedDbIds.has(video.id);
+                  return (
+                    <div
+                      key={video.id}
+                      onClick={() => {
+                        setCurrentVideo(video);
+                        setPlaybackError(null);
+                        setIsPlaying(false);
+                      }}
+                      className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                        isSelected
+                          ? 'bg-indigo-950/60 border-indigo-500 shadow-md ring-1 ring-indigo-500/50'
+                          : 'bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
+                          {video.type?.split('/')[1]?.toUpperCase() || 'VIDEO'}
+                        </span>
+                        {isSavedInDb && (
+                          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Đã lưu DB
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="font-semibold text-white text-xs truncate mb-1">{video.title}</h4>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/60">
+                        <span>{video.size || 'Stream'}</span>
+                        {isSavedInDb && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteFromDB(video.id, e)}
+                            className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"
+                            title="Xóa khỏi IndexedDB"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {activeBottomTab === 'details' && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <span className="text-slate-400 text-[11px] block mb-1">Độ phân giải thực:</span>
+                  <span className="text-white font-mono font-semibold">{currentVideo.resolution || 'Đang quét...'}</span>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <span className="text-slate-400 text-[11px] block mb-1">Tổng thời lượng:</span>
+                  <span className="text-white font-mono font-semibold">{formatTime(duration)}</span>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <span className="text-slate-400 text-[11px] block mb-1">Dung lượng:</span>
+                  <span className="text-white font-mono font-semibold">{currentVideo.size || 'Stream trực tiếp'}</span>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <span className="text-slate-400 text-[11px] block mb-1">Nguồn phát:</span>
+                  <span className="text-emerald-400 font-semibold">{currentVideo.isLocal ? 'Bộ nhớ máy tính' : 'Mạng trực tuyến'}</span>
+                </div>
+              </div>
+            )}
+
+            {activeBottomTab === 'url' && (
+              <form onSubmit={handleLoadCustomUrl} className="space-y-3">
+                <label className="block text-slate-300 font-semibold">Dán đường dẫn trực tiếp (.mp4, .webm):</label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={customUrlInput}
+                    onChange={(e) => setCustomUrlInput(e.target.value)}
+                    placeholder="https://domain.com/video.mp4"
+                    className="flex-1 px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white font-mono"
+                  />
+                  <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium cursor-pointer">
+                    Nạp & Phát
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {activeBottomTab === 'tips' && (
+              <div className="space-y-3 text-[11px] text-slate-300">
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <strong className="text-emerald-400 block mb-1">1. Đọc trực tiếp không cần server</strong>
+                  <p className="text-slate-400">
+                    Sử dụng <code className="text-indigo-300 font-mono">URL.createObjectURL(file)</code> để tạo đường dẫn ảo trỏ thẳng vào RAM/ổ cứng của máy bạn. Video đọc tại chỗ qua GPU nên chạy cực mượt, không tốn 1 byte mạng nào!
+                  </p>
+                </div>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800">
+                  <strong className="text-rose-400 block mb-1">2. Lưu vĩnh viễn với IndexedDB</strong>
+                  <p className="text-slate-400">
+                    Bằng cách lưu nguyên đối tượng nhị phân <code className="text-indigo-300 font-mono">Blob</code> vào IndexedDB tích hợp trong file này, video sẽ được lưu mãi mãi trên trình duyệt của bạn (F5 không mất)!
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (isEmbedded) return videoCardContent;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onClose) onClose();
+      }}
+    >
+      <div className="my-auto w-full max-w-5xl flex items-center justify-center">
+        {videoCardContent}
+      </div>
+    </div>
+  );
+}

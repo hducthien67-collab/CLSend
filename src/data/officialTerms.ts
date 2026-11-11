@@ -474,3 +474,454 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
     ]
   }
 ];
+
+// ==================== ENGLISH OFFICIAL TERMS OF SERVICE ====================
+export const OFFICIAL_TERMS_OF_SERVICE_EN: MainArticle[] = [
+  // ==================== ARTICLE 1 ====================
+  {
+    id: 'dieu-1',
+    articleNumber: 'Article 1',
+    title: 'Communication Language & Conduct in Chat Rooms',
+    category: 'speech',
+    categoryLabel: 'Communication & Speech',
+    summary: 'Applies to all public lounges, group P2P chat rooms, and direct messaging on the ClSend platform.',
+    subClauses: [
+      {
+        id: '1.1',
+        clauseNumber: '1.1',
+        title: 'Defamation, Personal Insults & Harassment',
+        description: 'Strictly prohibits all forms of vulgar language, humiliation, insults, or disparagement of the dignity, appearance, background, or family of other members.',
+        examples: [
+          'Aggressive cursing using vulgar slurs or offensive anatomical terms.',
+          'Defaming personal honor or concocting baseless rumors to damage reputations.',
+          'Using hate speech targeting communities, organizations, or demographic groups.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Medium',
+        penalty: 'First warning: automated masking with ***; Repeat offenses: chat sending privileges temporarily revoked for 6 to 24 hours.'
+      },
+      {
+        id: '1.2',
+        clauseNumber: '1.2',
+        title: 'Circumventing Moderation Filters & Disguised Profanity',
+        description: 'Strictly prohibits intentionally inserting periods, underscores, spaces, special symbols, numbers replacing letters, or leetspeak to bypass automated AI moderation.',
+        examples: [
+          'Deliberately spaced or dotted text: f.u.c.k, s e x, b.i.t.c.h.',
+          'Using numbers or alphanumeric substitutions: d1ck, 5ex, sh1t.',
+          'Inserting unicode emojis or zero-width symbols between banned words.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Medium',
+        penalty: 'Automated regex + AI detection filters the message immediately and records 1 violation point on the account.'
+      },
+      {
+        id: '1.3',
+        clauseNumber: '1.3',
+        title: 'Regional Discrimination, Religious Hatred & Incitement',
+        description: 'Strict adherence to Cybersecurity regulations: Strictly prohibits divisive speech, insults targeting regional cultures, religions, beliefs, ethnicities, or genders, and incitement to violence.',
+        examples: [
+          'Derogatory remarks targeting specific regional cultures, accents, or demographics.',
+          'Blasphemous insults directed at religious beliefs, faiths, or spiritual symbols.',
+          'Calling for harassment, ostracization, or violent acts against any group.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'Account suspension for 3 to 7 days; permanent ban for repeat offenses or severe incitement.'
+      },
+      {
+        id: '1.4',
+        clauseNumber: '1.4',
+        title: 'Sexual Harassment, Unwanted Solicitation & Mental Coercion',
+        description: 'Strictly prohibits crude sexual solicitations, coercing others into sharing private media, or persistently bothering others after they have declined.',
+        examples: [
+          'Demanding intimate photos or private media from other users.',
+          'Vulgar or obscene sexual commentary about any member in the chat.',
+          'Threatening violence, doxxing, or sending continuous harassing messages.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'Immediate P2P disconnection between devices and prohibition from joining public chat rooms for 48 to 72 hours.'
+      },
+      {
+        id: '1.5',
+        clauseNumber: '1.5',
+        title: 'Message Spam, Gibberish Flooding & Room Congestion',
+        description: 'Strictly prohibits flooding chat rooms with high-frequency messages, thousands of meaningless characters (Zalgo text, crash fonts) intended to lag or crash clients.',
+        examples: [
+          'Automated bot scripts dispatching dozens of messages per second.',
+          'Sending deformed unicode characters causing client-side buffer overflows.',
+          'Relentless spamming of sales pitches, promotional links, or referral URLs.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Medium',
+        penalty: 'Rate limiting activated (30-second cooldown); temporary removal from the chat room for 1 hour.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 2 ====================
+  {
+    id: 'dieu-2',
+    articleNumber: 'Article 2',
+    title: 'P2P Data Transmission & File Sharing Regulations',
+    category: 'file',
+    categoryLabel: 'Transmission & Files',
+    summary: 'Defines safety standards across direct WebRTC P2P streams and Cloud Relay transit servers.',
+    subClauses: [
+      {
+        id: '2.1',
+        clauseNumber: '2.1',
+        title: 'Strict Prohibition of Adult Content, Pornography & Child Exploitation (CSAM)',
+        description: 'In accordance with International Conventions and Laws: STRICTLY PROHIBITS creating, transmitting, forwarding, or storing pornographic, sexually explicit material, or child sexual abuse material (CSAM).',
+        examples: [
+          'Circulating explicit images, nude videos, or adult media.',
+          'Sharing links to adult file repositories or commercial adult archives.',
+          'Any content depicting, suggesting, or relating to the exploitation of minors.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'IMMEDIATE PERMANENT BAN of device identifier; IP address blacklisted system-wide, and digital evidence preserved for legal authorities.'
+      },
+      {
+        id: '2.2',
+        clauseNumber: '2.2',
+        title: 'Extreme Violence, Gore, Horror & Promotion of Self-Harm',
+        description: 'Strictly prohibits sharing images of disfigured corpses, gory accidents without medical educational merit, cruel violence, suicide, self-harm, or terrorist propaganda.',
+        examples: [
+          'Footage of animal torture or brutal physical abuse of human beings.',
+          'Tutorials on suicide, weapon fabrication, explosives, or hazardous toxins.',
+          'Propaganda promoting violent extremist or terrorist organizations.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'Automated file blocking at transmission layer; account suspended for 7 days or permanently banned.'
+      },
+      {
+        id: '2.3',
+        clauseNumber: '2.3',
+        title: 'Spreading Viruses, Malware, Trojans, Ransomware & Zip Bombs',
+        description: 'Strictly prohibits transferring files containing spyware, keyloggers, ransomware, or malicious decompressed bombs (Zip Bombs) designed to harm recipients hardware or operating systems.',
+        examples: [
+          'Transmitting malicious executables (.exe, .scr, .bat, .vbs) disguised as office documents.',
+          'Sending 42.zip or petabyte-expansion archive bombs intended to crash recipient machines.',
+          'Embedding browser exploits into crafted HTML or SVG files.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'Permanent account ban; SHA-256 file hash submitted to network-wide destruction filter.'
+      },
+      {
+        id: '2.4',
+        clauseNumber: '2.4',
+        title: 'Commercial Copyright Infringement & Malicious Cracked Software',
+        description: 'Strictly prohibits sharing cracked software, fake keygens, or stolen copyrighted assets for illegal distribution over public channels.',
+        examples: [
+          'Sharing cracked software bundles laced with hidden crypto-miners.',
+          'Leaking internal corporate databases, trade secrets, or unauthorized proprietary files.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'File removal and DMCA copyright notice; account ban on third repeat violation.'
+      },
+      {
+        id: '2.5',
+        clauseNumber: '2.5',
+        title: 'Abusing P2P/Relay Channels for Denial-of-Service (DDoS) Attacks',
+        description: 'Strictly prohibits deliberately opening thousands of concurrent dummy data streams (DataChannel Flood) to exhaust Relay bandwidth and degrade community connectivity.',
+        examples: [
+          'Scripts opening rapid loops of synthetic WebRTC connections.',
+          'Flooding peers with maximum-size dummy packets to crash buffer memory.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'IP and device identifier blocked at cloud infrastructure level; permanent ban with no appeal.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 3 ====================
+  {
+    id: 'dieu-3',
+    articleNumber: 'Article 3',
+    title: 'Cloud Storage & ClSend Cloud Drive Policies',
+    category: 'cloud',
+    categoryLabel: 'Cloud Storage Drive',
+    summary: 'Defines storage quotas, data ownership, and security commitments on the ClSend Cloud Drive ecosystem.',
+    subClauses: [
+      {
+        id: '3.1',
+        clauseNumber: '3.1',
+        title: 'Legal Ownership & Legal Responsibility for Stored Data',
+        description: 'Users retain 100% copyright over files they upload. ClSend never reads, alters, or monetizes personal user data.',
+        examples: [
+          'Users bear sole legal liability before the law for the contents of files they store.',
+          'ClSend provides encrypted cloud storage infrastructure adhering to modern industry standards.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Standard',
+        penalty: 'Users assume full legal liability if their stored data violates applicable statutory laws.'
+      },
+      {
+        id: '3.2',
+        clauseNumber: '3.2',
+        title: 'Storage Limits, File Sizes & Resource Management',
+        description: 'Users must use cloud storage properly without attempting to exploit loopholes to exceed provisioned storage quotas or uploading millions of 0KB junk files.',
+        examples: [
+          'Refraining from spam scripts uploading junk records to exhaust cloud storage databases.',
+          'Complying with supported file extensions and single-file upload size limits.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Medium',
+        penalty: 'Automated cleanup of abnormal junk files and upload speed throttle if abuse is detected.'
+      },
+      {
+        id: '3.3',
+        clauseNumber: '3.3',
+        title: 'End-to-End Encryption & Key Management Responsibility',
+        description: 'Data is client-side encrypted before pushing to the cloud. Users must retain their own passwords and PINs; ClSend cannot recover data if secret keys are lost.',
+        examples: [
+          'Safeguarding account credentials and never sharing sync PIN codes with untrusted third parties.',
+          'Periodically backing up mission-critical data to local storage drives.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Advisory',
+        penalty: 'ClSend assumes no liability for data loss caused by unauthorized disclosure of passwords or encryption keys.'
+      },
+      {
+        id: '3.4',
+        clauseNumber: '3.4',
+        title: 'Takedown & Destruction Procedure for Dangerous Files',
+        description: 'If cloud-stored files contain critical malware or prohibited items as determined by law, ClSend reserves the right to quarantine and destroy them without prior notice.',
+        examples: [
+          'Files flagged with Red Alert severity by antivirus scanning networks.',
+          'Files subject to official seizure or takedown orders issued by cybersecurity authorities.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'Immediate destruction of offending files and revocation of Cloud Drive privileges for the account.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 4 ====================
+  {
+    id: 'dieu-4',
+    articleNumber: 'Article 4',
+    title: 'Privacy Protection, Personal Data & Anti-Doxxing',
+    category: 'privacy',
+    categoryLabel: 'Privacy Protection',
+    summary: 'Guarantees the inviolability of private life, personal secrets, and identity security for all platform participants.',
+    subClauses: [
+      {
+        id: '4.1',
+        clauseNumber: '4.1',
+        title: 'Strict Prohibition of Unauthorized Identity Disclosure (Doxxing)',
+        description: 'Strictly prohibits publishing or circulating personally identifiable information (PII) of others in public chats or sending files containing private records without written consent.',
+        examples: [
+          'Sharing national identity cards, passports, or driver licenses of other individuals.',
+          'Disclosing private phone numbers, physical residential addresses, or workplaces.',
+          'Exposing private banking credentials, financial balances, or transaction records.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'Immediate removal of infringing records; account suspended from 7 days to permanently depending on impact.'
+      },
+      {
+        id: '4.2',
+        clauseNumber: '4.2',
+        title: 'Non-Consensual Recording & Leaking Private Conversations',
+        description: 'Strictly prohibits screenshotting or recording private P2P messages or private transmissions to distribute externally for extortion or defamation.',
+        examples: [
+          'Capturing confidential chat logs to publicly ridicule participants on external social networks.',
+          'Using private conversation records for extortion, ransom demands, or blackmail.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'Chat room access revoked; incident logs released upon official legal request.'
+      },
+      {
+        id: '4.3',
+        clauseNumber: '4.3',
+        title: 'Cyber Espionage, Tracking Scripts & Auth Token Theft',
+        description: 'Strictly prohibits sending malicious scripts, phishing links designed to steal session tokens, or browser tracking probes.',
+        examples: [
+          'Spoofing account login portals to deceive users into submitting passwords.',
+          'Sending IP logger links designed to surreptitiously capture real IP addresses or coordinates.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'Permanent account ban; attacker domains and IP ranges entered into automated blocklists.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 5 ====================
+  {
+    id: 'dieu-5',
+    articleNumber: 'Article 5',
+    title: 'Account Management, Device Identity & 6-Digit PIN Sync',
+    category: 'account',
+    categoryLabel: 'Account & Identity',
+    summary: 'Defines user account protection obligations, fast 6-digit sync mechanisms, and user duties when using services.',
+    subClauses: [
+      {
+        id: '5.1',
+        clauseNumber: '5.1',
+        title: 'Duty to Safeguard Passwords, 6-Digit PIN & Login QR Codes',
+        description: 'Each account is bound to a device ID and credentials. Users must keep this confidential and never disclose 6-digit synchronization PINs to strangers.',
+        examples: [
+          'The login QR code and 6-digit synchronization PIN grant full access to account resources.',
+          'ClSend administrators will never solicit your sync PIN or credentials via chat.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Caution',
+        penalty: 'Users bear full responsibility if carelessly sharing PIN codes resulting in data loss.'
+      },
+      {
+        id: '5.2',
+        clauseNumber: '5.2',
+        title: 'Impersonating Administrators, Developers or System Accounts',
+        description: 'Strictly prohibits setting display names, avatars, or sending messages pretending to be ClSend Administrators, Developers, or System alerts.',
+        examples: [
+          'Using deceptive display names such as "ClSend Admin", "Official Moderator", or "Dev Support".',
+          'Posing as technical staff demanding password handovers or claiming penalty fines.',
+          'Falsifying developer verification badges to intimidate novice users.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Critical',
+        penalty: 'Immediate permanent ban; display name revoked and added to permanent blacklisted keywords.'
+      },
+      {
+        id: '5.3',
+        clauseNumber: '5.3',
+        title: 'Automated Bot Tools & Mass Dummy Account Creation',
+        description: 'Strictly prohibits automated bot tools, crawlers, or spammers to register mass dummy accounts to disrupt platform infrastructure.',
+        examples: [
+          'Running automated scripts generating hundreds of guest tokens per minute.',
+          'Using bot crawlers to indiscriminately scrape cloud files without authorization.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: High',
+        penalty: 'Firewall blocks entire IP ranges; instant purge of all generated dummy accounts.'
+      },
+      {
+        id: '5.4',
+        clauseNumber: '5.4',
+        title: 'Guest Mode Policies vs. Verified Accounts',
+        description: 'Guest Mode provides quick ephemeral access without persistent retention. Users are advised to link a Google or password-protected account.',
+        examples: [
+          'Guest sessions may expire or cycle out after 7 days of inactivity.',
+          'Verified accounts retain persistent Cloud Drive storage and full profile customizability.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Informational',
+        penalty: 'Guest session temporary data automatically expires and cleans up after lifecycle termination.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 6 ====================
+  {
+    id: 'dieu-6',
+    articleNumber: 'Article 6',
+    title: 'Sanctions Hierarchy, Enforcement Measures & Appeals',
+    category: 'sanctions',
+    categoryLabel: 'Sanctions & Penalties',
+    summary: 'Transparently outlines violation levels, technical intervention processes, and fair complaint and appeal procedures.',
+    subClauses: [
+      {
+        id: '6.1',
+        clauseNumber: '6.1',
+        title: 'Four Progressive Violation Levels Across the Platform',
+        description: 'All infractions are classified into 4 tiers: Tier 1 (Minor - vulgarity), Tier 2 (Moderate - evasion, spam), Tier 3 (High - harassment, discrimination, doxxing), Tier 4 (Critical - CSAM, malware, fraud).',
+        examples: [
+          'Tier 1: Automated warning, profanity masking with asterisks.',
+          'Tier 2: Messaging freeze, temporary P2P transmission suspension from 1 to 24 hours.',
+          'Tier 3: Account and cloud access restricted for 3 to 14 days.',
+          'Tier 4: Permanent device UID ban, IP exclusion, and legal evidence handover if criminal.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Policy',
+        penalty: 'Progressive discipline: repeating the same offense automatically elevates to higher penalty tiers.'
+      },
+      {
+        id: '6.2',
+        clauseNumber: '6.2',
+        title: 'Security Evidence Collection & Audit Logging',
+        description: 'Systems automatically store encrypted violation evidence (timestamp, infraction type, suspect file, SHA-256 hash) for fair verification.',
+        examples: [
+          'Audit logs strictly serve to verify violations and safeguard potential victims.',
+          'Security logs are never monetized or utilized for third-party commercial profiling.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Standard',
+        penalty: 'System audit logs serve as primary legal evidence to evaluate claims.'
+      },
+      {
+        id: '6.3',
+        clauseNumber: '6.3',
+        title: 'Fair Appeal Mechanism & Resolution Timeframe',
+        description: 'If a user believes their account was mistakenly restricted by automated AI systems, they have the right to file an official appeal.',
+        examples: [
+          'Submit appeals to the official support channel: support@clsend.app.',
+          'Include relevant identifiers: device UID, timestamp of restriction, and the flagged content.',
+          'The moderation committee reviews records manually and issues a response within 24 - 48 business hours.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: User Rights',
+        penalty: 'If verified as a false positive: immediate unban, status restored, and wrongful violation marks erased.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 7 ====================
+  {
+    id: 'dieu-7',
+    articleNumber: 'Article 7',
+    title: 'Disclaimer of Liability & Legal Enforcement',
+    category: 'legal',
+    categoryLabel: 'Legal & Enforcement',
+    summary: 'Delineates responsibilities between the platform and users for peer-to-peer (P2P) data transfers.',
+    subClauses: [
+      {
+        id: '7.1',
+        clauseNumber: '7.1',
+        title: 'Liability Limitations for Decentralized P2P Data Channels',
+        description: 'P2P data channels are direct device-to-device connections via WebRTC. Data does not transit through ClSend storage servers. Recipients are responsible for inspecting file safety.',
+        examples: [
+          'Always scan received executable files or archives for malware before opening.',
+          'ClSend assumes no liability for financial damages caused by voluntarily disclosing private credentials.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Legal Policy',
+        penalty: 'Users accept inherent risks when accepting files from unknown peers.'
+      },
+      {
+        id: '7.2',
+        clauseNumber: '7.2',
+        title: 'Right to Amend, Update Terms & Notification of Changes',
+        description: 'ClSend reserves the right to revise these terms to reflect technological advances and statutory changes. Material updates will be announced in-app.',
+        examples: [
+          'Notices of terms revisions will appear prominently across the application portal.',
+          'Continued usage of the service following revisions constitutes binding acceptance of the updated terms.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Validity',
+        penalty: 'Users who disagree with revised terms may discontinue service usage at any time.'
+      },
+      {
+        id: '7.3',
+        clauseNumber: '7.3',
+        title: 'User Compliance Commitment Upon Accessing ClSend',
+        description: 'By clicking "Accept", signing in, or using file sending, chat, or storage, users confirm they have read, understood, and agreed to adhere to these Terms of Service.',
+        examples: [
+          'Pledging to build a respectful, secure, and civil digital file-sharing and messaging community.',
+          'Alerting platform moderators promptly when detecting severe abuses or security threats.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Legal Agreement',
+        penalty: 'All infractions will be strictly handled in accordance with these committed terms.'
+      }
+    ]
+  }
+];

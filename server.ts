@@ -1072,11 +1072,46 @@ async function startServer() {
         `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
       );
 
+      const arrayBuffer = await upstreamRes.arrayBuffer();
+      let manifest: any = null;
+      try {
+        const text = Buffer.from(arrayBuffer).toString('utf-8');
+        manifest = JSON.parse(text);
+      } catch {}
+
+      if (manifest && manifest.totalParts && Array.isArray(manifest.parts)) {
+        res.setHeader('Content-Type', manifest.type || 'application/octet-stream');
+        res.setHeader('Content-Length', manifest.size);
+        const dispositionType = isInline ? 'inline' : 'attachment';
+        res.setHeader(
+          'Content-Disposition',
+          `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(manifest.name || originalName)}`
+        );
+
+        for (let i = 0; i < manifest.parts.length; i++) {
+          const partFileId = manifest.parts[i];
+          const partGetRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${partFileId}`);
+          const partGetData: any = await partGetRes.json();
+          if (partGetData.ok && partGetData.result?.file_path) {
+            const partUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${partGetData.result.file_path}`;
+            const partRes = await fetch(partUrl);
+            if (partRes.body) {
+              const readable = Readable.fromWeb(partRes.body as any);
+              await new Promise((resolve, reject) => {
+                readable.pipe(res, { end: false });
+                readable.on('end', resolve);
+                readable.on('error', reject);
+              });
+            }
+          }
+        }
+        return res.end();
+      }
+
       if (upstreamRes.body) {
         return Readable.fromWeb(upstreamRes.body as any).pipe(res);
       }
 
-      const arrayBuffer = await upstreamRes.arrayBuffer();
       return res.send(Buffer.from(arrayBuffer));
     } catch (err: any) {
       console.error('Telegram proxy download error:', err);
@@ -1175,9 +1210,13 @@ async function startServer() {
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
         const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        // Cực kỳ quan trọng: Giới hạn chunk stream tối đa 4MB khi client không chỉ định end (Range: bytes=0-)
+        // giúp Chrome/Safari nhận ngay 4MB đầu chỉ trong vài chục mili-giây, GPU bắt đầu phát ngay lập tức không bị giật lag hay xoay vòng!
+        const maxChunk = 4 * 1024 * 1024;
+        const rawEnd = parts[1] ? parseInt(parts[1], 10) : (start + maxChunk - 1);
+        const end = Math.min(rawEnd, fileSize - 1);
 
-        if (start >= fileSize || end >= fileSize) {
+        if (start >= fileSize || end >= fileSize || start > end) {
           res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
           return res.end();
         }
@@ -2284,6 +2323,16 @@ exit
       }
     }
     next(err);
+  });
+
+  // Google Search Console verification file route
+  app.get('/google*.html', (req, res) => {
+    const filename = path.basename(req.path);
+    const pubPath = path.join(process.cwd(), 'public', filename);
+    if (fs.existsSync(pubPath)) {
+      return res.sendFile(pubPath);
+    }
+    return res.send(`google-site-verification: ${filename}`);
   });
 
   // Vite middleware in development vs Static SPA in production

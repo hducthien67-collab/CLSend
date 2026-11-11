@@ -34,6 +34,7 @@ import {
   Camera, 
   FolderPlus,
   Play,
+  Film,
   ExternalLink
 } from 'lucide-react';
 import { uploadFileToServer, isImageFile, isVideoFile, generateImageThumbnail, generateVideoThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
@@ -45,8 +46,10 @@ import { MobileBottomSheet } from './MobileBottomSheet';
 import { useLanguage } from '../../context/LanguageContext';
 import { getVideoWebWatchUrl, openVideoInWebTab } from '../../utils/videoWatch';
 import { PersistentVideoPlayerModal } from '../PersistentVideoPlayerModal';
+import { saveVideoToIndexedDB } from '../AllInOneVideoPlayer';
+import { storeFileBlobLocally } from '../../utils/idbStorage';
 
-const MAX_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB
+const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 export const MobileCloudView: React.FC = () => {
   const { currentUser, settings } = useAuth();
@@ -160,6 +163,18 @@ export const MobileCloudView: React.FC = () => {
           isFavorite: false,
           createdAt: new Date().toISOString()
         });
+
+        // Tự động lưu video vào IndexedDB bền vững để mở xem ngay lập tức không cần tải lên lại
+        if (category === 'video' || file.type.startsWith('video/')) {
+          saveVideoToIndexedDB({
+            id: docId,
+            title: file.name,
+            blob: file,
+            size: formatFileSize(file.size)
+          }).catch(() => {});
+          storeFileBlobLocally(docId, file).catch(() => {});
+          storeFileBlobLocally(file.name, file).catch(() => {});
+        }
       }
 
       showToast(`Đã lưu ${fileList.length} tệp vào Kho Cloud!`);
@@ -191,6 +206,40 @@ export const MobileCloudView: React.FC = () => {
     } catch {
       showToast('Không thể xóa tệp');
     }
+  };
+
+  // Nhấn vào thẻ video hoặc hình ảnh: chuyển ngay sang Trang Riêng Biệt (0% Lag)
+  const handleMobileCardClick = (file: CloudDriveFile) => {
+    const isVideo = file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i);
+    const isImage = file.category === 'image' || (file.type && file.type.startsWith('image/')) || file.name.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i);
+
+    if (isVideo || isImage) {
+      try {
+        sessionStorage.setItem('clsend_player_video', JSON.stringify({
+          id: file.id,
+          name: file.name,
+          title: file.name,
+          src: file.viewUrl || file.url,
+          thumbnail: file.thumbnail || null,
+          size: file.size,
+          type: isVideo ? 'video' : 'image'
+        }));
+      } catch (e) {
+        console.warn(e);
+      }
+      const q = new URLSearchParams();
+      q.set('page', 'player');
+      q.set('id', file.id);
+      q.set('name', file.name);
+      q.set('src', file.viewUrl || file.url);
+      if (file.size) q.set('size', String(file.size));
+      q.set('type', isVideo ? 'video' : 'image');
+      window.history.pushState(null, '', `/?${q.toString()}`);
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      return;
+    }
+
+    setSelectedFileAction(file);
   };
 
   const filteredFiles = files.filter((f) => {
@@ -242,7 +291,7 @@ export const MobileCloudView: React.FC = () => {
           </div>
 
           <span className="text-[10px] font-mono text-emerald-400 font-bold">
-            {formatFileSize(totalUsedBytes)} / 1 GB
+            {formatFileSize(totalUsedBytes)} / 5 GB
           </span>
         </div>
 
@@ -280,11 +329,11 @@ export const MobileCloudView: React.FC = () => {
         <button
           type="button"
           onClick={() => setIsPersistentVideoModalOpen(true)}
-          className="px-2.5 py-1 rounded-lg font-medium text-[11px] whitespace-nowrap bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1 shrink-0"
-          title="Mở khung xem video lưu IndexedDB (F5 không mất)"
+          className="px-2.5 py-1 rounded-lg font-medium text-[11px] whitespace-nowrap bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shrink-0 cursor-pointer"
+          title="Khung xem Video (F5 không mất)"
         >
-          <Play className="w-3 h-3 text-indigo-400" />
-          <span>Khung Video F5</span>
+          <Film className="w-3 h-3 text-emerald-400" />
+          <span>Khung Video</span>
         </button>
       </div>
 
@@ -316,24 +365,34 @@ export const MobileCloudView: React.FC = () => {
           {filteredFiles.map((file) => (
             <div
               key={file.id}
-              onClick={() => setSelectedFileAction(file)}
+              onClick={() => handleMobileCardClick(file)}
               className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 flex flex-col justify-between space-y-1.5 shadow-sm active:scale-98 transition-all cursor-pointer relative group"
             >
               {/* Thumbnail */}
               <div className="w-full h-20 rounded-lg bg-slate-950 flex items-center justify-center overflow-hidden border border-slate-800 relative">
-                {file.thumbnail || (file.url && isImageFile({ name: file.name, type: file.type })) ? (
+                {file.thumbnail ? (
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <img
+                      src={file.thumbnail}
+                      alt={file.name}
+                      className="w-full h-full object-cover"
+                    />
+                    {(file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) && (
+                      <div className="absolute inset-0 bg-black/35 flex items-center justify-center">
+                        <div className="w-7 h-7 rounded-full bg-emerald-500/90 text-slate-950 flex items-center justify-center shadow">
+                          <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) ? (
+                  <FileDocIcon fileName={file.name} mimeType={file.type || 'video/mp4'} size="sm" />
+                ) : (file.url && isImageFile({ name: file.name, type: file.type })) ? (
                   <img
-                    src={file.thumbnail || file.url}
+                    src={file.url}
                     alt={file.name}
                     className="w-full h-full object-cover"
                   />
-                ) : (file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) ? (
-                  <div className="flex flex-col items-center gap-1 text-emerald-400">
-                    <div className="w-8 h-8 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shadow">
-                      <Play className="w-4 h-4 fill-emerald-400 ml-0.5" />
-                    </div>
-                    <span className="text-[9px] font-bold">Xem Web ↗</span>
-                  </div>
                 ) : (
                   <FileDocIcon fileName={file.name} mimeType={file.type} size="sm" />
                 )}
@@ -341,9 +400,22 @@ export const MobileCloudView: React.FC = () => {
 
               {/* Title & Info */}
               <div className="space-y-0.5">
-                <h4 className="text-[11px] font-bold text-white truncate" title={file.name}>
-                  {file.name}
-                </h4>
+                <div className="flex items-center justify-between gap-1">
+                  <h4 className="text-[11px] font-bold text-white truncate flex-1" title={file.name}>
+                    {file.name}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedFileAction(file);
+                    }}
+                    className="p-1 rounded text-slate-400 hover:text-white shrink-0"
+                    title="Tùy chọn tệp"
+                  >
+                    <MoreVertical className="w-3 h-3" />
+                  </button>
+                </div>
                 <div className="flex items-center justify-between text-[9px] text-slate-400">
                   <span>{formatFileSize(file.size)}</span>
                   {file.isFavorite && <Star className="w-2.5 h-2.5 text-yellow-400 fill-yellow-400" />}
@@ -433,16 +505,45 @@ export const MobileCloudView: React.FC = () => {
 
             {/* Watch Video on Dedicated Web Tab */}
             {(selectedFileAction.category === 'video' || (selectedFileAction.type && selectedFileAction.type.startsWith('video/')) || selectedFileAction.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i)) && (
-              <a
-                href={getVideoWebWatchUrl(selectedFileAction)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={() => setSelectedFileAction(null)}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all"
-              >
-                <ExternalLink className="w-4 h-4 stroke-[2.5]" />
-                <span>Xem video trên Web riêng (Mượt mà)</span>
-              </a>
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selectedFileAction;
+                    setSelectedFileAction(null);
+                    setPreviewFile(target);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold text-xs flex items-center justify-center gap-2 border border-slate-700 active:scale-98 transition-all cursor-pointer"
+                >
+                  <Film className="w-4 h-4 text-emerald-400" />
+                  <span>Xem video trực tiếp (Khung xem All-in-One)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      sessionStorage.setItem('clsend_player_video', JSON.stringify({
+                        id: selectedFileAction.id,
+                        name: selectedFileAction.name,
+                        title: selectedFileAction.name,
+                        src: selectedFileAction.viewUrl || selectedFileAction.url,
+                        size: selectedFileAction.size
+                      }));
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                    const target = selectedFileAction;
+                    setSelectedFileAction(null);
+                    window.history.pushState(null, '', `/?page=player&id=${encodeURIComponent(target.id)}&name=${encodeURIComponent(target.name)}&src=${encodeURIComponent(target.viewUrl || target.url)}`);
+                    window.dispatchEvent(new PopStateEvent('popstate'));
+                  }}
+                  className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all cursor-pointer"
+                >
+                  <Play className="w-4 h-4 fill-white" />
+                  <span>Xem trên Trang Riêng (0% Lag)</span>
+                </button>
+              </>
             )}
 
             {/* Preview if image */}

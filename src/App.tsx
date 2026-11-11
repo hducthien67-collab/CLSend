@@ -26,6 +26,7 @@ const DataStorageAvatarsModal = React.lazy(() => import('./components/DataStorag
 const DesktopInstallModal = React.lazy(() => import('./components/DesktopInstallModal').then(m => ({ default: m.DesktopInstallModal })));
 const DesktopSyncModal = React.lazy(() => import('./components/DesktopSyncModal').then(m => ({ default: m.DesktopSyncModal })));
 const LandingPage = React.lazy(() => import('./components/LandingPage').then(m => ({ default: m.LandingPage })));
+const VideoPlayerPage = React.lazy(() => import('./components/VideoPlayerPage').then(m => ({ default: m.VideoPlayerPage })));
 import { registerErrorChatListener, ErrorChatInfo } from './utils/fileDownload';
 import { registerToastListener } from './utils/toast';
 import { SilkFabricBackground } from './components/SilkFabricBackground';
@@ -124,6 +125,37 @@ function MainApp() {
     }
     return false;
   });
+
+  // Dedicated Video Player Page (?page=player or ?page=watch or ?tab=player or #player or #watch or pathname /watch)
+  const [isPlayerPage, setIsPlayerPage] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      const tab = params.get('tab');
+      const pathname = window.location.pathname;
+      return page === 'player' || page === 'watch' || tab === 'player' || tab === 'watch' || 
+             pathname === '/player' || pathname.startsWith('/watch') || 
+             window.location.hash === '#player' || window.location.hash === '#watch';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const page = params.get('page');
+      const tab = params.get('tab');
+      const pathname = window.location.pathname;
+      setIsPlayerPage(
+        page === 'player' || page === 'watch' || tab === 'player' || tab === 'watch' ||
+        pathname === '/player' || pathname.startsWith('/watch') ||
+        window.location.hash === '#player' || window.location.hash === '#watch'
+      );
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // Track whether an unauthenticated visitor has clicked to open the AuthModal
   const [showAuthModal, setShowAuthModal] = useState<boolean>(() => {
@@ -818,6 +850,25 @@ function MainApp() {
           setIsDatastorePage(false);
         }}
       />
+    );
+  }
+
+  // Priority: Trang Riêng Biệt - Trình Phát Video Siêu Mượt (?page=player or ?page=watch)
+  if (isPlayerPage) {
+    return (
+      <React.Suspense fallback={<div className="min-h-screen bg-[#030712] flex items-center justify-center text-white text-xs">Đang tải Trình phát Video...</div>}>
+        <VideoPlayerPage
+          onBack={() => {
+            setIsPlayerPage(false);
+            if (currentUser) {
+              window.history.pushState(null, '', `/?page=${activeTab}`);
+            } else {
+              window.history.pushState(null, '', '/?page=landing');
+              setIsLandingTab(true);
+            }
+          }}
+        />
+      </React.Suspense>
     );
   }
 

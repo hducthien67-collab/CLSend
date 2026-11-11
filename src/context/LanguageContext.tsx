@@ -22,6 +22,7 @@ export const TRANSLATIONS = {
     'nav.chat': 'Chat',
     'nav.drive': 'Kho Cloud',
     'nav.rules': 'Nội quy',
+    'nav.terms_rules': 'Điều khoản & Quy định',
     'nav.smart_tv': 'Smart TV',
     'nav.settings': 'Cài đặt',
     'nav.language': 'Ngôn ngữ',
@@ -201,6 +202,8 @@ export const TRANSLATIONS = {
     'chat.italic_applied': '✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)',
     'chat.code_applied': '✨ Đã định dạng mã (Ctrl+E)',
     'chat.cleaned': '✨ Đã tự động làm gọn văn bản & loại bỏ ký tự lỗi!',
+    'chat.composing': 'Đang soạn tin nhắn...',
+    'chat.characters': 'ký tự',
 
 
     // RulesModal
@@ -410,6 +413,7 @@ export const TRANSLATIONS = {
     'nav.chat': 'Chat',
     'nav.drive': 'Cloud',
     'nav.rules': 'Rules',
+    'nav.terms_rules': 'Terms & Guidelines',
     'nav.smart_tv': 'Smart TV',
     'nav.settings': 'Settings',
     'nav.language': 'Language',
@@ -590,6 +594,8 @@ export const TRANSLATIONS = {
     'chat.italic_applied': '✨ Italic applied directly (Ctrl+I)',
     'chat.code_applied': '✨ Code formatted (Ctrl+E)',
     'chat.cleaned': '✨ Text automatically cleaned & errors removed!',
+    'chat.composing': 'Typing...',
+    'chat.characters': 'characters',
 
 
     // RulesModal

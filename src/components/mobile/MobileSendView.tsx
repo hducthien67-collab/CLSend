@@ -37,7 +37,7 @@ import {
 import { MobileBottomSheet } from './MobileBottomSheet';
 import { uploadFileToServer, isImageFile, isVideoFile, generateImageThumbnail, generateVideoThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { CloudDrivePickerModal } from '../CloudDrivePickerModal';
-import { useLanguage } from '../../context/LanguageContext';
+import { useLanguage, pickLang } from '../../context/LanguageContext';
 
 export const MobileSendView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
@@ -122,27 +122,25 @@ export const MobileSendView: React.FC = () => {
         const file = files[i];
         let fileUrl = '';
         let thumbnail: string | null = null;
-
-        if (isImageFile(file)) {
-          try {
-            thumbnail = await generateImageThumbnail(file, 480, 0.75);
-          } catch {}
-        } else if (isVideoFile(file)) {
-          try {
-            thumbnail = await generateVideoThumbnail(file);
-          } catch {}
-        }
+        const thumbPromise: Promise<string | null> = isImageFile(file)
+          ? generateImageThumbnail(file, 480, 0.75).catch(() => null)
+          : isVideoFile(file)
+          ? generateVideoThumbnail(file).catch(() => null)
+          : Promise.resolve(null);
 
         try {
           const uploaded = await uploadFileToServer(file, (pct) => {
             setSendProgress(Math.min(95, Math.round((i * 100 + pct) / files.length)));
           });
           fileUrl = uploaded.url;
-          if (uploaded.thumbnail) thumbnail = uploaded.thumbnail;
+          thumbnail = uploaded.thumbnail || await Promise.race([
+            thumbPromise,
+            new Promise<null>((res) => setTimeout(() => res(null), 800))
+          ]);
         } catch {
           const fallback = await createClientFallbackFileInfo(file);
           fileUrl = fallback.url;
-          thumbnail = fallback.thumbnail || null;
+          thumbnail = fallback.thumbnail || await thumbPromise;
         }
 
         const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
@@ -673,11 +671,14 @@ export const MobileSendView: React.FC = () => {
                   createdAt: new Date().toISOString()
                 });
               }
-              showToast(currentLang === 'en'
-                ? `Sent ${selectedFiles.length} file(s) from Cloud to ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`
-                : `Đã gửi ${selectedFiles.length} tệp từ Cloud tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`, 'success');
+              showToast(pickLang(
+                currentLang,
+                `Đã gửi ${selectedFiles.length} tệp từ Cloud tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`,
+                `Sent ${selectedFiles.length} file(s) from Cloud to ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`,
+                `已从云盘向 ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName} 发送 ${selectedFiles.length} 个文件！`
+              ), 'success');
             } catch (err) {
-              showToast(currentLang === 'en' ? 'Error sending files from Cloud.' : 'Lỗi khi gửi tệp từ Cloud.', 'error');
+              showToast(pickLang(currentLang, 'Lỗi khi gửi tệp từ Cloud.', 'Error sending files from Cloud.', '从云盘发送文件失败。'), 'error');
             } finally {
               setIsSending(false);
             }

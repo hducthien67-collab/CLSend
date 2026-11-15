@@ -27,9 +27,10 @@ import {
   getAccountKey,
   getEmailKey, 
   generateSalt, 
-  generateUid 
+  generateUid,
+  normalizePhoneNumber
 } from '../utils/authHelper';
-import { checkUserBanStatus } from '../utils/devModeration';
+import { checkUserBanStatus, isRealEmail } from '../utils/devModeration';
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -44,12 +45,16 @@ interface AuthContextType {
     dataOrUsername: string | {
       username: string;
       pass: string;
+      email?: string;
+      phone?: string;
       dob?: string;
       gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
       deviceName?: string;
     },
     passArg?: string,
     extra?: {
+      email?: string;
+      phone?: string;
       dob?: string;
       gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
       deviceName?: string;
@@ -61,6 +66,7 @@ interface AuthContextType {
   changePassword: (currentPass: string, newPass: string) => Promise<void>;
   updateDisplayName: (newDisplayName: string) => Promise<void>;
   linkEmail: (newEmail: string) => Promise<void>;
+  linkPhoneNumber: (newPhone: string) => Promise<string>;
   sendEmailVerificationCode: (targetEmail: string) => Promise<{
     code: string;
     expiresAt: string;
@@ -130,6 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   
   const currentUserRef = useRef<AppUser | null>(currentUser);
   const isLinkingAccountRef = useRef<boolean>(false);
+  const isExplicitGoogleLoginRef = useRef<boolean>(false);
+  const isSuppressingAuthListenerRef = useRef<boolean>(false);
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
@@ -322,8 +330,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const session: AppUser = JSON.parse(saved);
           if (session && session.uid) {
-            // Check if user is currently banned
-            const banCheck = await checkUserBanStatus(session.email, session.uid);
+            // Check if user (or any synced email/phone/linked UID) is currently banned
+            const banCheck = await checkUserBanStatus(session.email, session.uid, {
+              phone: session.phone || session.linkedPhone,
+              linkedEmail: session.linkedEmail,
+              linkedUids: session.linkedUids,
+            });
             if (banCheck.isBanned) {
               localStorage.removeItem('cloudsend_custom_session');
               localStorage.removeItem('cloudsend_user_profile');
@@ -342,7 +354,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               const userDocSnap = await getDoc(doc(db, 'users', session.uid));
               if (userDocSnap.exists() && isMounted) {
                 const profileData = userDocSnap.data() as UserDevice;
+                // Re-verify ban after loading latest phone / linkedEmail from Firestore
+                const freshBanCheck = await checkUserBanStatus(profileData.email, session.uid, {
+                  phone: profileData.phone || profileData.linkedPhone || profileData.phoneNumber,
+                  linkedEmail: profileData.linkedEmail,
+                  linkedUids: profileData.linkedUids,
+                });
+                if (freshBanCheck.isBanned) {
+                  localStorage.removeItem('cloudsend_custom_session');
+                  localStorage.removeItem('cloudsend_user_profile');
+                  setCurrentUser(null);
+                  currentUserRef.current = null;
+                  setUserProfile(null);
+                  if (isMounted) setLoading(false);
+                  return;
+                }
+
                 setUserProfile(profileData);
+                localStorage.setItem('cloudsend_user_profile', JSON.stringify(profileData));
+                // Merge latest linkedEmail / phone / linkedUids from Firestore into active session
+                const mergedLinkedUids = Array.from(new Set([
+                  ...(session.linkedUids || []),
+                  ...(profileData.linkedUids || []),
+                  ...(profileData.googleUid ? [profileData.googleUid] : []),
+                ].filter(Boolean)));
+                const enrichedSession: AppUser = {
+                  ...session,
+                  email: profileData.linkedEmail || profileData.email || session.email,
+                  linkedEmail: profileData.linkedEmail || session.linkedEmail,
+                  phone: profileData.phone || profileData.linkedPhone || session.phone,
+                  linkedPhone: profileData.linkedPhone || profileData.phone || session.linkedPhone,
+                  linkedUids: mergedLinkedUids.length > 0 ? mergedLinkedUids : session.linkedUids,
+                };
+                setCurrentUser(enrichedSession);
+                currentUserRef.current = enrichedSession;
+                localStorage.setItem('cloudsend_custom_session', JSON.stringify(enrichedSession));
+
                 const hasLocalSettings = Boolean(localStorage.getItem('cloudsend_settings'));
                 if (!hasLocalSettings && profileData.deviceName) {
                   setSettings((prev) => ({
@@ -369,8 +416,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (isLinkingAccountRef.current) {
-        // Account linking is currently running for existing user session - do not overwrite
+      if (isLinkingAccountRef.current || isSuppressingAuthListenerRef.current) {
+        // Account linking or explicit account switch is running - do not overwrite
         return;
       }
 
@@ -378,6 +425,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (typeof window !== 'undefined' && window.location.search.includes('desktopAuth=true')) {
           window.location.href = `/auth-success?uid=${encodeURIComponent(user.uid)}&email=${encodeURIComponent(user.email || '')}&displayName=${encodeURIComponent(user.displayName || '')}&photoURL=${encodeURIComponent(user.photoURL || '')}`;
           return;
+        }
+
+        // Prevent a residual Firebase Auth Google session on this Chrome profile from hijacking
+        // an explicitly logged-in ClSend custom account!
+        if (!isExplicitGoogleLoginRef.current) {
+          const savedRaw = localStorage.getItem('cloudsend_custom_session');
+          if (savedRaw) {
+            try {
+              const savedSession: AppUser = JSON.parse(savedRaw);
+              if (savedSession?.uid && (savedSession.authProvider === 'account' || savedSession.authProvider === 'sync' || savedSession.uid.startsWith('u_'))) {
+                await restoreCustomSession();
+                if (isMounted) setLoading(false);
+                return;
+              }
+            } catch {}
+          }
         }
 
         // Enforce Dev Ban Check on Gmail / Firebase Auth
@@ -394,11 +457,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
+        // Discover any sibling ClSend account UIDs linked to this Google email so cloud files stay synced
+        const discoveredLinkedUids = new Set<string>();
+        const cleanGoogleEmail = (user.email || '').trim().toLowerCase();
+        if (cleanGoogleEmail) {
+          try {
+            const [accLinkedSnap, accEmailSnap, usrLinkedSnap] = await Promise.all([
+              getDocs(query(collection(db, 'accounts'), where('linkedEmail', '==', cleanGoogleEmail))),
+              getDocs(query(collection(db, 'accounts'), where('email', '==', cleanGoogleEmail))),
+              getDocs(query(collection(db, 'users'), where('linkedEmail', '==', cleanGoogleEmail))),
+            ]);
+            accLinkedSnap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); });
+            accEmailSnap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); });
+            usrLinkedSnap.forEach((d) => { if (d.id !== user.uid) discoveredLinkedUids.add(d.id); });
+          } catch {}
+        }
+
         const appUser: AppUser = {
           uid: user.uid,
           email: user.email,
           displayName: user.displayName || user.email?.split('@')[0] || 'Người dùng',
           photoURL: user.photoURL,
+          authProvider: 'google',
+          linkedEmail: cleanGoogleEmail || undefined,
+          linkedUids: Array.from(discoveredLinkedUids),
         };
         setCurrentUser(appUser);
         currentUserRef.current = appUser;
@@ -417,27 +499,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const googleAvatar = user.photoURL || undefined;
           if (userDocSnap && userDocSnap.exists()) {
             profileData = userDocSnap.data() as UserDevice;
-            const effectiveAvatar = googleAvatar || profileData.customAvatarUrl;
-            profileData.customAvatarUrl = effectiveAvatar;
-            if (googleAvatar && profileData.customAvatarUrl !== googleAvatar) {
-              setDoc(userDocRef, { customAvatarUrl: googleAvatar }, { merge: true }).catch(() => {});
+            const mergedUids = Array.from(new Set([
+              ...(profileData.linkedUids || []),
+              ...Array.from(discoveredLinkedUids),
+            ]));
+            profileData.linkedUids = mergedUids;
+            const effectiveAvatar = googleAvatar || profileData.customAvatarUrl || profileData.avatarUrl;
+            profileData.customAvatarUrl = effectiveAvatar || undefined;
+            profileData.avatarUrl = effectiveAvatar || undefined;
+            profileData.photoURL = googleAvatar || profileData.photoURL || undefined;
+            if ((googleAvatar && profileData.customAvatarUrl !== googleAvatar) || mergedUids.length > 0) {
+              setDoc(userDocRef, {
+                customAvatarUrl: effectiveAvatar || null,
+                avatarUrl: effectiveAvatar || null,
+                photoURL: googleAvatar || null,
+                linkedUids: mergedUids,
+              }, { merge: true }).catch(() => {});
+            }
+            if (mergedUids.length > 0) {
+              appUser.linkedUids = mergedUids;
+              localStorage.setItem('cloudsend_custom_session', JSON.stringify(appUser));
             }
             setSettings((prev) => ({
               ...prev,
               deviceName: profileData.deviceName || prev.deviceName,
               deviceType: detectDeviceType(),
               avatarColor: profileData.avatarColor || prev.avatarColor,
-              customAvatarUrl: effectiveAvatar,
+              customAvatarUrl: effectiveAvatar || undefined,
             }));
           } else {
             profileData = {
               uid: user.uid,
               email: user.email || '',
+              linkedEmail: cleanGoogleEmail || undefined,
+              linkedUids: Array.from(discoveredLinkedUids),
               displayName: user.displayName || user.email?.split('@')[0] || 'Người dùng',
               deviceName: settings.deviceName,
               deviceType: detectDeviceType(),
               avatarColor: settings.avatarColor,
               customAvatarUrl: googleAvatar,
+              avatarUrl: googleAvatar,
+              photoURL: googleAvatar,
               createdAt: new Date().toISOString(),
             };
             try {
@@ -501,6 +603,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const loginWithGoogle = async () => {
+    isExplicitGoogleLoginRef.current = true;
     try {
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
@@ -530,6 +633,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       console.warn('Google Sign-In notice:', error?.message || error);
       throw error;
+    } finally {
+      setTimeout(() => {
+        isExplicitGoogleLoginRef.current = false;
+      }, 1500);
     }
   };
 
@@ -543,16 +650,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const normalized = cleanIdentifier.toLowerCase();
+    const normPhone = normalizePhoneNumber(cleanIdentifier);
 
-    // Check ban status by identifier first
-    const banCheck = await checkUserBanStatus(normalized);
+    // Check ban status by identifier (email or phone) first
+    const banCheck = await checkUserBanStatus(normalized.includes('@') ? normalized : null, null, {
+      phone: normPhone || null,
+    });
     if (banCheck.isBanned) {
       throw new Error(banCheck.message || 'Tài khoản này đã bị DEV cấm đăng nhập.');
     }
 
     const accountKey = await getAccountKey(normalized);
     const accountRef = doc(db, 'accounts', accountKey);
-    const accountSnap = await getDoc(accountRef);
+    let accountSnap: any = await getDoc(accountRef);
+
+    // Fallback lookup by linkedEmail or email if user logs in using their linked Gmail/email
+    if (!accountSnap.exists() && normalized.includes('@')) {
+      try {
+        const [byLinkedEmail, byEmail] = await Promise.all([
+          getDocs(query(collection(db, 'accounts'), where('linkedEmail', '==', normalized))),
+          getDocs(query(collection(db, 'accounts'), where('email', '==', normalized))),
+        ]);
+        if (!byLinkedEmail.empty) {
+          accountSnap = byLinkedEmail.docs[0];
+        } else if (!byEmail.empty) {
+          accountSnap = byEmail.docs[0];
+        }
+      } catch {}
+    }
+
+    // Fallback lookup by normalized phone number if user logs in with Phone Number
+    if (!accountSnap.exists() && normPhone) {
+      try {
+        const [byPhone, byLinkedPhone] = await Promise.all([
+          getDocs(query(collection(db, 'accounts'), where('phone', '==', normPhone))),
+          getDocs(query(collection(db, 'accounts'), where('linkedPhone', '==', normPhone))),
+        ]);
+        if (!byPhone.empty) {
+          accountSnap = byPhone.docs[0];
+        } else if (!byLinkedPhone.empty) {
+          accountSnap = byLinkedPhone.docs[0];
+        }
+      } catch {}
+    }
 
     if (!accountSnap.exists()) {
       const err = new Error('Tên tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.');
@@ -562,10 +702,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const account = accountSnap.data() as CustomAuthAccount;
 
-    // Check ban status by UID as well
-    const uidBanCheck = await checkUserBanStatus(normalized, account.uid);
+    // Check ban status by UID, linkedEmail, phone, and linkedUids
+    const uidBanCheck = await checkUserBanStatus(account.linkedEmail || account.email, account.uid, {
+      phone: account.phone || account.linkedPhone || normPhone || null,
+      linkedEmail: account.linkedEmail,
+      linkedUids: account.linkedUids,
+    });
     if (uidBanCheck.isBanned) {
-      throw new Error(uidBanCheck.message || 'Tài khoản này đã bị DEV cấm.');
+      throw new Error(uidBanCheck.message || 'Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.');
     }
 
     const computedHash = await hashPassword(pass, account.salt);
@@ -576,16 +720,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw err;
     }
 
-    // Authenticated successfully!
-    const userSession: AppUser = {
-      uid: account.uid,
-      email: account.email || `${account.username || account.displayName}@cloudsend.local`,
-      displayName: account.displayName || account.username || cleanIdentifier,
-    };
-
-    localStorage.setItem('cloudsend_custom_session', JSON.stringify(userSession));
-    setCurrentUser(userSession);
-    currentUserRef.current = userSession;
+    // Sign out any lingering Firebase Google session on this Chrome profile so it can never hijack this ClSend account
+    if (auth.currentUser) {
+      isSuppressingAuthListenerRef.current = true;
+      try {
+        await signOut(auth);
+      } catch {
+      } finally {
+        setTimeout(() => {
+          isSuppressingAuthListenerRef.current = false;
+        }, 1000);
+      }
+    }
 
     // Load or generate user profile
     let profileData: UserDevice;
@@ -596,7 +742,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         profileData = {
           uid: account.uid,
-          email: account.email || userSession.email || '',
+          email: account.linkedEmail || account.email || `${account.username || account.displayName}@cloudsend.local`,
+          linkedEmail: account.linkedEmail,
+          linkedUids: account.linkedUids,
+          googleUid: account.googleUid,
           username: account.username || cleanIdentifier,
           dob: account.dob,
           gender: account.gender,
@@ -611,7 +760,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       profileData = {
         uid: account.uid,
-        email: account.email || userSession.email || '',
+        email: account.linkedEmail || account.email || `${account.username || account.displayName}@cloudsend.local`,
+        linkedEmail: account.linkedEmail,
+        linkedUids: account.linkedUids,
+        googleUid: account.googleUid,
         username: account.username || cleanIdentifier,
         dob: account.dob,
         gender: account.gender,
@@ -623,9 +775,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
     }
 
+    const mergedLinkedUids = Array.from(new Set([
+      ...(account.linkedUids || []),
+      ...(profileData.linkedUids || []),
+      ...(account.googleUid ? [account.googleUid] : []),
+      ...(profileData.googleUid ? [profileData.googleUid] : []),
+    ].filter((u) => u && u !== account.uid)));
+
+    const effectiveEmail = profileData.linkedEmail || account.linkedEmail || profileData.email || account.email || `${account.username || account.displayName}@cloudsend.local`;
+    const effectivePhone = profileData.phone || profileData.linkedPhone || account.phone || account.linkedPhone || null;
+
+    // Authenticated successfully!
+    const userSession: AppUser = {
+      uid: account.uid,
+      email: effectiveEmail,
+      linkedEmail: profileData.linkedEmail || account.linkedEmail || null,
+      phone: effectivePhone,
+      linkedPhone: profileData.linkedPhone || account.linkedPhone || effectivePhone,
+      linkedUids: mergedLinkedUids,
+      displayName: profileData.displayName || account.displayName || account.username || cleanIdentifier,
+      photoURL: profileData.customAvatarUrl || profileData.avatarUrl || profileData.photoURL || null,
+      authProvider: 'account',
+    };
+
+    localStorage.setItem('cloudsend_custom_session', JSON.stringify(userSession));
+    localStorage.setItem('cloudsend_user_profile', JSON.stringify(profileData));
+    setCurrentUser(userSession);
+    currentUserRef.current = userSession;
     setUserProfile(profileData);
     if (profileData.deviceName) {
-      setSettings((prev) => ({ ...prev, deviceName: profileData.deviceName, deviceType: detectDeviceType() }));
+      setSettings((prev) => ({
+        ...prev,
+        deviceName: profileData.deviceName,
+        deviceType: detectDeviceType(),
+        customAvatarUrl: profileData.customAvatarUrl || prev.customAvatarUrl,
+        avatarColor: profileData.avatarColor || prev.avatarColor,
+      }));
     }
     await updatePresence(account.uid, profileData);
   };
@@ -636,7 +821,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithSyncPayload = async (payload: { userSession: AppUser; profileData: UserDevice; settings?: Partial<AppSettings> }) => {
     if (!payload?.userSession?.uid) return;
-    const session = payload.userSession;
+    const syncBanCheck = await checkUserBanStatus(payload.userSession.email, payload.userSession.uid, {
+      phone: payload.profileData?.phone || payload.profileData?.linkedPhone || payload.userSession.phone,
+      linkedEmail: payload.profileData?.linkedEmail || payload.userSession.linkedEmail,
+      linkedUids: payload.profileData?.linkedUids || payload.userSession.linkedUids,
+    });
+    if (syncBanCheck.isBanned) {
+      throw new Error(syncBanCheck.message || 'Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.');
+    }
+    if (auth.currentUser) {
+      isSuppressingAuthListenerRef.current = true;
+      try {
+        await signOut(auth);
+      } catch {
+      } finally {
+        setTimeout(() => {
+          isSuppressingAuthListenerRef.current = false;
+        }, 1000);
+      }
+    }
+
+    const session: AppUser = {
+      ...payload.userSession,
+      authProvider: payload.userSession.authProvider || 'sync',
+    };
     const profile = payload.profileData;
 
     localStorage.setItem('cloudsend_custom_session', JSON.stringify(session));
@@ -661,12 +869,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     dataOrUsername: string | {
       username: string;
       pass: string;
+      email?: string;
+      phone?: string;
       dob?: string;
       gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
       deviceName?: string;
     },
     passArg?: string,
     extra?: {
+      email?: string;
+      phone?: string;
       dob?: string;
       gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
       deviceName?: string;
@@ -675,6 +887,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let data: {
       username: string;
       pass: string;
+      email?: string;
+      phone?: string;
       dob?: string;
       gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
       deviceName?: string;
@@ -684,6 +898,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       data = {
         username: dataOrUsername,
         pass: passArg || '',
+        email: extra?.email,
+        phone: extra?.phone,
         dob: extra?.dob,
         gender: extra?.gender,
         deviceName: extra?.deviceName,
@@ -701,11 +917,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const normalizedUsername = cleanUsername.toLowerCase();
+    const cleanInputEmail = (data.email || '').trim().toLowerCase();
+    const hasProvidedRealEmail = Boolean(cleanInputEmail && isRealEmail(cleanInputEmail));
+    if (cleanInputEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanInputEmail)) {
+      throw new Error('Địa chỉ Email không hợp lệ. Vui lòng kiểm tra lại.');
+    }
 
-    // Check if this account is banned by Dev
-    const banCheck = await checkUserBanStatus(normalizedUsername);
-    if (banCheck.isBanned) {
-      throw new Error(banCheck.message || 'Tên tài khoản này đã bị DEV cấm đăng ký vào hệ thống.');
+    const rawPhone = (data.phone || '').trim();
+    const normPhone = normalizePhoneNumber(rawPhone);
+    if (rawPhone && !normPhone) {
+      throw new Error('Số điện thoại không hợp lệ (tối thiểu 7 chữ số).');
+    }
+
+    // Ban gate: Block if provided email or phone number belongs to a banned account (never bans clean new accounts/devices!)
+    if (hasProvidedRealEmail || normPhone) {
+      const contactBanCheck = await checkUserBanStatus(hasProvidedRealEmail ? cleanInputEmail : null, null, {
+        phone: normPhone || null,
+        linkedEmail: hasProvidedRealEmail ? cleanInputEmail : null,
+      });
+      if (contactBanCheck.isBanned) {
+        throw new Error(
+          contactBanCheck.message ||
+            'Email hoặc Số điện thoại này đang gắn với một tài khoản bị CẤM. Hệ thống chặn đăng ký để chống lách luật.'
+        );
+      }
     }
 
     const devName = data.deviceName?.trim() || settings.deviceName;
@@ -722,11 +957,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const salt = generateSalt();
     const passwordHash = await hashPassword(data.pass, salt);
     const uid = generateUid();
-    const emailEquivalent = `${normalizedUsername.replace(/\s+/g, '_')}@cloudsend.local`;
+    const emailEquivalent = hasProvidedRealEmail
+      ? cleanInputEmail
+      : `${normalizedUsername.replace(/\s+/g, '_')}@cloudsend.local`;
 
     const newAccount: CustomAuthAccount = {
       uid,
       email: emailEquivalent,
+      ...(hasProvidedRealEmail ? { linkedEmail: cleanInputEmail } : {}),
+      ...(normPhone ? { phone: normPhone, linkedPhone: normPhone } : {}),
       username: cleanUsername,
       dob: data.dob?.trim() || undefined,
       gender: data.gender || 'Không Muốn Trả Lời',
@@ -744,6 +983,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newProfile: UserDevice = {
       uid,
       email: emailEquivalent,
+      ...(hasProvidedRealEmail ? { linkedEmail: cleanInputEmail } : {}),
+      ...(normPhone ? { phone: normPhone, linkedPhone: normPhone } : {}),
       username: cleanUsername,
       dob: data.dob?.trim() || undefined,
       gender: data.gender || 'Không Muốn Trả Lời',
@@ -756,13 +997,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     await setDoc(doc(db, 'users', uid), newProfile);
 
+    if (auth.currentUser) {
+      isSuppressingAuthListenerRef.current = true;
+      try {
+        await signOut(auth);
+      } catch {
+      } finally {
+        setTimeout(() => {
+          isSuppressingAuthListenerRef.current = false;
+        }, 1000);
+      }
+    }
+
     const userSession: AppUser = {
       uid,
       email: emailEquivalent,
+      linkedEmail: hasProvidedRealEmail ? cleanInputEmail : null,
+      phone: normPhone || null,
+      linkedPhone: normPhone || null,
       displayName: cleanUsername,
+      authProvider: 'account',
     };
 
     localStorage.setItem('cloudsend_custom_session', JSON.stringify(userSession));
+    localStorage.setItem('cloudsend_user_profile', JSON.stringify(newProfile));
     setCurrentUser(userSession);
     currentUserRef.current = userSession;
     setUserProfile(newProfile);
@@ -779,6 +1037,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loginAsGuest = async (customDisplayName?: string, customDeviceName?: string) => {
+    if (auth.currentUser) {
+      isSuppressingAuthListenerRef.current = true;
+      try {
+        await signOut(auth);
+      } catch {
+      } finally {
+        setTimeout(() => {
+          isSuppressingAuthListenerRef.current = false;
+        }, 1000);
+      }
+    }
+
     // Reuse existing guest UID if already created on this browser to avoid ghost duplicate devices
     let uid = typeof window !== 'undefined' ? localStorage.getItem('cloudsend_guest_uid') : null;
     if (!uid) {
@@ -794,6 +1064,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       uid,
       email: `${uid}@cloudsend.local`,
       displayName: dispName,
+      authProvider: 'guest',
     };
 
     localStorage.setItem('cloudsend_custom_session', JSON.stringify(guestUser));
@@ -1046,6 +1317,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw new Error('Địa chỉ email không hợp lệ. Vui lòng nhập đúng định dạng (ví dụ: yourname@gmail.com).');
     }
 
+    const banCheck = await checkUserBanStatus(cleanEmail, null, { linkedEmail: cleanEmail });
+    if (banCheck.isBanned) {
+      throw new Error(banCheck.message || 'Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!');
+    }
+
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
       throw new Error('Chưa đăng nhập.');
@@ -1054,6 +1330,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedUser: AppUser = {
       ...currentUsr,
       email: cleanEmail,
+      linkedEmail: cleanEmail,
     };
     setCurrentUser(updatedUser);
     currentUserRef.current = updatedUser;
@@ -1069,6 +1346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString(),
       }),
       email: cleanEmail,
+      linkedEmail: cleanEmail,
     };
     setUserProfile(updatedProfile);
     localStorage.setItem('cloudsend_user_profile', JSON.stringify(updatedProfile));
@@ -1085,6 +1363,78 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('Error linking email:', err);
       throw err;
     }
+  };
+
+  const linkPhoneNumber = async (newPhone: string): Promise<string> => {
+    const normPhone = normalizePhoneNumber(newPhone);
+    if (!normPhone) {
+      throw new Error('Số điện thoại không hợp lệ. Vui lòng nhập ít nhất 7 chữ số.');
+    }
+
+    const banCheck = await checkUserBanStatus(null, null, { phone: normPhone });
+    if (banCheck.isBanned) {
+      throw new Error(banCheck.message || 'Số điện thoại này đang gắn với tài khoản bị CẤM. Không thể liên kết!');
+    }
+
+    const currentUsr = currentUserRef.current;
+    if (!currentUsr) {
+      throw new Error('Chưa đăng nhập.');
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedUser: AppUser = {
+      ...currentUsr,
+      phone: normPhone,
+      linkedPhone: normPhone,
+    };
+    setCurrentUser(updatedUser);
+    currentUserRef.current = updatedUser;
+    localStorage.setItem('cloudsend_custom_session', JSON.stringify(updatedUser));
+
+    const updatedProfile: UserDevice = {
+      ...(userProfile || {
+        uid: currentUsr.uid,
+        email: currentUsr.email || '',
+        displayName: currentUsr.displayName || 'Người dùng',
+        deviceName: settings.deviceName,
+        deviceType: settings.deviceType,
+        avatarColor: settings.avatarColor || '#10B981',
+        createdAt: nowIso,
+      }),
+      phone: normPhone,
+      linkedPhone: normPhone,
+      phoneNumber: normPhone,
+      isPhoneVerified: true,
+    };
+    setUserProfile(updatedProfile);
+    localStorage.setItem('cloudsend_user_profile', JSON.stringify(updatedProfile));
+
+    try {
+      await setDoc(doc(db, 'users', currentUsr.uid), {
+        phone: normPhone,
+        linkedPhone: normPhone,
+        phoneNumber: normPhone,
+        isPhoneVerified: true,
+      }, { merge: true });
+
+      const identifier = userProfile?.username || currentUsr.displayName || '';
+      if (identifier) {
+        const accountKey = await getAccountKey(identifier.trim().toLowerCase());
+        const accSnap = await getDoc(doc(db, 'accounts', accountKey));
+        if (accSnap.exists()) {
+          await setDoc(accSnap.ref, { phone: normPhone, linkedPhone: normPhone }, { merge: true }).catch(() => {});
+        }
+      }
+      const byUid = await getDocs(query(collection(db, 'accounts'), where('uid', '==', currentUsr.uid)));
+      for (const d of byUid.docs) {
+        await setDoc(d.ref, { phone: normPhone, linkedPhone: normPhone }, { merge: true }).catch(() => {});
+      }
+    } catch (err) {
+      console.error('Error linking phone:', err);
+      throw err;
+    }
+
+    return normPhone;
   };
 
   const sendEmailVerificationCode = async (targetEmail: string) => {
@@ -1227,6 +1577,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw err;
     }
 
+    const banCheck = await checkUserBanStatus(cleanEmail, null, { linkedEmail: cleanEmail });
+    if (banCheck.isBanned) {
+      throw new Error(banCheck.message || 'Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!');
+    }
+
     // Code is valid! Mark as used & Link Email
     try {
       await setDoc(doc(db, 'email_verifications', verificationId), {
@@ -1242,6 +1597,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedUser: AppUser = {
       ...currentUsr,
       email: cleanEmail,
+      linkedEmail: cleanEmail,
     };
     setCurrentUser(updatedUser);
     currentUserRef.current = updatedUser;
@@ -1459,6 +1815,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deviceType: effectiveType,
         avatarColor: newSettings.avatarColor ?? settings.avatarColor,
         customAvatarUrl: effectiveAvatar || null,
+        avatarUrl: effectiveAvatar || null,
+        photoURL: effectiveAvatar || null,
         bannerUrl: newSettings.bannerUrl !== undefined ? newSettings.bannerUrl : (userProfile?.bannerUrl || settings.bannerUrl || null),
         customBio: newSettings.customBio !== undefined ? newSettings.customBio : (userProfile?.customBio || settings.customBio || null),
         customBadgeText: newSettings.customBadgeText !== undefined ? newSettings.customBadgeText : (userProfile?.customBadgeText || settings.customBadgeText || null),
@@ -1502,6 +1860,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: currentUsr.email || '',
             }),
             customAvatarUrl: photoUrl,
+            avatarUrl: photoUrl,
+            photoURL: photoUrl,
           };
           setUserProfile(updatedProf);
           localStorage.setItem('cloudsend_user_profile', JSON.stringify(updatedProf));
@@ -1510,6 +1870,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           await setDoc(doc(db, 'users', currentUsr.uid), {
             customAvatarUrl: photoUrl,
+            avatarUrl: photoUrl,
+            photoURL: photoUrl,
           }, { merge: true });
 
           await updatePresence(currentUsr.uid, updatedProf);
@@ -1532,13 +1894,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await signInWithPopup(auth, googleProvider);
       if (res.user) {
         const photoUrl = res.user.photoURL;
-        const email = res.user.email || '';
+        const email = (res.user.email || '').trim().toLowerCase();
+        const googleUid = res.user.uid;
+
+        const googleBanCheck = await checkUserBanStatus(email, googleUid, { linkedEmail: email });
+        if (googleBanCheck.isBanned) {
+          await signOut(auth).catch(() => {});
+          throw new Error(googleBanCheck.message || 'Tài khoản Google / Email này đã bị DEV CẤM. Không thể liên kết!');
+        }
+
         const nowIso = new Date().toISOString();
         const currentUsr = currentUserRef.current;
+
         if (currentUsr) {
+          const mergedLinkedUids = Array.from(new Set([
+            ...(currentUsr.linkedUids || []),
+            ...(userProfile?.linkedUids || []),
+            ...(googleUid && googleUid !== currentUsr.uid ? [googleUid] : []),
+          ].filter(Boolean)));
+
           const updatedUser: AppUser = {
             ...currentUsr,
             email: email || currentUsr.email,
+            linkedEmail: email || currentUsr.linkedEmail,
+            linkedUids: mergedLinkedUids,
             photoURL: photoUrl || currentUsr.photoURL,
           };
           setCurrentUser(updatedUser);
@@ -1556,6 +1935,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }),
             email: email || currentUsr.email || '',
             linkedEmail: email || currentUsr.email || '',
+            linkedUids: mergedLinkedUids,
+            googleUid: googleUid || userProfile?.googleUid,
             isEmailVerified: true,
             emailVerifiedAt: nowIso,
             customAvatarUrl: photoUrl || userProfile?.customAvatarUrl,
@@ -1571,6 +1952,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await setDoc(doc(db, 'users', currentUsr.uid), {
               email: email,
               linkedEmail: email,
+              linkedUids: mergedLinkedUids,
+              googleUid: googleUid || null,
               isEmailVerified: true,
               emailVerifiedAt: nowIso,
               customAvatarUrl: photoUrl || null,
@@ -1579,22 +1962,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.warn('Firestore set user notice:', e);
           }
 
-          const identifier = userProfile?.username || currentUsr.displayName || '';
-          if (identifier) {
-            try {
+          // Update accounts record by username key OR fallback query by uid
+          try {
+            const identifier = userProfile?.username || currentUsr.displayName || '';
+            let updatedAccount = false;
+            if (identifier) {
               const accountKey = await getAccountKey(identifier.trim().toLowerCase());
-              await setDoc(doc(db, 'accounts', accountKey), {
-                email: email,
-                linkedEmail: email,
-                isEmailVerified: true,
-                emailVerifiedAt: nowIso,
-              }, { merge: true });
-            } catch (e) {
-              console.warn('Firestore set account notice:', e);
+              const accSnap = await getDoc(doc(db, 'accounts', accountKey));
+              if (accSnap.exists()) {
+                await setDoc(accSnap.ref, {
+                  email: email,
+                  linkedEmail: email,
+                  linkedUids: mergedLinkedUids,
+                  googleUid: googleUid || null,
+                  isEmailVerified: true,
+                  emailVerifiedAt: nowIso,
+                }, { merge: true });
+                updatedAccount = true;
+              }
             }
+            if (!updatedAccount) {
+              const byUid = await getDocs(query(collection(db, 'accounts'), where('uid', '==', currentUsr.uid)));
+              for (const d of byUid.docs) {
+                await setDoc(d.ref, {
+                  email: email,
+                  linkedEmail: email,
+                  linkedUids: mergedLinkedUids,
+                  googleUid: googleUid || null,
+                  isEmailVerified: true,
+                  emailVerifiedAt: nowIso,
+                }, { merge: true });
+              }
+            }
+          } catch (e) {
+            console.warn('Firestore set account notice:', e);
           }
 
           await updatePresence(currentUsr.uid, updatedProf).catch(() => {});
+
+          // Keep the custom ClSend account active instead of leaving Firebase Google Auth signed in
+          if (currentUsr.authProvider === 'account' || currentUsr.uid.startsWith('u_')) {
+            await signOut(auth).catch(() => {});
+          }
         }
         return { email, photoURL: photoUrl };
       }
@@ -1630,6 +2039,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         changePassword,
         updateDisplayName,
         linkEmail,
+        linkPhoneNumber,
         sendEmailVerificationCode,
         verifyEmailCodeAndLink,
         getLoginSessions,
@@ -1652,5 +2062,9 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+};
+
+export const useOptionalAuth = () => {
+  return useContext(AuthContext);
 };
 

@@ -474,6 +474,231 @@ export const COMMUNITY_RULES_EN: RuleClause[] = [
   }
 ];
 
+// ==================== 简体中文社区规范 ====================
+export const COMMUNITY_RULES_ZH: RuleClause[] = [
+  // --- 言语与交流规范 ---
+  {
+    id: '1',
+    ruleNumber: '规则 1',
+    title: '侮辱名誉与人身攻击',
+    category: 'speech',
+    severity: 'medium',
+    severityLabel: '严重程度：中',
+    description: '严禁任何使用粗俗语言、贬低、辱骂或诋毁他人个人名誉、尊严、外貌、处境或家庭的行为。',
+    actions: [
+      '使用涉及生殖器官的粗鄙脏话或恶意辱骂。',
+      '嘲讽、侮辱他人的外貌、个人背景、种族或家庭。',
+      '在聊天室中进行暴力威胁或精神恐吓。'
+    ],
+    penalties: [
+      '首次警告：系统自动将敏感词屏蔽为 ***。',
+      '再次违规：暂停发言权限 24 小时。'
+    ]
+  },
+  {
+    id: '2',
+    ruleNumber: '规则 2',
+    title: '故意规避审核与伪装脏话',
+    category: 'speech',
+    severity: 'medium',
+    severityLabel: '严重程度：中',
+    description: '严禁故意插入句号、下划线、空格、特殊符号、数字替代字母或火星文，以绕过自动内容审查系统。',
+    actions: [
+      '故意拆分拼写：f.u.c.k、s-e-x、b_i_t_c_h、c.a.o 等。',
+      '使用谐音、缩写或隐晦粗俗俚语。',
+      '使用数字替代字母：sh1t、d1ck、s3x 等。'
+    ],
+    penalties: [
+      '系统自动识别并屏蔽为 ***，同时记录一次违规。',
+      '多次故意绕过审核刷屏：封禁账号 1 至 12 小时。'
+    ]
+  },
+  {
+    id: '3',
+    ruleNumber: '规则 3',
+    title: '地域歧视、宗教侮辱与煽动仇恨',
+    category: 'speech',
+    severity: 'high',
+    severityLabel: '严重程度：高',
+    description: '严格遵守网络安全法规：绝对禁止发表分裂地域文化、侮辱宗教信仰、种族、性别或煽动暴力的言论。',
+    actions: [
+      '使用贬低特定地区文化、口音或人群的歧视性词汇。',
+      '亵渎宗教信仰、种族背景或性别身份。',
+      '传播虚假谣言、极端宣传或煽动暴力聚集。'
+    ],
+    penalties: [
+      '封禁账号并限制访问权限 3 至 7 天。',
+      '严重煽动或传播仇恨言论者永久封禁。'
+    ]
+  },
+  {
+    id: '4',
+    ruleNumber: '规则 4',
+    title: '性骚扰与粗俗搭讪',
+    category: 'speech',
+    severity: 'high',
+    severityLabel: '严重程度：高',
+    description: '严禁发送粗俗性暗示信息、进行性骚扰或强迫他人接收敏感不雅内容。',
+    actions: [
+      '向他人索要私密、敏感或露骨照片与视频。',
+      '对聊天室成员的身体发表下流、淫秽的评论。',
+      '在对方明确拒绝后仍持续纠缠或骚扰刷屏。'
+    ],
+    penalties: [
+      '立即断开双方设备之间的 P2P 直连。',
+      '禁止参与所有公共聊天室 48 小时。'
+    ]
+  },
+
+  // --- 文件与媒体内容 ---
+  {
+    id: '5',
+    ruleNumber: '规则 5',
+    title: '传播色情、18+ 及儿童性剥削内容',
+    category: 'file',
+    severity: 'critical',
+    severityLabel: '严重程度：极其严重',
+    description: '依据国际公约与网络安全法规：绝对禁止上传、发送、转发或存储色情、淫秽媒体或任何涉及儿童性剥削与虐待的内容 (CSAM)。',
+    actions: [
+      '发送露骨照片、裸露视频或 18+ 成人色情影片。',
+      '传播淫秽色情资源合集或违法成人网站链接。',
+      '任何涉及剥削、侵害未成年人的影像或信息。'
+    ],
+    penalties: [
+      '最高处罚：永久封禁涉事账号及关联邮箱/手机号，并吊销授权。',
+      '保存证据链并依法配合相关部门追责处理。'
+    ]
+  },
+  {
+    id: '6',
+    ruleNumber: '规则 6',
+    title: '极端暴力、血腥恐怖与自残内容',
+    category: 'file',
+    severity: 'critical',
+    severityLabel: '严重程度：极其严重',
+    description: '严禁分享血腥残忍画面、恶性事故现场、虐待动物或人体酷刑、自杀自残引导以及武器制造教程。',
+    actions: [
+      '分享非医疗教学用途的遗体或严重创伤血腥画面。',
+      '教唆、美化或传播自杀、自残相关图文视频。',
+      '传播恐怖主义宣传、爆炸物或危险武器制造指南。'
+    ],
+    penalties: [
+      'AI 审核系统在传输前自动拦截并清除文件。',
+      '视情节封禁账号 7 天至永久封禁。'
+    ]
+  },
+  {
+    id: '7',
+    ruleNumber: '规则 7',
+    title: '传播病毒、恶意软件与钓鱼诈骗链接',
+    category: 'file',
+    severity: 'critical',
+    severityLabel: '严重程度：极其严重',
+    description: '严禁传输包含木马、勒索病毒、键盘记录器、压缩包炸弹 (Zip Bomb) 的文件或旨在盗取账号与数据的钓鱼链接。',
+    actions: [
+      '伪装正常软件发送恶意可执行文件 (.exe/.bat/.scr)。',
+      '发送旨在瘫痪接收方设备内存或硬盘的压缩包炸弹。',
+      '发送仿冒银行或社交平台的虚假登录钓鱼链接。'
+    ],
+    penalties: [
+      '立即永久封禁涉事账号。',
+      '将恶意文件 SHA-256 哈希值加入全网拦截黑名单。'
+    ]
+  },
+  {
+    id: '8',
+    ruleNumber: '规则 8',
+    title: '侵犯个人隐私与人肉搜索 (Doxxing)',
+    category: 'file',
+    severity: 'high',
+    severityLabel: '严重程度：高',
+    description: '严禁在未经本人明确合法许可的情况下，公开或泄露他人的个人身份识别信息。',
+    actions: [
+      '在聊天室上传他人身份证、护照或私密证件照片。',
+      '公开他人手机号、家庭住址或银行账户信息用于骚扰。',
+      '泄露个人或机构内部机密文件与敏感记录。'
+    ],
+    penalties: [
+      '立即删除并清除所有违规泄露内容。',
+      '锁定文件传输与消息功能 3 至 14 天。'
+    ]
+  },
+
+  // --- 系统与聊天室规范 ---
+  {
+    id: '9',
+    ruleNumber: '规则 9',
+    title: '消息刷屏与恶意占用系统带宽',
+    category: 'system',
+    severity: 'medium',
+    severityLabel: '严重程度：中',
+    description: '严禁高频发送垃圾信息、使用自动化脚本恶意刷屏或发送大量垃圾文件堵塞他人的 P2P/Relay 传输通道。',
+    actions: [
+      '短时间内连续发送数十条重复或无意义消息。',
+      '未经同意向聊天室连续发送超大垃圾文件。',
+      '使用自动化机器人或压测脚本导致聊天室卡顿。'
+    ],
+    penalties: [
+      '触发速率限制，暂时禁言 30 至 60 分钟。',
+      '房主有权立即将捣乱成员踢出房间。'
+    ]
+  },
+  {
+    id: '10',
+    ruleNumber: '规则 10',
+    title: '冒充管理员 (Admin/Dev) 与欺诈行为',
+    category: 'system',
+    severity: 'high',
+    severityLabel: '严重程度：高',
+    description: '严禁将设备名或昵称设为管理员、技术团队或系统官方以欺诈财物、套取密码或恐吓其他用户。',
+    actions: [
+      '使用“系统”“管理员”“Admin”等名称索要 PIN 码或密码。',
+      '冒充开发者向用户索取隐私数据或钱财。',
+      '创建虚假中奖或官方活动房间实施诈骗。'
+    ],
+    penalties: [
+      '收回违规昵称并永久封禁冒充账号。',
+      '列入全平台反欺诈预警名单。'
+    ]
+  },
+  {
+    id: '11',
+    ruleNumber: '规则 11',
+    title: '聊天室房主权限与管理责任',
+    category: 'system',
+    severity: 'low',
+    severityLabel: '严重程度：一般规范',
+    description: '房主有责任维护房间秩序，并有权依据社区规范处置违规成员。',
+    actions: [
+      '房主有权删除违反社区规范的消息。',
+      '房主有权将持续刷屏或捣乱的成员移出房间。',
+      '遇到陌生人恶意闯入骚扰时可随时更换房间密码。'
+    ],
+    penalties: [
+      '若房主故意纵容 18+ 色情内容（规则 5）或恶意软件（规则 7），整个房间将被解散且房主需承担连带责任。'
+    ]
+  },
+
+  // --- 处罚标准与申诉 ---
+  {
+    id: '12',
+    ruleNumber: '规则 12',
+    title: '违规分级处理与公平申诉机制',
+    category: 'sanctions',
+    severity: 'low',
+    severityLabel: '严重程度：通用条款',
+    description: '平台根据违规行为的影响范围和严重程度，采取从轻到重的分级处罚措施。',
+    actions: [
+      '一级（警告）：直接提醒，系统自动将违规词汇屏蔽为 ***。',
+      '二级（限时封禁）：锁定发消息和传文件权限 1 小时至 7 天。',
+      '三级（永久封禁）：永久封禁涉事账号及其关联的同邮箱/同手机号账号。'
+    ],
+    penalties: [
+      '如认为系统误判，被封禁用户可附带证明材料向管理员提交申诉以申请人工复核解封。'
+    ]
+  }
+];
+
 // Default export alias for backward compatibility
 export const COMMUNITY_RULES: RuleClause[] = COMMUNITY_RULES_VI;
 
@@ -493,7 +718,9 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   initialCategory = 'all'
 }) => {
   const { currentLang, setLanguage } = useLanguage();
-  const isEn = currentLang === 'en';
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const isEn = !isVi && !isZh;
 
   const [activeCategory, setActiveCategory] = useState<'all' | 'speech' | 'file' | 'system' | 'sanctions'>(initialCategory);
   const [searchQuery, setSearchQuery] = useState('');
@@ -528,8 +755,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({
 
   // Select localized rules set
   const currentRules = useMemo(() => {
-    return isEn ? COMMUNITY_RULES_EN : COMMUNITY_RULES_VI;
-  }, [isEn]);
+    if (isEn) return COMMUNITY_RULES_EN;
+    if (isZh) return COMMUNITY_RULES_ZH;
+    return COMMUNITY_RULES_VI;
+  }, [isEn, isZh]);
 
   // When mandatory (first login), always display all 12 rules without search or category filtering
   const displayedRules = useMemo(() => {
@@ -558,6 +787,8 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   const handleCopyRule = (rule: RuleClause) => {
     const textToCopy = isEn
       ? `[Basis: ${rule.ruleNumber}: ${rule.title}]\n- Specific Prohibited Actions:\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- Sanctions & Penalties:\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`
+      : isZh
+      ? `[依据 ${rule.ruleNumber}: ${rule.title}]\n- 具体违规行为：\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- 处罚标准与措施：\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`
       : `[Căn cứ ${rule.ruleNumber}: ${rule.title}]\n- Các Hành Vi Cụ Thể:\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- Căn Cứ Xử Phạt:\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`;
 
     navigator.clipboard.writeText(textToCopy);
@@ -571,21 +802,21 @@ export const RulesModal: React.FC<RulesModalProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
             <Flame className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: Critical' : rule.severityLabel}
+            {isEn ? 'Severity: Critical' : isZh ? '严重程度：极其严重' : rule.severityLabel}
           </span>
         );
       case 'high':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
             <AlertTriangle className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: High' : rule.severityLabel}
+            {isEn ? 'Severity: High' : isZh ? '严重程度：高' : rule.severityLabel}
           </span>
         );
       case 'medium':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
             <Info className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: Medium' : rule.severityLabel}
+            {isEn ? 'Severity: Medium' : isZh ? '严重程度：中' : rule.severityLabel}
           </span>
         );
       case 'low':
@@ -593,7 +824,11 @@ export const RulesModal: React.FC<RulesModalProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            {isEn ? (rule.category === 'sanctions' ? 'Severity: General Rule' : 'Severity: Low') : rule.severityLabel}
+            {isEn
+              ? (rule.category === 'sanctions' ? 'Severity: General Rule' : 'Severity: Low')
+              : isZh
+              ? (rule.category === 'sanctions' ? '严重程度：通用条款' : '严重程度：一般规范')
+              : rule.severityLabel}
           </span>
         );
     }
@@ -635,6 +870,32 @@ export const RulesModal: React.FC<RulesModalProps> = ({
     footerMandatoryHint: '* Scroll to the bottom to confirm acceptance and get started.',
     footerNotice: 'Users can copy rules to remind violating members in chat rooms.',
     footerClose: 'Understood & Close',
+  } : isZh ? {
+    title: '平台使用条款与社区规范',
+    mandatoryBadge: '必须确认',
+    subtitle: '（依据网络安全法规、国际标准及平台管理规范制定）',
+    close: '关闭',
+    all: `全部 (${currentRules.length})`,
+    speech: '言语与交流',
+    file: '文件与媒体',
+    system: '系统与聊天室',
+    sanctions: '处罚与申诉',
+    searchPlaceholder: '搜索规则（例如：规则 1、18+、绕过）...',
+    mandatoryNotice: '欢迎来到 CloudSend！请阅读下方 12 条社区规则，勾选底部确认框后点击“开始使用”。',
+    mandatoryCounter: '12 / 12 条规则',
+    actionsLabel: '- 具体违规行为：',
+    penaltiesLabel: '- 处罚依据与措施：',
+    appliesToAll: '适用于平台全体用户',
+    copyBtn: '复制',
+    copiedBtn: '已复制规则！',
+    copyTooltip: '复制规则以作为处理违规行为的依据',
+    confirmTitle: '确认同意 CloudSend 平台社区规范',
+    confirmDesc: '确认同意即表示您承诺严格遵守以上 12 条规则，共同维护安全、友好的交流环境。',
+    agreeCheckbox: '我已阅读并同意遵守 CloudSend 平台使用规则',
+    startUsing: '开始使用',
+    footerMandatoryHint: '* 请滚动至底部勾选确认并开始使用。',
+    footerNotice: '用户可复制规则条款以在聊天室中提醒违规成员。',
+    footerClose: '我已了解并关闭',
   } : {
     title: 'Nội Quy & Điều Khoản Sử Dụng Web',
     mandatoryBadge: 'Bắt buộc xác nhận',
@@ -695,8 +956,8 @@ export const RulesModal: React.FC<RulesModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Language Switcher Button (VI / EN) */}
-            <div className="flex items-center rounded-xl bg-slate-900 border border-slate-700/80 p-0.5">
+            {/* Language Switcher Button (VI / EN / ZH) */}
+            <div translate="no" className="notranslate flex items-center rounded-xl bg-slate-900 border border-slate-700/80 p-0.5">
               <button
                 type="button"
                 onClick={() => setLanguage('vi')}
@@ -722,6 +983,19 @@ export const RulesModal: React.FC<RulesModalProps> = ({
               >
                 <span>🇬🇧</span>
                 <span className="hidden sm:inline">English</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('zh-CN')}
+                className={`px-2 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  isZh
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="中文 (简体 / 繁體)"
+              >
+                <span>🇨🇳</span>
+                <span className="hidden sm:inline">中文</span>
               </button>
             </div>
 

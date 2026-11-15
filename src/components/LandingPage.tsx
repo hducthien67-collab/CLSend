@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { CloudSendLogo } from './CloudSendLogo';
 import { SilkFabricBackground } from './SilkFabricBackground';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface LandingPageProps {
   onEnterApp: () => void;
@@ -349,18 +349,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       {/* Footer in Dark Theme */}
       <footer className="w-full py-6 text-center text-xs text-slate-500 border-t border-slate-900/80 bg-slate-950/60 backdrop-blur-xs">
         <p>
-          {currentLang === 'en' ? '© 2012 - 2026 A product of ClSend - ' : '© 2012 - 2026 Một sản phẩm của ClSend - '}
+          {pickLang(
+            currentLang,
+            '© 2012 - 2026 Một sản phẩm của ClSend - ',
+            '© 2012 - 2026 A product of ClSend - ',
+            '© 2012 - 2026 ClSend 出品 - '
+          )}
           {onOpenRules ? (
             <button
               type="button"
               onClick={onOpenRules}
               className="text-emerald-400 hover:underline cursor-pointer font-medium"
             >
-              {currentLang === 'en' ? 'Terms of Service' : 'Điều khoản sử dụng dịch vụ'}
+              {pickLang(currentLang, 'Điều khoản sử dụng dịch vụ', 'Terms of Service', '服务条款')}
             </button>
           ) : (
             <span className="text-emerald-400">
-              {currentLang === 'en' ? 'Terms of Service' : 'Điều khoản sử dụng dịch vụ'}
+              {pickLang(currentLang, 'Điều khoản sử dụng dịch vụ', 'Terms of Service', '服务条款')}
             </span>
           )}
         </p>

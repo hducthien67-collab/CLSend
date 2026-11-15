@@ -84,49 +84,51 @@ export function detectDeviceType(): DeviceType {
   return 'desktop';
 }
 
-export function getDeviceTypeInfo(type: DeviceType, lang: 'vi' | 'en' = 'vi'): {
+import { LanguageCode, pickLang } from '../context/LanguageContext';
+
+export function getDeviceTypeInfo(type: DeviceType, lang: LanguageCode | string = 'vi'): {
   type: DeviceType;
   label: string;
   subLabel: string;
   description: string;
 } {
-  const isEn = lang === 'en';
+  const p = (vi: string, en: string, zh: string) => pickLang(lang, vi, en, zh);
   switch (type) {
     case 'mobile':
       return {
         type: 'mobile',
-        label: isEn ? 'Mobile (Smartphone)' : 'Điện thoại (Mobile)',
-        subLabel: isEn ? 'Smart mobile device' : 'Thiết bị di động thông minh',
-        description: isEn ? 'Auto-detected based on mobile phone hardware' : 'Được tự động nhận diện theo phần cứng điện thoại'
+        label: p('Điện thoại (Mobile)', 'Mobile (Smartphone)', '手机 (Mobile)'),
+        subLabel: p('Thiết bị di động thông minh', 'Smart mobile device', '智能移动设备'),
+        description: p('Được tự động nhận diện theo phần cứng điện thoại', 'Auto-detected based on mobile phone hardware', '根据手机硬件自动识别')
       };
     case 'tablet':
       return {
         type: 'tablet',
-        label: isEn ? 'Tablet (iPad / Pad)' : 'Máy tính bảng (Tablet)',
-        subLabel: isEn ? 'Flat-screen tablet device' : 'Thiết bị màn hình phẳng',
-        description: isEn ? 'Auto-detected based on iPad / Tablet hardware' : 'Được tự động nhận diện theo phần cứng iPad / Máy tính bảng'
+        label: p('Máy tính bảng (Tablet)', 'Tablet (iPad / Pad)', '平板电脑 (Tablet)'),
+        subLabel: p('Thiết bị màn hình phẳng', 'Flat-screen tablet device', '平板触控设备'),
+        description: p('Được tự động nhận diện theo phần cứng iPad / Máy tính bảng', 'Auto-detected based on iPad / Tablet hardware', '根据 iPad / 平板硬件自动识别')
       };
     case 'laptop':
       return {
         type: 'laptop',
-        label: isEn ? 'Laptop (Notebook PC)' : 'Laptop (Máy tính xách tay)',
-        subLabel: isEn ? 'Portable laptop computer' : 'Máy tính xách tay',
-        description: isEn ? 'Auto-detected based on laptop display & hardware' : 'Được tự động nhận diện theo màn hình & phần cứng Laptop'
+        label: p('Laptop (Máy tính xách tay)', 'Laptop (Notebook PC)', '笔记本电脑 (Laptop)'),
+        subLabel: p('Máy tính xách tay', 'Portable laptop computer', '便携式笔记本电脑'),
+        description: p('Được tự động nhận diện theo màn hình & phần cứng Laptop', 'Auto-detected based on laptop display & hardware', '根据笔记本屏幕与硬件自动识别')
       };
     case 'tv':
       return {
         type: 'tv',
-        label: isEn ? 'Smart TV (Living Room)' : 'Smart TV (Truyền hình thông minh)',
-        subLabel: isEn ? 'Smart Television (Tizen / WebOS / Android TV)' : 'Tivi thông minh (Tizen / WebOS / Android TV)',
-        description: isEn ? 'Optimized for large TV display, high DPI and auto file reception' : 'Được tối ưu giao diện màn hình lớn, phóng to DPI chống mỏi mắt và tự động nhận file'
+        label: p('Smart TV (Truyền hình thông minh)', 'Smart TV (Living Room)', '智能电视 (Smart TV)'),
+        subLabel: p('Tivi thông minh (Tizen / WebOS / Android TV)', 'Smart Television (Tizen / WebOS / Android TV)', '智能电视 (Tizen / WebOS / Android TV)'),
+        description: p('Được tối ưu giao diện màn hình lớn, phóng to DPI chống mỏi mắt và tự động nhận file', 'Optimized for large TV display, high DPI and auto file reception', '已针对电视大屏优化显示、高 DPI 缩放与自动接收文件')
       };
     case 'desktop':
     default:
       return {
         type: 'desktop',
-        label: isEn ? 'PC (Desktop Computer)' : 'PC (Máy tính để bàn)',
-        subLabel: isEn ? 'Fixed desktop computer' : 'Máy tính bàn cố định',
-        description: isEn ? 'Auto-detected based on desktop computer configuration' : 'Được tự động nhận diện theo cấu hình máy tính để bàn'
+        label: p('PC (Máy tính để bàn)', 'PC (Desktop Computer)', '台式电脑 (PC)'),
+        subLabel: p('Máy tính bàn cố định', 'Fixed desktop computer', '桌面固定电脑'),
+        description: p('Được tự động nhận diện theo cấu hình máy tính để bàn', 'Auto-detected based on desktop computer configuration', '根据台式电脑配置自动识别')
       };
   }
 }

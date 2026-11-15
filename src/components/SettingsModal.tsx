@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth, getClientDeviceId } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../context/LanguageContext';
 import { auth } from '../firebase/config';
 import { 
   X, 
@@ -30,13 +30,18 @@ import {
   Camera, 
   Trash2, 
   HardDrive,
-  Bell
+  Bell,
+  Phone,
+  Globe
 } from 'lucide-react';
 import { LoginSession } from './types';
 import { AVATAR_COLORS, getDeviceTypeInfo, generateDefaultDeviceName } from '../utils/device';
 import { playReceiveSound } from '../utils/sound';
 import { triggerIncomingChatMessageNotification } from '../utils/tabNotification';
 import { getPwaStorageEstimate, cleanAllPwaCachesAndBloat, StorageEstimateInfo } from '../utils/pwaStorageCleaner';
+
+import { isDevUser } from '../utils/devModeration';
+import { MobileSettingsView } from './mobile/MobileSettingsView';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -45,6 +50,7 @@ interface SettingsModalProps {
   onOpenDevConsole?: () => void;
   onOpenDevPage?: () => void;
   showDataChannelAvatars?: boolean;
+  forceMobileLayout?: boolean;
 }
 
 type SettingsTab = 'account' | 'appearance' | 'notifications';
@@ -55,7 +61,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenRules, 
   onOpenDevConsole,
   onOpenDevPage,
+  forceMobileLayout = false,
 }) => {
+  const [isSmallScreen, setIsSmallScreen] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 767px)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(max-width: 767px)');
+    const handleChange = () => setIsSmallScreen(mq.matches);
+    handleChange();
+    mq.addEventListener?.('change', handleChange);
+    return () => mq.removeEventListener?.('change', handleChange);
+  }, []);
   const { 
     currentUser, 
     userProfile, 
@@ -64,13 +84,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     logout,
     changePassword,
     updateDisplayName,
+    linkEmail,
+    linkPhoneNumber,
+    linkWithGoogleAccount,
     sendEmailVerificationCode,
     verifyEmailCodeAndLink,
     getLoginSessions,
     logoutSession,
     logoutAllDevices,
   } = useAuth();
-  const { t, currentLang } = useLanguage();
+  const { t, currentLang, setLanguage, languages } = useLanguage();
+  const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
   
   // Tab Management
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
@@ -133,6 +157,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isEditingLinkedEmail, setIsEditingLinkedEmail] = useState(false);
   const [linkEmailSuccess, setLinkEmailSuccess] = useState<string | null>(null);
   const [linkEmailError, setLinkEmailError] = useState<string | null>(null);
+  const [isLinkingEmailDirect, setIsLinkingEmailDirect] = useState(false);
+
+  // Phone Number Linking
+  const currentLinkedPhone = userProfile?.phone || userProfile?.linkedPhone || userProfile?.phoneNumber || currentUser?.phone || '';
+  const [phoneInput, setPhoneInput] = useState(currentLinkedPhone);
+  const [isLinkingPhone, setIsLinkingPhone] = useState(false);
+  const [phoneLinkSuccess, setPhoneLinkSuccess] = useState<string | null>(null);
+  const [phoneLinkError, setPhoneLinkError] = useState<string | null>(null);
 
   // Storage Cache Cleaner State
   const [storageInfo, setStorageInfo] = useState<StorageEstimateInfo | null>(null);
@@ -171,9 +203,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setCustomBannerUrl(settings.bannerUrl);
       setEditDisplayName(currentUser?.displayName || userProfile?.displayName || '');
       setLinkEmailInput(isLinkedEmail ? (currentUser?.email || userProfile?.linkedEmail || '') : '');
+      setPhoneInput(currentLinkedPhone);
+      setLinkEmailError(null);
+      setLinkEmailSuccess(null);
+      setPhoneLinkError(null);
+      setPhoneLinkSuccess(null);
       getPwaStorageEstimate().then(setStorageInfo).catch(() => {});
     }
-  }, [isOpen, settings, currentUser, userProfile, isLinkedEmail]);
+  }, [isOpen, settings, currentUser, userProfile, isLinkedEmail, currentLinkedPhone]);
 
   const fetchSessions = async () => {
     setIsLoadingSessions(true);
@@ -437,11 +474,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleLinkPhoneSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPhoneLinkError(null);
+    setPhoneLinkSuccess(null);
+    setIsLinkingPhone(true);
+    try {
+      const saved = await linkPhoneNumber(phoneInput);
+      setPhoneInput(saved);
+      setPhoneLinkSuccess(pick(`Đã liên kết SĐT ${saved} thành công!`, `Linked phone ${saved} successfully!`, `已成功绑定手机号 ${saved}！`));
+      setTimeout(() => setPhoneLinkSuccess(null), 4000);
+    } catch (err: any) {
+      setPhoneLinkError(err?.message || pick('Không thể liên kết số điện thoại.', 'Unable to link phone number.', '无法绑定手机号。'));
+    } finally {
+      setIsLinkingPhone(false);
+    }
+  };
+
+  const handleLinkEmailSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLinkEmailError(null);
+    setLinkEmailSuccess(null);
+    setIsLinkingEmailDirect(true);
+    try {
+      await linkEmail(linkEmailInput);
+      setLinkEmailSuccess(pick(`Đã liên kết Email ${linkEmailInput.trim().toLowerCase()} thành công!`, `Linked Email ${linkEmailInput.trim().toLowerCase()} successfully!`, `已成功绑定邮箱 ${linkEmailInput.trim().toLowerCase()}！`));
+      setTimeout(() => setLinkEmailSuccess(null), 4000);
+    } catch (err: any) {
+      setLinkEmailError(err?.message || pick('Không thể liên kết Email.', 'Unable to link email.', '无法绑定邮箱。'));
+    } finally {
+      setIsLinkingEmailDirect(false);
+    }
+  };
+
+  const handleLinkGoogleSubmit = async () => {
+    setLinkEmailError(null);
+    setLinkEmailSuccess(null);
+    setIsLinkingEmailDirect(true);
+    try {
+      const res = await linkWithGoogleAccount();
+      if (res?.email) {
+        setLinkEmailInput(res.email);
+        setLinkEmailSuccess(pick(`Đã đồng bộ Google (${res.email}) thành công!`, `Synced Google (${res.email}) successfully!`, `已成功同步 Google (${res.email})！`));
+        setTimeout(() => setLinkEmailSuccess(null), 4000);
+      }
+    } catch (err: any) {
+      setLinkEmailError(err?.message || pick('Không thể liên kết Google.', 'Unable to link Google account.', '无法绑定 Google 账号。'));
+    } finally {
+      setIsLinkingEmailDirect(false);
+    }
+  };
+
   const formatSessionTime = (isoString?: string) => {
-    if (!isoString) return currentLang === 'en' ? 'Just now' : 'Vừa xong';
+    if (!isoString) return pick('Vừa xong', 'Just now', '刚刚');
     try {
       const d = new Date(isoString);
-      return d.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN', {
+      return d.toLocaleString(getLocaleTag(currentLang), {
         hour: '2-digit',
         minute: '2-digit',
         day: '2-digit',
@@ -455,6 +543,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   if (!isOpen) return null;
 
+  if (forceMobileLayout || isSmallScreen) {
+    return (
+      <MobileSettingsView
+        isOpen={isOpen}
+        onClose={onClose}
+        onOpenRules={onOpenRules}
+        onOpenDevConsole={onOpenDevConsole}
+        onOpenDevPage={onOpenDevPage}
+      />
+    );
+  }
+
   const displayName = currentUser?.displayName || userProfile?.displayName || 'Đức Thiện';
   const displayUsername = rawUsername || 'hducthien';
   const displayAvatar = customAvatarUrl || currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName)}`;
@@ -462,10 +562,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       
-      {/* Main Settings Frame Modal: Taller vertically (h-[86vh], min-h-[640px]) with fixed height so it doesn't jump when switching tabs */}
+      {/* Main Settings Frame Modal */}
       <div 
         id="settings-modal-card"
-        className="relative w-full max-w-5xl h-[86vh] min-h-[640px] max-h-[86vh] bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 flex flex-col md:flex-row overflow-hidden z-10"
+        className="relative w-full max-w-5xl h-[86vh] min-h-[480px] md:min-h-[620px] max-h-[90vh] bg-slate-900 rounded-2xl shadow-2xl border border-slate-800 flex flex-col md:flex-row overflow-hidden z-10"
       >
         
         {/* NÚT THOÁT Ở TRÊN GÓC PHẢI */}
@@ -474,12 +574,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           onClick={onClose}
           className="absolute top-3 right-3 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
         >
-          <span>Thoát</span>
+          <span>{t('settings.close_btn')}</span>
           <X className="w-4 h-4" />
         </button>
 
         {/* CỘT BÊN TRÁI (SIDEBAR) */}
-        <aside className="w-full md:w-72 bg-slate-950 p-5 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col justify-between shrink-0 h-full">
+        <aside className="w-full md:w-72 bg-slate-950 p-5 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col justify-between shrink-0 md:h-full">
           <div>
             {/* Góc trên trái: Ảnh đại diện + Tên hiển thị & Username đặt SÁT BÊN CẠNH avatar */}
             <div className="flex items-center gap-2.5 pb-4 border-b border-slate-800">
@@ -545,7 +645,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="pt-4 border-t border-slate-800 flex flex-col gap-2">
             {savedSuccess && (
               <span className="text-emerald-400 font-bold text-[11px] animate-in fade-in flex items-center gap-1 justify-center">
-                <Check className="w-3.5 h-3.5" /> Đã lưu thành công
+                <Check className="w-3.5 h-3.5" /> {t('settings.save_success_toast')}
               </span>
             )}
             <button
@@ -556,13 +656,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               className="w-full py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-98 disabled:opacity-50"
             >
               {isSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4 stroke-[3]" />}
-              <span>Lưu cài đặt</span>
+              <span>{t('settings.save_changes_btn')}</span>
             </button>
           </div>
         </aside>
 
-        {/* NỘI DUNG TƯƠNG ỨNG CỦA 3 TAB PHÍA BÊN PHẢI (Fixed height container with internal scroll) */}
-        <main className="flex-1 p-6 md:p-8 overflow-y-auto no-scrollbar space-y-5 h-full">
+        {/* NỘI DUNG TƯƠNG ỨNG CỦA 3 TAB PHÍA BÊN PHẢI */}
+        <main className="flex-1 min-h-0 p-6 md:p-8 overflow-y-auto no-scrollbar space-y-5">
           
           {/* TAB 1: TÀI KHOẢN & THIẾT BỊ */}
           {activeTab === 'account' && (
@@ -687,8 +787,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 text-xs font-semibold flex items-center gap-1.5 shrink-0"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Dọn dẹp</span>
+                  <span>{pick('Dọn dẹp', 'Clean', '清理')}</span>
                 </button>
+              </div>
+
+              {/* Ngôn ngữ giao diện / Language */}
+              <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-bold text-white">{t('settings.language')}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400">{t('settings.language_desc')}</span>
+                </div>
+                <div translate="no" className="notranslate grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
+                  {languages.map((lang) => (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => setLanguage(lang.code)}
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                        currentLang === lang.code
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>{lang.flag}</span>
+                      <span className="truncate">{lang.name}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
             </div>
@@ -845,27 +973,104 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Bell className="w-4 h-4 text-emerald-400" />
-                  <span>Cài đặt Thông báo & Bảo mật tài khoản</span>
+                  <span>{pick('Cài đặt Thông báo & Bảo mật tài khoản', 'Notifications & Account Security', '通知与账号安全设置')}</span>
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">Quản lý mật khẩu, xác thực Gmail OTP và phiên đăng nhập.</p>
+                <p className="text-xs text-slate-400 mt-0.5">{pick('Quản lý mật khẩu, liên kết Email / Số điện thoại và phiên đăng nhập.', 'Manage password, linked Email / Phone number and login sessions.', '管理密码、绑定的邮箱/手机号及登录会话。')}</p>
+              </div>
+
+              {/* Liên kết Số điện thoại & Email đồng bộ bảo mật */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Số điện thoại */}
+                <form onSubmit={handleLinkPhoneSubmit} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{pick('Số điện thoại liên kết', 'Linked Phone Number', '绑定手机号')}</span>
+                    </h3>
+                    {currentLinkedPhone && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                        {pick('Đã lưu', 'Saved', '已绑定')}
+                      </span>
+                    )}
+                  </div>
+                  {phoneLinkError && <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">{phoneLinkError}</div>}
+                  {phoneLinkSuccess && <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px]">{phoneLinkSuccess}</div>}
+                  <div className="flex gap-2">
+                    <input
+                      type="tel"
+                      value={phoneInput}
+                      onChange={(e) => setPhoneInput(e.target.value)}
+                      placeholder="09xx xxx xxx / +84..."
+                      className="flex-1 min-w-0 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isLinkingPhone}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600/25 hover:bg-emerald-600/40 border border-emerald-500/30 text-emerald-300 text-xs font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {isLinkingPhone ? '...' : pick('Lưu SĐT', 'Save', '保存')}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Email / Google */}
+                <form onSubmit={handleLinkEmailSubmit} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-sky-400" />
+                      <span>{pick('Email / Gmail liên kết', 'Linked Email / Gmail', '绑定邮箱 / Gmail')}</span>
+                    </h3>
+                    {isLinkedEmail && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-mono">
+                        {pick('Đã liên kết', 'Linked', '已绑定')}
+                      </span>
+                    )}
+                  </div>
+                  {linkEmailError && <div className="p-2 rounded bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">{linkEmailError}</div>}
+                  {linkEmailSuccess && <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px]">{linkEmailSuccess}</div>}
+                  <div className="flex gap-2">
+                    <input
+                      type="email"
+                      value={linkEmailInput}
+                      onChange={(e) => setLinkEmailInput(e.target.value)}
+                      placeholder="yourname@gmail.com"
+                      className="flex-1 min-w-0 px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white font-mono"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isLinkingEmailDirect}
+                      className="px-3 py-1.5 rounded-lg bg-sky-600/25 hover:bg-sky-600/40 border border-sky-500/30 text-sky-300 text-xs font-bold shrink-0 cursor-pointer disabled:opacity-50"
+                    >
+                      {isLinkingEmailDirect ? '...' : pick('Lưu Email', 'Save', '保存')}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleLinkGoogleSubmit}
+                    disabled={isLinkingEmailDirect}
+                    className="w-full py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-semibold cursor-pointer"
+                  >
+                    {pick('Đồng bộ trực tiếp với tài khoản Google', 'Sync directly with Google account', '直接同步 Google 账号')}
+                  </button>
+                </form>
               </div>
 
               {/* Đổi mật khẩu */}
               {!isGoogleUser && (
                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
-                  <h3 className="text-xs font-bold text-white">Đổi Mật Khẩu</h3>
+                  <h3 className="text-xs font-bold text-white">{pick('Đổi Mật Khẩu', 'Change Password', '修改密码')}</h3>
                   {passwordError && <div className="p-2 rounded bg-rose-500/10 text-rose-300 text-xs">{passwordError}</div>}
                   {passwordSuccess && <div className="p-2 rounded bg-emerald-500/10 text-emerald-300 text-xs">{passwordSuccess}</div>}
                   
                   <form onSubmit={handleChangePasswordSubmit} className="space-y-2">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Mật khẩu cũ" className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
-                      <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mật khẩu mới" className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
-                      <input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder="Nhập lại mới" className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
+                      <input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder={pick('Mật khẩu cũ', 'Current password', '当前密码')} className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
+                      <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder={pick('Mật khẩu mới', 'New password', '新密码')} className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
+                      <input type="password" value={confirmNewPassword} onChange={(e) => setConfirmNewPassword(e.target.value)} placeholder={pick('Nhập lại mới', 'Confirm new', '确认新密码')} className="px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white" />
                     </div>
                     <div className="flex justify-end pt-1">
                       <button type="submit" disabled={isUpdatingPassword} className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-bold">
-                        Đổi mật khẩu
+                        {pick('Đổi mật khẩu', 'Update password', '更新密码')}
                       </button>
                     </div>
                   </form>

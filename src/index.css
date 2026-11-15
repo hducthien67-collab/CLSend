@@ -22,54 +22,29 @@ html, body {
 }
 
 /* ==========================================================
-   GLOBAL TEXT SELECTION DISCIPLINE (CHỐNG BÔI ĐEN TOÀN TRANG)
-   Mặc định vô hiệu hóa bôi đen trên toàn bộ giao diện web,
-   TRỪ:
-   1. Nội dung tin nhắn người dùng gửi trong phòng chat
-   2. Các đoạn văn bản / mã số có nút Sao Chép (Copy)
-   3. Các ô nhập liệu (input / textarea / contenteditable)
+   GLOBAL TEXT SELECTION DISCIPLINE (FAST INHERITED SELECTORS)
    ========================================================== */
-*, *::before, *::after {
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
-  user-select: none;
-}
-
-/* Cho phép bôi đen & nhập liệu trên các ô nhập liệu tiêu chuẩn */
 input,
 textarea,
 select,
 [contenteditable="true"],
-[contenteditable=""] {
-  -webkit-user-select: text !important;
-  -moz-user-select: text !important;
-  -ms-user-select: text !important;
-  user-select: text !important;
+[contenteditable=""],
+.chat-bubble-item,
+#chat-messages-container,
+[data-chat-message="true"],
+.chat-selectable-text {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  -ms-user-select: text;
+  user-select: text;
 }
 
-/* 1. Cho phép bôi đen toàn bộ nội dung tin nhắn do người dùng gửi trong phòng chat và tất cả các thẻ con */
-.chat-scroll-container p,
-.chat-scroll-container .chat-message-text,
-.chat-scroll-container .chat-message-text *,
-.chat-bubble-item p,
-.chat-bubble-item .chat-message-text,
-.chat-bubble-item .chat-message-text *,
-.chat-message-body,
-.chat-message-body *,
-[data-chat-message="true"],
-[data-chat-message="true"] *,
-.chat-selectable-text,
-.chat-selectable-text *,
-.chat-message-content,
-.chat-message-content *,
-.chat-message-bubble,
-.chat-message-bubble * {
-  -webkit-user-select: text !important;
-  -moz-user-select: text !important;
-  -ms-user-select: text !important;
-  user-select: text !important;
-  -webkit-touch-callout: default !important;
+button,
+svg {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 ::selection {
@@ -637,17 +612,11 @@ html.tv-mode [tabindex]:focus-visible,
   outline-offset: 2px !important;
 }
 
-/* Modal Open: Strict scroll locking across all desktop, mobile, and TV browsers */
+/* Modal Open: Fast scroll locking without wildcard attribute selectors */
 body.modal-open,
 body.modal-open #root,
-body.modal-open main,
-body.modal-open [class*="overflow-y-auto"],
-body.modal-open .overflow-y-auto,
-body.modal-open .overflow-auto,
-body.modal-open .chat-scroll-container,
-body.modal-open [key*="tab"] {
+body.modal-open .chat-scroll-container {
   overflow: hidden !important;
-  touch-action: none !important;
   overscroll-behavior: contain !important;
 }
 
@@ -767,7 +736,7 @@ html, body, #root {
 }
 
 .animate-cyber-grid {
-  animation: background-cyber-grid 32s linear infinite;
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

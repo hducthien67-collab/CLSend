@@ -66,6 +66,7 @@ import {
   setDoc,
   updateDoc,
   addDoc,
+  getDocs,
   query,
   orderBy,
   limit,
@@ -80,8 +81,11 @@ import {
   DEV_EMAIL, 
   SANCTION_TIERS, 
   applyTierSanction, 
+  applyLinkedBanSanction,
+  removeDevSanction,
   sendPrivateDevNotification, 
   callAiAuditUser, 
+  evaluateUserWith12Rules,
   AiEvaluationResult 
 } from '../utils/devModeration';
 import { 
@@ -89,13 +93,14 @@ import {
   generateImageThumbnail, 
   MAX_FILE_SIZE 
 } from '../utils/fileUpload';
+import { unwrapSecureBase64Message } from '../utils/base64Security';
 import { DataStorageAvatarsModal } from './DataStorageAvatars';
 
 interface DevDatastorePageProps {
   onBackToApp?: () => void;
 }
 
-type ManagementTask = 'rooms' | 'users' | 'violators' | 'banned' | 'broadcast' | 'reports';
+type ManagementTask = 'rooms_users' | 'violators_banned' | 'broadcast' | 'reports';
 
 // Interface cho đối tượng vi phạm
 interface ViolatorRecord {
@@ -123,11 +128,31 @@ interface BroadcastRecord {
   active: boolean;
 }
 
+interface ViolationIncident {
+  id: string;
+  roomId: string;
+  roomName: string;
+  roomCode?: string;
+  senderId?: string;
+  senderName?: string;
+  senderDevice?: string;
+  createdAt?: string;
+  timestamp?: number;
+  content: string;
+  reason: string;
+  source: 'openai_moderation' | 'word_filter' | 'user_report' | 'sanction';
+  severity: 'light' | 'medium' | 'heavy' | 'critical';
+}
+
+const DEFAULT_GLOBAL_LOUNGE_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="%23064e3b" stroke="%2310b981" stroke-width="3"/><circle cx="50" cy="50" r="38" fill="%23047857"/><ellipse cx="50" cy="50" rx="18" ry="38" fill="none" stroke="%2334d399" stroke-width="2.5"/><line x1="12" y1="50" x2="88" y2="50" stroke="%2334d399" stroke-width="2.5"/><path d="M20 30 Q50 38 80 30" fill="none" stroke="%236ee7b7" stroke-width="2"/><path d="M20 70 Q50 62 80 70" fill="none" stroke="%236ee7b7" stroke-width="2"/></svg>`;
+
 export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp }) => {
   const { currentUser, settings } = useAuth();
   
   // 1. Tác vụ được chọn trên Thanh Điều Khiển
-  const [activeTask, setActiveTask] = useState<ManagementTask>('rooms');
+  const [activeTask, setActiveTask] = useState<ManagementTask>('rooms_users');
+  const [roomsUsersSubTab, setRoomsUsersSubTab] = useState<'rooms' | 'users'>('rooms');
+  const [violatorsBannedSubTab, setViolatorsBannedSubTab] = useState<'violators' | 'banned'>('violators');
 
   // 2. Các bộ lọc tương ứng trong "Khung 2" (Bên Trái)
   const [roomFilter, setRoomFilter] = useState<'all' | 'public' | 'private' | 'violating'>('all');
@@ -176,7 +201,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // State chuyên biệt cho Tác vụ 2. Những Người Dùng (Quản trị, Thiết bị, Thông báo riêng, Kỷ luật AI)
   const [firestoreUsers, setFirestoreUsers] = useState<any[]>([]);
-  const [userDetailsTab, setUserDetailsTab] = useState<'info' | 'notify' | 'moderation' | 'messages'>('info');
+  const [userDetailsTab, setUserDetailsTab] = useState<'info' | 'messages'>('info');
   const [privateMsgText, setPrivateMsgText] = useState('');
   const consecutiveEnterCountRef = useRef<number>(0);
   const [privateNotifStatus, setPrivateNotifStatus] = useState<string | null>(null);
@@ -186,6 +211,25 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const [isAiAuditing, setIsAiAuditing] = useState(false);
   const [userMessages, setUserMessages] = useState<ChatMessage[]>([]);
   const [copiedUid, setCopiedUid] = useState(false);
+
+  // State Kiểm Duyệt Hàng Loạt bằng OpenAI Moderation
+  const [openAiAuditResults, setOpenAiAuditResults] = useState<Record<string, {
+    severity: 'light' | 'medium' | 'heavy' | 'critical';
+    reason: string;
+    source: string;
+    categories?: string[];
+    auditedAt: string;
+    evidenceMessages?: ViolationIncident[];
+  }>>({});
+  const [violationIncidentsMap, setViolationIncidentsMap] = useState<Record<string, ViolationIncident[]>>({});
+  const [isLoadingViolationDetails, setIsLoadingViolationDetails] = useState(false);
+  const [isBatchAuditing, setIsBatchAuditing] = useState(false);
+  const [batchAuditSummary, setBatchAuditSummary] = useState<{
+    totalScanned: number;
+    flaggedCount: number;
+    source: string;
+    timestamp: string;
+  } | null>(null);
 
   // Tùy chỉnh thông điệp nhắc nhở Roblox cho 5 cấp độ (DEV có thể tự chỉnh văn bản gửi đi bất kỳ lúc nào)
   const [sanctionCustomNotes, setSanctionCustomNotes] = useState<Record<string, string>>({
@@ -201,7 +245,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // Lắng nghe thông báo riêng và tin nhắn của người dùng đang được chọn thời gian thực
   useEffect(() => {
-    if (activeTask !== 'users' || !selectedItemId) {
+    if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'users' || !selectedItemId) {
       setUserMessages([]);
       setSentPrivateNotifs([]);
       setAiAuditResult(null);
@@ -271,7 +315,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // Lắng nghe tin nhắn phòng chat đang được chọn thời gian thực (Bao gồm lưu trữ vĩnh viễn không bị mất khi Client xóa)
   useEffect(() => {
-    if (activeTask !== 'rooms' || !selectedItemId) {
+    if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'rooms' || !selectedItemId) {
       setRoomMessages([]);
       return;
     }
@@ -372,8 +416,17 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
     // 3. Sanctions / Banned users
     const unsubSanctions = onSnapshot(collection(db, 'sanctions'), (snap) => {
-      const list: UserSanction[] = snap.docs.map(d => ({ ...d.data() } as UserSanction));
-      setSanctions(list);
+      const rawList: UserSanction[] = snap.docs.map(d => ({ ...d.data() } as UserSanction));
+      const map = new Map<string, UserSanction>();
+      rawList.forEach(item => {
+        const key = item.uid || (item.email ? item.email.toLowerCase() : '');
+        if (key) {
+          if (!map.has(key) || (item.bannedAt && !map.get(key)?.bannedAt)) {
+            map.set(key, item);
+          }
+        }
+      });
+      setSanctions(Array.from(map.values()));
     }, (err) => {
       console.warn('Lỗi đọc sanctions Firestore:', err);
     });
@@ -553,32 +606,47 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       }
     });
 
-    // 1. Nạp và đồng bộ từ onlinePresence
+    // 1. Nạp và đồng bộ từ onlinePresence (luôn giữ nguyên ảnh đại diện tùy chỉnh nếu đã có)
     onlinePresence.forEach(u => {
       const existing = userMap.get(u.uid);
+      const syncedAvatar = (u as any).customAvatarUrl || existing?.customAvatarUrl || (u as any).avatarUrl || existing?.avatarUrl || (u as any).photoURL || existing?.photoURL;
       userMap.set(u.uid, {
         ...(existing || {}),
         id: u.uid,
         ...u,
+        customAvatarUrl: (u as any).customAvatarUrl || existing?.customAvatarUrl || '',
+        avatarUrl: (u as any).avatarUrl || existing?.avatarUrl || '',
+        photoURL: (u as any).photoURL || existing?.photoURL || syncedAvatar || '',
         onlineCheck: evaluateOnlineStatus(u.lastSeen, u.status)
       });
     });
 
-    // 2. Thêm current user nếu chưa có
-    if (currentUser && !userMap.has(currentUser.uid)) {
-      userMap.set(currentUser.uid, {
-        id: currentUser.uid,
-        uid: currentUser.uid,
-        email: currentUser.email || 'user@cloudsend.local',
-        displayName: currentUser.displayName || 'Bạn (Current Device)',
-        deviceName: settings.deviceName || 'Thiết bị của bạn',
-        deviceType: settings.deviceType || 'laptop',
-        avatarColor: settings.avatarColor || '#10b981',
-        createdAt: new Date().toISOString(),
-        lastSeen: new Date().toISOString(),
-        status: 'online',
-        onlineCheck: evaluateOnlineStatus(new Date().toISOString(), 'online')
-      });
+    // 2. Thêm hoặc đồng bộ avatar cho current user
+    if (currentUser) {
+      const existingCur = userMap.get(currentUser.uid);
+      if (!existingCur) {
+        userMap.set(currentUser.uid, {
+          id: currentUser.uid,
+          uid: currentUser.uid,
+          email: currentUser.email || 'user@cloudsend.local',
+          displayName: currentUser.displayName || 'Bạn (Current Device)',
+          deviceName: settings.deviceName || 'Thiết bị của bạn',
+          deviceType: settings.deviceType || 'laptop',
+          avatarColor: settings.avatarColor || '#10b981',
+          customAvatarUrl: settings.customAvatarUrl || currentUser.photoURL || '',
+          photoURL: currentUser.photoURL || settings.customAvatarUrl || '',
+          createdAt: new Date().toISOString(),
+          lastSeen: new Date().toISOString(),
+          status: 'online',
+          onlineCheck: evaluateOnlineStatus(new Date().toISOString(), 'online')
+        });
+      } else {
+        userMap.set(currentUser.uid, {
+          ...existingCur,
+          customAvatarUrl: settings.customAvatarUrl || existingCur.customAvatarUrl || currentUser.photoURL || '',
+          photoURL: currentUser.photoURL || existingCur.photoURL || settings.customAvatarUrl || ''
+        });
+      }
     }
 
     // 3. Nạp tất cả người dùng và chủ phòng từ các phòng chat
@@ -621,10 +689,21 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     return Array.from(userMap.values());
   }, [firestoreUsers, onlinePresence, currentUser, settings, rooms]);
 
-    // Xử lý và tính toán mức độ vi phạm cho từng phòng chat thực tế (Nhẹ, Bình Thường, Nặng, Hết Cứu)
+  // Kiểm tra lệnh kỷ luật còn đang hiệu lực hay chỉ là bản ghi test đã hết hạn
+  const checkSanctionActiveState = (s?: UserSanction | null) => {
+    if (!s) return { activeBan: false, activeChatLock: false };
+    const now = Date.now();
+    const activeBan = !!(s.isBanned && (!s.banExpiresAt || new Date(s.banExpiresAt).getTime() > now));
+    const activeChatLock = !!(s.isChatLocked && (!s.chatLockExpiresAt || new Date(s.chatLockExpiresAt).getTime() > now));
+    return { activeBan, activeChatLock };
+  };
+
+  // Xử lý và tính toán mức độ vi phạm cho từng phòng chat thực tế (Nhẹ, Bình Thường, Nặng, Hết Cứu)
   const roomsWithViolations = useMemo(() => {
+    const sevRank: Record<string, number> = { light: 1, medium: 2, heavy: 3, critical: 4 };
     return rooms.map(r => {
-      const roomReps = reports.filter(rep => rep.roomId === r.id);
+      // Chỉ tính báo cáo đang chờ xử lý (không tính báo cáo đã bỏ qua/đã giải quyết)
+      const roomReps = reports.filter(rep => rep.roomId === r.id && rep.status === 'pending');
       let sev: 'light' | 'medium' | 'heavy' | 'critical' | undefined = undefined;
       let reason: string | undefined = undefined;
 
@@ -645,61 +724,28 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         reason = `Bị 1 báo cáo: ${roomReps[0].reason || 'Nội quy phòng'}`;
       }
 
+      const aiRes = openAiAuditResults[r.id];
+      if (aiRes) {
+        if (!sev || (sevRank[aiRes.severity] || 0) >= (sevRank[sev] || 0)) {
+          sev = aiRes.severity;
+        }
+        reason = reason ? `${aiRes.reason} • ${reason}` : aiRes.reason;
+      }
+
+      const cachedIncidents = violationIncidentsMap[r.id] || [];
+
       return {
         ...r,
         violationSeverity: sev,
         violationReason: reason,
-        violationCount: roomReps.length
+        violationCount: Math.max(roomReps.length, aiRes ? (aiRes.evidenceMessages?.length || 1) : 0, cachedIncidents.length),
+        aiAuditedSource: aiRes?.source
       };
     });
-  }, [rooms, reports]);
+  }, [rooms, reports, openAiAuditResults, violationIncidentsMap]);
 
   // Xử lý và tính toán người dùng vi phạm thực tế - Sắp xếp người dùng vi phạm nặng nhất lên ĐẦU danh sách
   const evaluatedUsersWithViolations = useMemo(() => {
-    const mapped = evaluatedUsers.map(u => {
-      const userReps = reports.filter(r => r.senderId === u.uid);
-      const sanction = sanctions.find(s => s.uid === u.uid);
-      let sev: 'light' | 'medium' | 'heavy' | 'critical' | undefined = undefined;
-      let reason: string | undefined = undefined;
-      let count = (sanction?.violationCount || 0) + userReps.length;
-
-      if (sanction?.isBanned || sanction?.lastSanctionType === 'ban_perm') {
-        sev = 'critical';
-        reason = sanction.reason || 'Bị cấm vĩnh viễn (Hết cứu)';
-      } else if (sanction?.lastSanctionType === 'ban_6m' || sanction?.lastSanctionType === 'ban_7d' || count >= 4) {
-        sev = 'heavy';
-        reason = sanction?.reason || `Tái phạm nặng (${count} lần vi phạm)`;
-      } else if (sanction?.lastSanctionType === 'ban_3d' || sanction?.lastSanctionType === 'ban_1d' || count >= 3) {
-        sev = 'heavy';
-        reason = sanction?.reason || `Bị tạm khóa (${count} lần vi phạm)`;
-      } else if (sanction?.lastSanctionType === 'chat_lock_1h' || count >= 2) {
-        sev = 'medium';
-        reason = sanction?.reason || `Cấm chat 1 tiếng (Tái phạm ${count} lần)`;
-      } else if (sanction?.lastSanctionType === 'chat_lock_15m' || sanction?.lastSanctionType === 'warn' || count === 1 || u.hasWarning) {
-        sev = 'light';
-        reason = sanction?.reason || 'Cảnh cáo / Khóa chat ngắn (Vi phạm lần 1)';
-      }
-
-      // Xác định người dùng tái phạm nghiêm trọng nhất (Đã từng bị khóa 7 ngày hoặc vi phạm tới hạn cần cấm vĩnh viễn)
-      const isWorstViolator = !!(
-        sanction?.lastSanctionType === 'ban_perm' ||
-        (sanction?.lastSanctionType === 'ban_7d' && count > 1) ||
-        (sanction?.isBanned && count >= 3) ||
-        sev === 'critical' ||
-        count >= 4
-      );
-
-      return {
-        ...u,
-        sanction,
-        violationSeverity: sev,
-        violationReason: reason,
-        violationCount: count,
-        isWorstViolator
-      };
-    });
-
-    // Sắp xếp ưu tiên: Người dùng tái phạm nặng nhất lên đầu -> tiếp theo theo trọng số vi phạm (critical > heavy > medium > light)
     const severityWeight: Record<string, number> = {
       critical: 4,
       heavy: 3,
@@ -707,23 +753,96 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       light: 1
     };
 
+    const mapped = evaluatedUsers.map(u => {
+      // Chỉ tính các báo cáo đang chờ xử lý (pending)
+      const userReps = reports.filter(r => r.senderId === u.uid && r.status === 'pending');
+      const sanction = sanctions.find(s => s.uid === u.uid || (u.email && s.email?.toLowerCase() === u.email.toLowerCase()));
+      const { activeBan, activeChatLock } = checkSanctionActiveState(sanction);
+      const aiRes = !isDevUser(u.email) ? openAiAuditResults[u.uid] : undefined;
+      const msgEvidenceCount = (aiRes?.evidenceMessages?.length || 0) + ((violationIncidentsMap[u.uid] || []).filter(i => i.source === 'openai_moderation' || i.source === 'word_filter').length);
+
+      let sev: 'light' | 'medium' | 'heavy' | 'critical' | undefined = undefined;
+      let reason: string | undefined = undefined;
+      let count = userReps.length + (msgEvidenceCount > 0 ? msgEvidenceCount : 0);
+
+      // 1. Lệnh cấm/khóa ĐANG CÒN HIỆU LỰC (không chụp mũ từ khóa test đã hết hạn)
+      if (activeBan && sanction) {
+        if (sanction.lastSanctionType === 'ban_perm') {
+          sev = 'critical';
+          reason = sanction.reason || 'Bị cấm vĩnh viễn (Hết cứu)';
+        } else if (sanction.lastSanctionType === 'ban_6m' || sanction.lastSanctionType === 'ban_7d') {
+          sev = 'heavy';
+          reason = sanction.reason || 'Tài khoản đang bị tạm khóa dài hạn';
+        } else {
+          sev = 'heavy';
+          reason = sanction.reason || 'Tài khoản đang bị tạm khóa';
+        }
+        count = Math.max(count, 1);
+      } else if (activeChatLock && sanction) {
+        sev = sanction.lastSanctionType === 'chat_lock_1h' ? 'medium' : 'light';
+        reason = sanction.reason || 'Đang trong thời gian khóa chat';
+        count = Math.max(count, 1);
+      }
+
+      // 2. Báo cáo tố cáo đang chờ xử lý
+      if (userReps.length >= 5) {
+        sev = 'critical';
+        reason = reason ? `${reason} • ${userReps.length} tố cáo chờ xử lý` : `Bị tố cáo ${userReps.length} lần`;
+      } else if (userReps.length >= 3 && sev !== 'critical') {
+        sev = 'heavy';
+        reason = reason ? `${reason} • ${userReps.length} tố cáo` : `Bị tố cáo ${userReps.length} lần`;
+      } else if (userReps.length >= 2 && (!sev || sev === 'light')) {
+        sev = 'medium';
+        reason = reason ? `${reason} • ${userReps.length} tố cáo` : `Có ${userReps.length} lượt tố cáo cộng đồng`;
+      } else if (userReps.length === 1 && !sev) {
+        sev = 'light';
+        reason = userReps[0].reason || 'Có 1 báo cáo chờ kiểm tra';
+      }
+
+      // 3. Kết hợp kết quả OpenAI Moderation (bỏ qua tài khoản DEV)
+      if (aiRes) {
+        if (!sev || (severityWeight[aiRes.severity] || 0) >= (severityWeight[sev] || 0)) {
+          sev = aiRes.severity;
+        }
+        reason = reason ? `${aiRes.reason} • ${reason}` : aiRes.reason;
+        count = Math.max(count, aiRes.evidenceMessages?.length || 1);
+      }
+
+      // Xác định người dùng tái phạm nghiêm trọng nhất
+      const isWorstViolator = !!(
+        (activeBan && sanction?.lastSanctionType === 'ban_perm') ||
+        (activeBan && sanction?.lastSanctionType === 'ban_7d' && count > 1) ||
+        sev === 'critical' ||
+        userReps.length >= 4
+      );
+
+      return {
+        ...u,
+        sanction,
+        isActiveSanction: activeBan || activeChatLock,
+        violationSeverity: sev,
+        violationReason: reason,
+        violationCount: count,
+        isWorstViolator,
+        aiAuditedSource: aiRes?.source
+      };
+    });
+
+    // Sắp xếp ưu tiên: Người dùng tái phạm nặng nhất lên đầu -> tiếp theo theo trọng số vi phạm (critical > heavy > medium > light)
     mapped.sort((a, b) => {
-      // 1. Tái phạm nặng nhất lên đỉnh tuyệt đối
       if (a.isWorstViolator !== b.isWorstViolator) {
         return a.isWorstViolator ? -1 : 1;
       }
-      // 2. Theo trọng số mức độ vi phạm
       const weightA = a.violationSeverity ? severityWeight[a.violationSeverity] || 0 : 0;
       const weightB = b.violationSeverity ? severityWeight[b.violationSeverity] || 0 : 0;
       if (weightB !== weightA) {
         return weightB - weightA;
       }
-      // 3. Số lần vi phạm
       return (b.violationCount || 0) - (a.violationCount || 0);
     });
 
     return mapped;
-  }, [evaluatedUsers, reports, sanctions]);
+  }, [evaluatedUsers, reports, sanctions, openAiAuditResults, violationIncidentsMap]);
 
   // Danh sách người dùng tái phạm mức độ nặng nhất (cần xử lý cấm vĩnh viễn)
   const worstViolators = useMemo(() => {
@@ -764,102 +883,86 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // Dữ liệu lọc cho Khung 3 (Middle Frame)
   const filteredItems = useMemo(() => {
-    if (activeTask === 'rooms') {
-      let list = [...roomsWithViolations];
-      if (roomFilter === 'public') list = list.filter(r => !r.isPrivate);
-      if (roomFilter === 'private') list = list.filter(r => !!r.isPrivate);
-      if (roomFilter === 'violating') {
-        list = list.filter(r => !!r.violationSeverity);
-        if (roomViolationSeverity !== 'all') {
-          list = list.filter(r => r.violationSeverity === roomViolationSeverity);
-        }
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        list = list.filter(r => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q));
-      }
-      return list;
-    }
-
-    if (activeTask === 'users') {
-      let list = [...evaluatedUsersWithViolations];
-      if (userFilter === 'online') list = list.filter(u => u.onlineCheck?.isOnline);
-      if (userFilter === 'offline') list = list.filter(u => !u.onlineCheck?.isOnline);
-      if (userFilter === 'violating') {
-        list = list.filter(u => !!u.violationSeverity);
-        if (userViolationSeverity !== 'all') {
-          list = list.filter(u => u.violationSeverity === userViolationSeverity);
-        }
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        list = list.filter(u => u.displayName.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q)));
-      }
-      return list;
-    }
-
-    if (activeTask === 'violators') {
-      if (violatorTarget === 'rooms') {
-        let list = roomsWithViolations.filter(r => !!r.violationSeverity);
-        if (violatorFilter !== 'all') {
-          list = list.filter(r => r.violationSeverity === violatorFilter);
+    if (activeTask === 'rooms_users') {
+      if (roomsUsersSubTab === 'rooms') {
+        let list = [...roomsWithViolations];
+        if (roomFilter === 'public') list = list.filter(r => !r.isPrivate);
+        if (roomFilter === 'private') list = list.filter(r => !!r.isPrivate);
+        if (roomFilter === 'violating') {
+          list = list.filter(r => !!r.violationSeverity);
+          if (roomViolationSeverity !== 'all') {
+            list = list.filter(r => r.violationSeverity === roomViolationSeverity);
+          }
         }
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
-          list = list.filter(r => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.violationReason && r.violationReason.toLowerCase().includes(q)));
+          list = list.filter(r => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q));
         }
         return list;
       } else {
-        let list = evaluatedUsersWithViolations.filter(u => !!u.violationSeverity);
-        if (violatorFilter !== 'all') {
-          list = list.filter(v => v.violationSeverity === violatorFilter);
+        let list = [...evaluatedUsersWithViolations];
+        if (userFilter === 'online') list = list.filter(u => u.onlineCheck?.isOnline);
+        if (userFilter === 'offline') list = list.filter(u => !u.onlineCheck?.isOnline);
+        if (userFilter === 'violating') {
+          list = list.filter(u => !!u.violationSeverity);
+          if (userViolationSeverity !== 'all') {
+            list = list.filter(u => u.violationSeverity === userViolationSeverity);
+          }
         }
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
-          list = list.filter(v => v.displayName.toLowerCase().includes(q) || (v.violationReason && v.violationReason.toLowerCase().includes(q)) || (v.email && v.email.toLowerCase().includes(q)));
+          list = list.filter(u => u.displayName.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q)));
         }
         return list;
       }
     }
 
-    if (activeTask === 'banned') {
-      let list = sanctions.filter(s => s.isBanned);
-      // Mẫu dự phòng nếu chưa có lệnh ban thực tế
-      if (list.length === 0) {
-        list = [
-          {
-            uid: 'demo-banned-01',
-            displayName: 'BannedUser_Spam',
-            email: 'spammer_banned@demo.com',
-            violationCount: 4,
-            lastSanctionType: 'ban_perm',
-            reason: 'Spam liên tục và vi phạm quy định cộng đồng nhiều lần',
-            bannedAt: new Date(Date.now() - 86400000).toISOString(),
-            banExpiresAt: null,
-            isBanned: true
-          },
-          {
-            uid: 'demo-banned-02',
-            displayName: 'Temporary_Suspended',
-            email: 'temp_suspension@demo.com',
-            violationCount: 2,
-            lastSanctionType: 'ban_3d',
-            reason: 'Tạm khóa 3 ngày do gửi nội dung thô tục',
-            bannedAt: new Date().toISOString(),
-            banExpiresAt: new Date(Date.now() + 3 * 86400000).toISOString(),
-            isBanned: true
+    if (activeTask === 'violators_banned') {
+      if (violatorsBannedSubTab === 'violators') {
+        if (violatorTarget === 'rooms') {
+          let list = roomsWithViolations.filter(r => !!r.violationSeverity);
+          if (violatorFilter !== 'all') {
+            list = list.filter(r => r.violationSeverity === violatorFilter);
           }
-        ];
-      }
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(r => r.name.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || (r.violationReason && r.violationReason.toLowerCase().includes(q)));
+          }
+          return list;
+        } else {
+          let list = evaluatedUsersWithViolations.filter(u => !!u.violationSeverity);
+          if (violatorFilter !== 'all') {
+            list = list.filter(v => v.violationSeverity === violatorFilter);
+          }
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            list = list.filter(v => v.displayName.toLowerCase().includes(q) || (v.violationReason && v.violationReason.toLowerCase().includes(q)) || (v.email && v.email.toLowerCase().includes(q)));
+          }
+          return list;
+        }
+      } else {
+        let list = sanctions.filter(s => {
+          const { activeBan, activeChatLock } = checkSanctionActiveState(s);
+          return activeBan || activeChatLock;
+        });
+        // Deduplicate by uid or email
+        const seen = new Set<string>();
+        list = list.filter(item => {
+          const key = item.uid || item.email?.toLowerCase();
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
 
-      if (bannedFilter === 'perm') list = list.filter(b => b.lastSanctionType === 'ban_perm' || !b.banExpiresAt);
-      if (bannedFilter === 'temp') list = list.filter(b => b.lastSanctionType === 'ban_3d' || b.lastSanctionType === 'ban_6m' || !!b.banExpiresAt);
-      if (bannedFilter === 'muted') list = list.filter(b => b.lastSanctionType === 'warn');
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        list = list.filter(b => b.displayName.toLowerCase().includes(q) || b.email.toLowerCase().includes(q) || b.reason.toLowerCase().includes(q));
+        if (bannedFilter === 'perm') list = list.filter(b => b.lastSanctionType === 'ban_perm' || (!b.banExpiresAt && b.isBanned));
+        if (bannedFilter === 'temp') list = list.filter(b => b.isBanned && b.lastSanctionType !== 'ban_perm' && !!b.banExpiresAt);
+        if (bannedFilter === 'muted') list = list.filter(b => !b.isBanned && b.isChatLocked);
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          list = list.filter(b => (b.displayName || '').toLowerCase().includes(q) || (b.email || '').toLowerCase().includes(q) || (b.reason || '').toLowerCase().includes(q));
+        }
+        return list;
       }
-      return list;
     }
 
     if (activeTask === 'broadcast') {
@@ -910,19 +1013,19 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
 
     return [];
-  }, [activeTask, roomFilter, roomViolationSeverity, userFilter, userViolationSeverity, violatorFilter, violatorTarget, bannedFilter, broadcastFilter, reportFilter, roomsWithViolations, evaluatedUsersWithViolations, sanctions, broadcasts, reports, searchQuery]);
+  }, [activeTask, roomsUsersSubTab, violatorsBannedSubTab, roomFilter, roomViolationSeverity, userFilter, userViolationSeverity, violatorFilter, violatorTarget, bannedFilter, broadcastFilter, reportFilter, roomsWithViolations, evaluatedUsersWithViolations, sanctions, broadcasts, reports, searchQuery]);
 
   // Chi tiết mục đang chọn ở Khung 3 / Modal
   const selectedItemData = useMemo(() => {
     if (!selectedItemId) return null;
-    if (activeTask === 'rooms' || (activeTask === 'violators' && violatorTarget === 'rooms')) {
+    if ((activeTask === 'rooms_users' && roomsUsersSubTab === 'rooms') || (activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && violatorTarget === 'rooms')) {
       return roomsWithViolations.find((r: any) => r.id === selectedItemId) || null;
     }
-    if (activeTask === 'users' || (activeTask === 'violators' && violatorTarget === 'users')) {
+    if ((activeTask === 'rooms_users' && roomsUsersSubTab === 'users') || (activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && violatorTarget === 'users')) {
       return evaluatedUsersWithViolations.find((u: any) => (u.uid === selectedItemId || u.id === selectedItemId)) || null;
     }
     return filteredItems.find((it: any) => (it.id === selectedItemId || it.uid === selectedItemId)) || null;
-  }, [filteredItems, selectedItemId, activeTask, violatorTarget, roomsWithViolations, evaluatedUsersWithViolations]);
+  }, [filteredItems, selectedItemId, activeTask, roomsUsersSubTab, violatorsBannedSubTab, violatorTarget, roomsWithViolations, evaluatedUsersWithViolations]);
 
   // Xử lý gửi Thông Báo Toàn Máy Chủ (Tác vụ 5)
   const handleSendBroadcast = async () => {
@@ -955,13 +1058,93 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
   };
 
-  // Xử lý Gỡ Ban (Unban)
-  const handleUnbanUser = async (targetUid: string) => {
+  // Xử lý Gỡ Ban (Unban) ngay lập tức (gỡ cả tài khoản chính + email/SĐT liên kết)
+  const handleUnbanUser = async (targetUid: string, targetEmail?: string) => {
     try {
-      await deleteDoc(doc(db, 'sanctions', targetUid));
+      const found = sanctions.find(s => s.uid === targetUid) || firestoreUsers.find(u => (u.uid || u.id) === targetUid);
+      const email = targetEmail || found?.email || (found as any)?.linkedEmail || '';
+      const phone = (found as any)?.phone || (found as any)?.linkedPhone || (found as any)?.phoneNumber || '';
+      const cleanEmail = (email || '').trim().toLowerCase();
+
+      await removeDevSanction(cleanEmail, targetUid, phone);
+
+      // Cập nhật state local ngay lập tức
+      setSanctions(prev => prev.filter(s => {
+        if (targetUid && (s.uid === targetUid || s.linkedUids?.includes(targetUid))) return false;
+        if (cleanEmail && (s.email?.toLowerCase() === cleanEmail || s.linkedEmails?.includes(cleanEmail))) return false;
+        if (phone && (s.phone === phone || s.linkedPhones?.includes(phone))) return false;
+        return true;
+      }));
+
+      alert('✅ Đã gỡ lệnh cấm thành công (bao gồm cả các tài khoản liên kết Email / SĐT)! Người dùng có thể đăng nhập lại ngay lập tức.');
+    } catch (err) {
+      console.error('Lỗi khi gỡ ban:', err);
       setSanctions(prev => prev.filter(s => s.uid !== targetUid));
-    } catch {
-      setSanctions(prev => prev.filter(s => s.uid !== targetUid));
+      alert('Đã hoàn tất thao tác gỡ lệnh cấm.');
+    }
+  };
+
+  // Xóa sạch lịch sử vi phạm / khóa chat test để đưa tài khoản/phòng về trạng thái sạch
+  const handleClearTestViolations = async (targetId: string, targetType: 'users' | 'rooms', targetEmail?: string, targetName?: string) => {
+    try {
+      if (targetType === 'users') {
+        const cleanEmail = (targetEmail || '').trim().toLowerCase();
+        const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
+        const promises: Promise<any>[] = [];
+        if (targetId) promises.push(deleteDoc(doc(db, 'sanctions', targetId)));
+        if (emailDocId && emailDocId !== targetId) promises.push(deleteDoc(doc(db, 'sanctions', emailDocId)));
+        sanctions.forEach(s => {
+          if ((targetId && s.uid === targetId) || (cleanEmail && s.email?.toLowerCase() === cleanEmail)) {
+            if (s.uid && s.uid !== targetId) promises.push(deleteDoc(doc(db, 'sanctions', s.uid)));
+            if (s.email) {
+              const eId = encodeURIComponent(s.email.trim().toLowerCase()).replace(/\./g, '_');
+              if (eId !== emailDocId) promises.push(deleteDoc(doc(db, 'sanctions', eId)));
+            }
+          }
+        });
+        // Đánh dấu bỏ qua các báo cáo đang pending của user này nếu DEV xác nhận xóa lịch sử test
+        reports
+          .filter(r => r.senderId === targetId && r.status === 'pending')
+          .forEach(r => {
+            promises.push(updateDoc(doc(db, 'reports', r.id), { status: 'dismissed', resolvedAt: new Date().toISOString() }));
+          });
+        try {
+          if (targetId) promises.push(updateDoc(doc(db, 'users', targetId), { hasWarning: false }));
+        } catch {
+          // ignore if user doc doesn't exist
+        }
+        await Promise.allSettled(promises);
+        setSanctions(prev => prev.filter(s => !(targetId && s.uid === targetId) && !(cleanEmail && s.email?.toLowerCase() === cleanEmail)));
+      } else {
+        const promises: Promise<any>[] = [];
+        reports
+          .filter(r => r.roomId === targetId && r.status === 'pending')
+          .forEach(r => {
+            promises.push(updateDoc(doc(db, 'reports', r.id), { status: 'dismissed', resolvedAt: new Date().toISOString() }));
+          });
+        try {
+          promises.push(updateDoc(doc(db, 'rooms', targetId), { violationSeverity: null, violationReason: null }));
+        } catch {
+          // ignore
+        }
+        await Promise.allSettled(promises);
+      }
+
+      setOpenAiAuditResults(prev => {
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
+      setViolationIncidentsMap(prev => {
+        const next = { ...prev };
+        delete next[targetId];
+        return next;
+      });
+      setShowDetailModal(false);
+      alert(`✅ Đã xóa sạch trạng thái vi phạm / khóa test cho [${targetName || targetId}]!`);
+    } catch (err) {
+      console.error('Clear violation history error:', err);
+      alert('Đã dọn dẹp trạng thái vi phạm cục bộ.');
     }
   };
 
@@ -1008,20 +1191,20 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const handleBanUserFromReport = async (targetUid: string, targetName: string, durationDays: number | 'perm', reason: string, reportId?: string) => {
     try {
       const now = new Date();
-      const expiresAt = durationDays === 'perm' ? null : new Date(now.getTime() + durationDays * 86400000).toISOString();
-      const sanctionPayload: UserSanction = {
-        uid: targetUid,
-        displayName: targetName,
-        email: '',
-        violationCount: 1,
-        lastSanctionType: durationDays === 'perm' ? 'ban_perm' : durationDays === 3 ? 'ban_3d' : 'ban_6m',
-        reason: reason || 'Vi phạm nội quy từ báo cáo tố cáo của người dùng',
-        bannedAt: now.toISOString(),
-        banExpiresAt: expiresAt,
-        isBanned: true
-      };
+      const foundUser = firestoreUsers.find(u => (u.uid || u.id) === targetUid) as any;
+      const targetEmail = foundUser?.linkedEmail || foundUser?.email || '';
+      const targetPhone = foundUser?.phone || foundUser?.linkedPhone || foundUser?.phoneNumber || '';
 
-      await setDoc(doc(db, 'sanctions', targetUid), sanctionPayload);
+      const { propagatedCount } = await applyLinkedBanSanction({
+        targetUid,
+        targetEmail,
+        targetPhone,
+        targetDisplayName: targetName,
+        durationDays,
+        reason,
+        actedBy: currentUser?.email || DEV_EMAIL,
+      });
+
       if (reportId) {
         await updateDoc(doc(db, 'reports', reportId), {
           status: 'resolved',
@@ -1029,7 +1212,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           resolvedAt: now.toISOString()
         });
       }
-      alert(`Đã áp dụng hình phạt khóa tài khoản với [${targetName}] thành công (${durationDays === 'perm' ? 'Vĩnh viễn' : durationDays + ' ngày'})!`);
+      alert(`Đã áp dụng hình phạt khóa tài khoản với [${targetName}] (và ${Math.max(0, propagatedCount - 1)} định danh Email/SĐT/tài khoản liên kết) thành công (${durationDays === 'perm' ? 'Vĩnh viễn' : durationDays + ' ngày'})!`);
     } catch (err) {
       console.error('Ban user error:', err);
     }
@@ -1038,7 +1221,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   // Điều hướng từ phòng chat sang đúng người dùng trong Tác vụ 2: Những Người Dùng
   const handleNavigateToUser = (targetUid: string, userData?: any) => {
     if (!targetUid) return;
-    setActiveTask('users');
+    setActiveTask('rooms_users');
+    setRoomsUsersSubTab('users');
     setUserFilter('all');
     setSearchQuery('');
     setSelectedItemId(targetUid);
@@ -1053,7 +1237,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // Tổng hợp danh sách tất cả các thiết bị đã đăng nhập bằng tài khoản người dùng đang chọn
   const userDevicesList = useMemo(() => {
-    if (activeTask !== 'users' || !selectedItemData) return [];
+    if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'users' || !selectedItemData) return [];
     const u = selectedItemData as any;
     const devMap = new Map<string, {
       id: string;
@@ -1209,6 +1393,470 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
   };
 
+  // Kiểm duyệt toàn hệ thống bằng OpenAI Moderation API và tự động phân loại vào các tab mức độ vi phạm
+  const handleStartOpenAiModeration = async () => {
+    if (isBatchAuditing) return;
+    setIsBatchAuditing(true);
+
+    try {
+      const targetRoomsMap = new Map<string, { id: string; name: string; code?: string }>();
+      targetRoomsMap.set('public-relay-lounge', { id: 'public-relay-lounge', name: 'Đại Sảnh Toàn Cầu', code: 'GLOBAL' });
+      rooms.forEach(r => targetRoomsMap.set(r.id, { id: r.id, name: r.name, code: r.code }));
+
+      interface RawScannedMsg {
+        id: string;
+        roomId: string;
+        roomName: string;
+        roomCode?: string;
+        senderId?: string;
+        senderName?: string;
+        senderDevice?: string;
+        text: string;
+        createdAt?: string;
+        timestamp?: number;
+      }
+
+      interface RawScannedImg {
+        messageId?: string;
+        roomId?: string;
+        roomName?: string;
+        roomCode?: string;
+        senderId?: string;
+        senderName?: string;
+        senderDevice?: string;
+        fileName?: string;
+        url: string;
+        createdAt?: string;
+        timestamp?: number;
+      }
+
+      const userMsgsMap = new Map<string, RawScannedMsg[]>();
+      const roomMsgsMap = new Map<string, RawScannedMsg[]>();
+      const userImgsMap = new Map<string, RawScannedImg[]>();
+      const roomImgsMap = new Map<string, RawScannedImg[]>();
+
+      const isAuditImageUrl = (u: unknown): u is string =>
+        typeof u === 'string' && (u.startsWith('data:image/') || u.startsWith('https://') || u.startsWith('http://'));
+
+      // Thu thập tối đa 60 tin nhắn gần nhất mỗi phòng (kèm hình ảnh, phòng chat, thời điểm, thiết bị)
+      await Promise.all(
+        Array.from(targetRoomsMap.values()).map(async (roomMeta) => {
+          try {
+            let snap;
+            try {
+              snap = await getDocs(
+                query(collection(db, 'rooms', roomMeta.id, 'messages'), orderBy('createdAt', 'desc'), limit(60))
+              );
+            } catch {
+              snap = await getDocs(query(collection(db, 'rooms', roomMeta.id, 'messages'), limit(60)));
+            }
+            const rList: RawScannedMsg[] = [];
+            const rImgList: RawScannedImg[] = [];
+
+            snap.docs.forEach(d => {
+              const data = d.data() as ChatMessage;
+              const raw = unwrapSecureBase64Message(data.rawText || data.text || '').trim();
+              if (raw) {
+                const itemMsg: RawScannedMsg = {
+                  id: d.id,
+                  roomId: roomMeta.id,
+                  roomName: roomMeta.name,
+                  roomCode: roomMeta.code,
+                  senderId: data.senderId,
+                  senderName: data.senderName,
+                  senderDevice: data.senderDevice,
+                  text: raw,
+                  createdAt: data.createdAt,
+                  timestamp: data.timestamp
+                };
+                rList.push(itemMsg);
+                if (data.senderId) {
+                  const prev = userMsgsMap.get(data.senderId) || [];
+                  if (prev.length < 30) {
+                    prev.push(itemMsg);
+                    userMsgsMap.set(data.senderId, prev);
+                  }
+                }
+              }
+
+              // Thu thập tệp ảnh đính kèm để OpenAI omni-moderation-latest kiểm duyệt hình ảnh miễn phí
+              const candidateImages: Array<{ url: string; fileName?: string }> = [];
+              if (Array.isArray(data.attachments)) {
+                data.attachments.forEach((att: any) => {
+                  const attUrl = att?.data || att?.url;
+                  const looksImage = att?.type?.startsWith('image/') || (typeof attUrl === 'string' && attUrl.startsWith('data:image/'));
+                  if (looksImage && isAuditImageUrl(attUrl)) {
+                    candidateImages.push({ url: attUrl, fileName: att?.name });
+                  }
+                });
+              }
+              if (candidateImages.length === 0) {
+                const singleUrl = data.fileData || data.fileUrl;
+                const looksImage = data.fileType?.startsWith('image/') || (typeof singleUrl === 'string' && singleUrl.startsWith('data:image/'));
+                if (looksImage && isAuditImageUrl(singleUrl)) {
+                  candidateImages.push({ url: singleUrl, fileName: data.fileName });
+                }
+              }
+
+              candidateImages.forEach((imgInfo) => {
+                const itemImg: RawScannedImg = {
+                  messageId: d.id,
+                  roomId: roomMeta.id,
+                  roomName: roomMeta.name,
+                  roomCode: roomMeta.code,
+                  senderId: data.senderId,
+                  senderName: data.senderName,
+                  senderDevice: data.senderDevice,
+                  fileName: imgInfo.fileName,
+                  url: imgInfo.url,
+                  createdAt: data.createdAt,
+                  timestamp: data.timestamp
+                };
+                if (rImgList.length < 6) {
+                  rImgList.push(itemImg);
+                }
+                if (data.senderId) {
+                  const prevImgs = userImgsMap.get(data.senderId) || [];
+                  if (prevImgs.length < 6) {
+                    prevImgs.push(itemImg);
+                    userImgsMap.set(data.senderId, prevImgs);
+                  }
+                }
+              });
+            });
+
+            if (rList.length > 0) {
+              roomMsgsMap.set(roomMeta.id, rList);
+            }
+            if (rImgList.length > 0) {
+              roomImgsMap.set(roomMeta.id, rImgList);
+            }
+          } catch {
+            // Bỏ qua phòng không đọc được
+          }
+        })
+      );
+
+      const batchItems: Array<{
+        id: string;
+        type: 'user' | 'room';
+        name: string;
+        email?: string;
+        messages: RawScannedMsg[];
+        images: RawScannedImg[];
+        reportReasons: string[];
+      }> = [];
+
+      // Chuẩn bị payload Người Dùng (không kiểm duyệt tài khoản DEV, chỉ tính báo cáo đang pending)
+      evaluatedUsers.forEach(u => {
+        if (isDevUser(u.email)) return;
+        const uid = u.uid || u.id;
+        const msgs = userMsgsMap.get(uid) || [];
+        const imgs = userImgsMap.get(uid) || [];
+        const userReps = reports.filter(r => r.senderId === uid && r.status === 'pending');
+        if (msgs.length > 0 || imgs.length > 0 || userReps.length > 0) {
+          batchItems.push({
+            id: uid,
+            type: 'user',
+            name: u.displayName || 'Người dùng',
+            email: u.email,
+            messages: msgs,
+            images: imgs,
+            reportReasons: userReps.map(r => r.reason).filter(Boolean)
+          });
+        }
+      });
+
+      // Chuẩn bị payload Phòng Chat
+      rooms.forEach(r => {
+        const msgs = roomMsgsMap.get(r.id) || [];
+        const imgs = roomImgsMap.get(r.id) || [];
+        const roomReps = reports.filter(rep => rep.roomId === r.id && rep.status === 'pending');
+        if (msgs.length > 0 || imgs.length > 0 || roomReps.length > 0) {
+          batchItems.push({
+            id: r.id,
+            type: 'room',
+            name: r.name,
+            messages: msgs,
+            images: imgs,
+            reportReasons: roomReps.map(rep => rep.reason).filter(Boolean)
+          });
+        }
+      });
+
+      if (batchItems.length === 0) {
+        setBatchAuditSummary({
+          totalScanned: 0,
+          flaggedCount: 0,
+          source: 'OpenAI Moderation',
+          timestamp: new Date().toLocaleTimeString('vi-VN')
+        });
+        setIsBatchAuditing(false);
+        return;
+      }
+
+      const nextResults: Record<string, {
+        severity: 'light' | 'medium' | 'heavy' | 'critical';
+        reason: string;
+        source: string;
+        categories?: string[];
+        auditedAt: string;
+        evidenceMessages?: ViolationIncident[];
+      }> = {};
+      const nextIncidents: Record<string, ViolationIncident[]> = {};
+      let usedSource = 'openai_moderation';
+      const nowIso = new Date().toISOString();
+
+      try {
+        const resp = await fetch('/api/moderation/openai-batch-audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: batchItems })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          usedSource = data.source || 'openai_moderation';
+          const list = Array.isArray(data.results) ? data.results : [];
+          list.forEach((r: any) => {
+            if (r && r.id && r.severity && r.severity !== 'clean') {
+              const evMsgs: ViolationIncident[] = Array.isArray(r.evidenceMessages)
+                ? r.evidenceMessages.map((em: any, i: number) => ({
+                    id: em.messageId || `ev-${r.id}-${i}`,
+                    roomId: em.roomId || '',
+                    roomName: em.roomName || 'Phòng chat',
+                    roomCode: em.roomCode,
+                    senderId: em.senderId,
+                    senderName: em.senderName,
+                    senderDevice: em.senderDevice,
+                    createdAt: em.createdAt,
+                    timestamp: em.timestamp,
+                    content: em.content || '',
+                    reason: em.reason || r.reason,
+                    source: em.source || 'openai_moderation',
+                    severity: em.severity || r.severity
+                  }))
+                : [];
+              nextResults[r.id] = {
+                severity: r.severity,
+                reason: r.reason || 'Phát hiện vi phạm bởi AI Kiểm Duyệt',
+                source: usedSource,
+                categories: Array.isArray(r.categories) ? r.categories : [],
+                auditedAt: nowIso,
+                evidenceMessages: evMsgs
+              };
+              if (evMsgs.length > 0) {
+                nextIncidents[r.id] = evMsgs;
+              }
+            }
+          });
+        } else {
+          throw new Error('Batch API failed');
+        }
+      } catch {
+        // Fallback cục bộ bằng 12 điều luật chuẩn xác theo từng tin nhắn
+        usedSource = 'local_12_rules';
+        batchItems.forEach(item => {
+          const evMsgs: ViolationIncident[] = [];
+          item.messages.forEach((m) => {
+            const singleEval = evaluateUserWith12Rules([{ text: m.text, rawText: m.text }], [], null);
+            if (singleEval.hasViolation) {
+              const sev: 'light' | 'medium' | 'heavy' | 'critical' =
+                singleEval.recommendedTier === 'level_perm' ? 'critical' :
+                singleEval.recommendedTier === 'level_4' || singleEval.recommendedTier === 'level_3' ? 'heavy' :
+                singleEval.recommendedTier === 'level_2' ? 'medium' : 'light';
+              evMsgs.push({
+                id: m.id,
+                roomId: m.roomId,
+                roomName: m.roomName,
+                roomCode: m.roomCode,
+                senderId: m.senderId,
+                senderName: m.senderName,
+                senderDevice: m.senderDevice,
+                createdAt: m.createdAt,
+                timestamp: m.timestamp,
+                content: m.text,
+                reason: singleEval.findings.map(f => f.ruleTitle).join(' • '),
+                source: 'word_filter',
+                severity: sev
+              });
+            }
+          });
+          const pendingReps = item.type === 'user'
+            ? reports.filter(r => r.senderId === item.id && r.status === 'pending')
+            : reports.filter(r => r.roomId === item.id && r.status === 'pending');
+
+          if (evMsgs.length > 0 || pendingReps.length > 0) {
+            const evalRes = evaluateUserWith12Rules(
+              item.messages.map(m => ({ text: m.text, rawText: m.text })),
+              pendingReps.map(r => ({ reason: r.reason })),
+              null
+            );
+            const mappedSev: 'light' | 'medium' | 'heavy' | 'critical' =
+              evalRes.recommendedTier === 'level_perm' ? 'critical' :
+              evalRes.recommendedTier === 'level_4' || evalRes.recommendedTier === 'level_3' ? 'heavy' :
+              evalRes.recommendedTier === 'level_2' ? 'medium' : 'light';
+            nextResults[item.id] = {
+              severity: mappedSev,
+              reason: evalRes.summary,
+              source: usedSource,
+              auditedAt: nowIso,
+              evidenceMessages: evMsgs
+            };
+            if (evMsgs.length > 0) {
+              nextIncidents[item.id] = evMsgs;
+            }
+          }
+        });
+      }
+
+      setOpenAiAuditResults(nextResults);
+      setViolationIncidentsMap(prev => ({ ...prev, ...nextIncidents }));
+      setBatchAuditSummary({
+        totalScanned: batchItems.length,
+        flaggedCount: Object.keys(nextResults).length,
+        source: usedSource === 'openai_moderation' ? 'OpenAI Moderation' : 'AI Rule Engine',
+        timestamp: new Date().toLocaleTimeString('vi-VN')
+      });
+      setViolatorsBannedSubTab('violators');
+      setViolatorFilter('all');
+    } catch (err) {
+      console.error('Batch OpenAI moderation error:', err);
+    } finally {
+      setIsBatchAuditing(false);
+    }
+  };
+
+  // Lấy chi tiết vi phạm thực tế (ở phòng chat nào, thời điểm nào, trên thiết bị nào) khi nhấn vào 1 đối tượng trong tab Kiểm Duyệt & Vi Phạm
+  const fetchViolationDetailsForTarget = async (targetId: string, targetType: 'users' | 'rooms') => {
+    setIsLoadingViolationDetails(true);
+    try {
+      const incidents: ViolationIncident[] = [];
+      const seenKeys = new Set<string>();
+
+      const pushIncident = (inc: ViolationIncident) => {
+        const dedupKey = `${inc.roomId}|${inc.id}|${inc.content.slice(0, 60)}`;
+        if (!seenKeys.has(dedupKey)) {
+          seenKeys.add(dedupKey);
+          incidents.push(inc);
+        }
+      };
+
+      // 1. Lấy từ kết quả kiểm duyệt OpenAI đã quét (nếu có)
+      const aiEvidence = openAiAuditResults[targetId]?.evidenceMessages || [];
+      aiEvidence.forEach(pushIncident);
+
+      // 2. Lấy từ đơn tố cáo đang pending
+      const matchedReports = reports.filter(r =>
+        r.status === 'pending' && (targetType === 'users' ? r.senderId === targetId : r.roomId === targetId)
+      );
+      matchedReports.forEach(rep => {
+        const roomMeta = rooms.find(rm => rm.id === rep.roomId);
+        pushIncident({
+          id: `rep-${rep.id}`,
+          roomId: rep.roomId || '',
+          roomName: rep.roomName || roomMeta?.name || 'Phòng chat',
+          roomCode: roomMeta?.code,
+          senderId: rep.senderId,
+          senderName: rep.senderName,
+          senderDevice: rep.senderDevice || 'Không rõ thiết bị',
+          createdAt: rep.createdAt,
+          timestamp: rep.timestamp,
+          content: unwrapSecureBase64Message(rep.messageRawText || rep.messageText || '') || '(Nội dung đính kèm / báo cáo)',
+          reason: `Tố cáo từ ${rep.reportedByName || 'thành viên'}: ${rep.reason}`,
+          source: 'user_report',
+          severity: 'medium'
+        });
+      });
+
+      // 3. Quét trực tiếp các phòng chat để tìm chính xác tin nhắn vi phạm (Phòng nào, lúc nào, thiết bị nào)
+      const roomListToScan = targetType === 'rooms'
+        ? rooms.filter(r => r.id === targetId).map(r => ({ id: r.id, name: r.name, code: r.code }))
+        : [
+            { id: 'public-relay-lounge', name: 'Đại Sảnh Toàn Cầu', code: 'GLOBAL' },
+            ...rooms.filter(r => r.id !== 'public-relay-lounge').map(r => ({ id: r.id, name: r.name, code: r.code }))
+          ];
+
+      await Promise.all(
+        roomListToScan.map(async (rm) => {
+          try {
+            const qMsgs = targetType === 'users'
+              ? query(collection(db, 'rooms', rm.id, 'messages'), where('senderId', '==', targetId), limit(40))
+              : query(collection(db, 'rooms', rm.id, 'messages'), orderBy('createdAt', 'desc'), limit(60));
+            const snap = await getDocs(qMsgs);
+            snap.docs.forEach(d => {
+              const data = d.data() as ChatMessage;
+              const raw = unwrapSecureBase64Message(data.rawText || data.text || '').trim();
+              if (!raw) return;
+              const evalMsg = evaluateUserWith12Rules([{ text: raw, rawText: raw }], [], null);
+              if (evalMsg.hasViolation || data.isReported) {
+                const sev: 'light' | 'medium' | 'heavy' | 'critical' =
+                  evalMsg.recommendedTier === 'level_perm' ? 'critical' :
+                  evalMsg.recommendedTier === 'level_4' || evalMsg.recommendedTier === 'level_3' ? 'heavy' :
+                  evalMsg.recommendedTier === 'level_2' ? 'medium' : 'light';
+                pushIncident({
+                  id: d.id,
+                  roomId: rm.id,
+                  roomName: rm.name,
+                  roomCode: rm.code,
+                  senderId: data.senderId,
+                  senderName: data.senderName,
+                  senderDevice: data.senderDevice || 'Không rõ thiết bị',
+                  createdAt: data.createdAt,
+                  timestamp: data.timestamp,
+                  content: raw,
+                  reason: evalMsg.hasViolation
+                    ? evalMsg.findings.map(f => `${f.ruleNumber}: ${f.ruleTitle}`).join(' • ')
+                    : 'Tin nhắn bị thành viên khác báo cáo',
+                  source: evalMsg.hasViolation ? 'word_filter' : 'user_report',
+                  severity: sev
+                });
+              }
+            });
+          } catch {
+            // Bỏ qua nếu index hoặc quyền truy cập chưa sẵn sàng
+          }
+        })
+      );
+
+      // 4. Nếu có lệnh kỷ luật ĐANG CÒN HIỆU LỰC, đính kèm thông tin chi tiết
+      if (targetType === 'users') {
+        const sanc = sanctions.find(s => s.uid === targetId);
+        const { activeBan, activeChatLock } = checkSanctionActiveState(sanc);
+        if ((activeBan || activeChatLock) && sanc) {
+          pushIncident({
+            id: `sanction-${sanc.uid}`,
+            roomId: 'system',
+            roomName: 'Hệ Thống Kiểm Soát ClSend',
+            senderId: sanc.uid,
+            senderName: sanc.displayName,
+            senderDevice: evaluatedUsers.find(u => u.uid === targetId)?.deviceName || 'Thiết bị tài khoản',
+            createdAt: sanc.offensiveItemTimestamp || sanc.bannedAt,
+            content: sanc.offensiveItem || sanc.reason || 'Lệnh khóa/cấm đang hiệu lực',
+            reason: sanc.remindText || sanc.reason || 'Án phạt kỷ luật đang hiệu lực',
+            source: 'sanction',
+            severity: sanc.lastSanctionType === 'ban_perm' ? 'critical' : activeBan ? 'heavy' : 'light'
+          });
+        }
+      }
+
+      // Sắp xếp mới nhất lên đầu
+      incidents.sort((a, b) => {
+        const tA = a.timestamp || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const tB = b.timestamp || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return tB - tA;
+      });
+
+      setViolationIncidentsMap(prev => ({
+        ...prev,
+        [targetId]: incidents
+      }));
+    } catch (err) {
+      console.warn('Fetch violation details notice:', err);
+    } finally {
+      setIsLoadingViolationDetails(false);
+    }
+  };
+
   // Áp dụng hình phạt theo 5 cấp độ chuẩn Roblox với văn bản tùy chỉnh
   const handleApplyTierSanction = async (
     tier: 'level_1' | 'level_2' | 'level_3' | 'level_4' | 'level_perm',
@@ -1218,7 +1866,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     if (!selectedItemData) return;
     const target = selectedItemData as any;
     const targetUid = target.uid || target.id;
-    const targetEmail = target.email || '';
+    const targetEmail = target.linkedEmail || target.email || '';
+    const targetPhone = target.phone || target.linkedPhone || target.phoneNumber || '';
     const targetName = target.displayName || 'Người dùng';
 
     if (isDevUser(targetEmail)) {
@@ -1232,8 +1881,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     const finalRule = ruleViolated || sanctionCustomRule.trim() || (aiAuditResult?.findings?.[0]?.ruleNumber || 'Tiêu Chuẩn & Nội Quy Cộng Đồng');
 
     const confirmMsg = tier === 'level_perm'
-      ? `⚠️ BẠN CÓ CHẮC CHẮN MUỐN CẤM TÀI KHOẢN [${targetName}] VĨNH VIỄN KHÔNG?\n\nNgười này sẽ nhận thông báo Roblox: Account Deleted và bị thu hồi toàn bộ quyền truy cập.`
-      : `Xác nhận áp dụng hình phạt kỷ luật Roblox:\n\n• ${tierConf.label}\n• Ghi chú Moderator gửi đi: "${customRemind}"\n• Lý do: "${customFinalReason}"\n\nBạn có muốn thực hiện không?`;
+      ? `⚠️ BẠN CÓ CHẮC CHẮN MUỐN CẤM TÀI KHOẢN [${targetName}] VĨNH VIỄN KHÔNG?\n\nHệ thống sẽ thu hồi quyền truy cập của tài khoản này và đồng bộ cấm tất cả tài khoản chung Email / SĐT liên kết (không cấm máy/tài khoản sạch mới).`
+      : `Xác nhận áp dụng hình phạt kỷ luật:\n\n• ${tierConf.label}\n• Ghi chú Moderator gửi đi: "${customRemind}"\n• Lý do: "${customFinalReason}"\n\nBạn có muốn thực hiện không?`;
 
     if (!window.confirm(confirmMsg)) return;
 
@@ -1241,6 +1890,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       const updated = await applyTierSanction({
         targetUid,
         targetEmail,
+        targetPhone,
         targetDisplayName: targetName,
         tier,
         customReason: customFinalReason,
@@ -1275,13 +1925,19 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
 
     try {
+      const cleanEmail = (targetEmail || '').trim().toLowerCase();
+      const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
+
       await deleteDoc(doc(db, 'users', targetUid));
       await deleteDoc(doc(db, 'presence', targetUid));
       await deleteDoc(doc(db, 'sanctions', targetUid));
+      if (emailDocId && emailDocId !== targetUid) {
+        await deleteDoc(doc(db, 'sanctions', emailDocId));
+      }
 
       setFirestoreUsers(prev => prev.filter(u => (u.uid || u.id) !== targetUid));
       setOnlinePresence(prev => prev.filter(p => p.uid !== targetUid));
-      setSanctions(prev => prev.filter(s => s.uid !== targetUid));
+      setSanctions(prev => prev.filter(s => s.uid !== targetUid && (!cleanEmail || s.email?.toLowerCase() !== cleanEmail)));
 
       if (selectedItemId === targetUid) {
         setSelectedItemId(null);
@@ -1325,9 +1981,14 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     let deletedCount = 0;
     for (const u of testUsers) {
       try {
+        const cleanEmail = (u.email || '').trim().toLowerCase();
+        const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
         await deleteDoc(doc(db, 'users', u.uid));
         await deleteDoc(doc(db, 'presence', u.uid));
         await deleteDoc(doc(db, 'sanctions', u.uid));
+        if (emailDocId && emailDocId !== u.uid) {
+          await deleteDoc(doc(db, 'sanctions', emailDocId));
+        }
         deletedCount++;
       } catch (err) {
         console.warn('Purge test user error for:', u.uid, err);
@@ -1356,7 +2017,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       const seconds = String(d.getSeconds()).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
       const month = String(d.getMonth() + 1).padStart(2, '0');
-      return `${hours}:${minutes}:${seconds} • ${day}/${month}`;
+      const year = d.getFullYear();
+      return `${hours}:${minutes}:${seconds} • ${day}/${month}/${year}`;
     } catch {
       return '';
     }
@@ -1364,7 +2026,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
   // 1. Danh sách người dùng của phòng chat (Dành cho Tab 1 ở Khung 4)
   const roomUsersList = useMemo(() => {
-    if (activeTask !== 'rooms' || !selectedItemId) return [];
+    if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'rooms' || !selectedItemId) return [];
     const currentRoom = rooms.find(r => r.id === selectedItemId);
     const userMap = new Map<string, {
       uid: string;
@@ -1372,6 +2034,9 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       email: string;
       deviceName: string;
       avatarColor?: string;
+      customAvatarUrl?: string;
+      avatarUrl?: string;
+      photoURL?: string;
       role: 'owner' | 'dev' | 'member';
       messageCount: number;
       lastActive?: string;
@@ -1420,6 +2085,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           displayName: msg.senderName || 'Người dùng',
           email: msg.senderEmail || '',
           deviceName: msg.senderDevice || '',
+          customAvatarUrl: msg.senderAvatar,
+          avatarColor: msg.senderAvatarColor,
           role: isMsgDev ? 'dev' : 'member',
           messageCount: 1,
           lastActive: msg.createdAt
@@ -1429,13 +2096,21 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         u.messageCount += 1;
         if (msg.senderEmail && !u.email) u.email = msg.senderEmail;
         if (msg.senderDevice && !u.deviceName) u.deviceName = msg.senderDevice;
+        if (msg.senderAvatar && !u.customAvatarUrl) u.customAvatarUrl = msg.senderAvatar;
         if (msg.createdAt) u.lastActive = msg.createdAt;
       }
     });
 
-    // Gắn trạng thái online từ onlinePresence
+    // Gắn trạng thái online và đồng bộ avatar từ evaluatedUsers / onlinePresence
     const list = Array.from(userMap.values());
     list.forEach(u => {
+      const syncedUser = evaluatedUsers.find(eu => eu.uid === u.uid || (u.email && eu.email && eu.email.toLowerCase() === u.email.toLowerCase()));
+      if (syncedUser) {
+        u.customAvatarUrl = syncedUser.customAvatarUrl || u.customAvatarUrl;
+        u.avatarUrl = syncedUser.avatarUrl || u.avatarUrl;
+        u.photoURL = syncedUser.photoURL || u.photoURL;
+        if (!u.avatarColor && syncedUser.avatarColor) u.avatarColor = syncedUser.avatarColor;
+      }
       const device = onlinePresence.find(p => p.uid === u.uid || (u.email && p.email && p.email.toLowerCase() === u.email.toLowerCase()));
       if (device) {
         const evaluated = evaluateOnlineStatus(device.lastSeen, device.status);
@@ -1455,11 +2130,11 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     });
 
     return list;
-  }, [activeTask, selectedItemId, rooms, roomMessages, onlinePresence]);
+  }, [activeTask, roomsUsersSubTab, selectedItemId, rooms, roomMessages, onlinePresence, evaluatedUsers]);
 
   // 2. Danh sách hình ảnh đã gửi trong phòng chat (Dành cho Tab 3 ở Khung 4 - Lưu giữ vĩnh viễn cả ảnh đã xóa và ảnh 18+)
   const roomImagesList = useMemo(() => {
-    if (activeTask !== 'rooms' || !selectedItemId) return [];
+    if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'rooms' || !selectedItemId) return [];
     const images: Array<{
       id: string;
       url: string;
@@ -1754,142 +2429,83 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         </div>
       </header>
 
-      {/* 1. KHUNG Ở TRÊN (Hàng dài trải hết chiều ngang toàn màn hình) */}
+      {/* Sleek Modern Task Navigation Bar */}
       <section 
         id="datastore-frame-top"
-        className="w-full border-b border-slate-800 bg-slate-900/80 px-4 sm:px-6 py-3 shrink-0 flex flex-col justify-center"
+        className="w-full border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md px-4 sm:px-6 py-2.5 shrink-0 z-30"
       >
-        <div className="w-full rounded-2xl border border-slate-800/90 bg-slate-950/70 p-3 shadow-sm">
-          {/* Header của Khung Trên */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2.5 border-b border-slate-800/80 gap-2 mb-2.5">
-            <div className="flex items-center gap-2 text-emerald-400">
-              <PanelTop className="w-4 h-4" />
-              <h2 className="text-xs sm:text-sm font-bold tracking-wide uppercase">
-                1. Thanh Điều Khiển & Tác Vụ Quản Trị
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                <span>6 Tác vụ quản trị DEV hoạt động</span>
-              </span>
-            </div>
-          </div>
-
-          {/* 5 NÚT TÁC VỤ ĐÃ CÓ */}
-          <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-800">
-            {/* 1. Các Phòng Chat */}
+        <div className="flex items-center justify-between gap-4">
+          {/* Main 4 Unified Tasks Tab Strip */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-0.5 scrollbar-none flex-1">
+            {/* 1. Phòng Chat & Người Dùng */}
             <button
-              id="task-btn-rooms"
+              id="task-btn-rooms-users"
               type="button"
-              onClick={() => { setActiveTask('rooms'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
-                activeTask === 'rooms'
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/60 shadow-emerald-950/50 ring-1 ring-emerald-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
+              onClick={() => { setActiveTask('rooms_users'); setSelectedItemId(null); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer ${
+                activeTask === 'rooms_users'
+                  ? 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <div className={`p-1 rounded-lg ${activeTask === 'rooms' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'}`}>
-                <MessageSquare className="w-3.5 h-3.5" />
-              </div>
-              <span>1. Các Phòng Chat</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-slate-300 border border-slate-700">
-                {rooms.length}
+              <Users className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Phòng Chat & Người Dùng</span>
+              <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                {rooms.length} · {verifiedOnlineUsersCount} online
               </span>
             </button>
 
-            {/* 2. Những Người Dùng */}
+            {/* 2. Kiểm Duyệt & Vi Phạm (Gộp Vi Phạm + Đã Khóa + OpenAI Kiểm Duyệt) */}
             <button
-              id="task-btn-users"
+              id="task-btn-violators-banned"
               type="button"
-              onClick={() => { setActiveTask('users'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
-                activeTask === 'users'
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/60 shadow-sky-950/50 ring-1 ring-sky-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
+              onClick={() => { setActiveTask('violators_banned'); setSelectedItemId(null); }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer ${
+                activeTask === 'violators_banned'
+                  ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <div className={`p-1 rounded-lg ${activeTask === 'users' ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-800 text-slate-400'}`}>
-                <Users className="w-3.5 h-3.5" />
-              </div>
-              <span>2. Những Người Dùng</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800/80 text-emerald-400 border border-slate-700">
-                {verifiedOnlineUsersCount} Online
-              </span>
+              <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Kiểm Duyệt & Vi Phạm</span>
+              {(countUserSeverity.all + countRoomSeverity.all + sanctions.filter(s => s.isBanned).length) > 0 && (
+                <span className="text-[11px] font-mono tabular-nums text-amber-300 font-bold">
+                  ({countUserSeverity.all + countRoomSeverity.all + sanctions.filter(s => s.isBanned).length})
+                </span>
+              )}
             </button>
 
-            {/* 3. Các Vi Phạm */}
-            <button
-              id="task-btn-violators"
-              type="button"
-              onClick={() => { setActiveTask('violators'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
-                activeTask === 'violators'
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/60 shadow-amber-950/50 ring-1 ring-amber-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTask === 'violators' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-800 text-slate-400'}`}>
-                <AlertTriangle className="w-3.5 h-3.5" />
-              </div>
-              <span>3. Các Vi Phạm</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                {countUserSeverity.all + countRoomSeverity.all}
-              </span>
-            </button>
-
-            {/* 4. Những Người Dùng Đã Bị Banned */}
-            <button
-              id="task-btn-banned"
-              type="button"
-              onClick={() => { setActiveTask('banned'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
-                activeTask === 'banned'
-                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 shadow-rose-950/50 ring-1 ring-rose-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <div className={`p-1 rounded-lg ${activeTask === 'banned' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-800 text-slate-400'}`}>
-                <Ban className="w-3.5 h-3.5" />
-              </div>
-              <span>4. Những Người Dùng Đã Bị Banned</span>
-            </button>
-
-            {/* 5. Thông Báo Toàn Máy Chủ */}
+            {/* 3. Thông Báo Server */}
             <button
               id="task-btn-broadcast"
               type="button"
               onClick={() => { setActiveTask('broadcast'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer ${
                 activeTask === 'broadcast'
-                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/60 shadow-indigo-950/50 ring-1 ring-indigo-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
+                  ? 'bg-indigo-500/15 text-indigo-300 ring-1 ring-indigo-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <div className={`p-1 rounded-lg ${activeTask === 'broadcast' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-slate-800 text-slate-400'}`}>
-                <Megaphone className="w-3.5 h-3.5" />
-              </div>
-              <span>5. Thông Báo Toàn Máy Chủ</span>
+              <Megaphone className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>Thông Báo Server</span>
             </button>
 
-            {/* 6. Báo Cáo Tố Cáo */}
+            {/* 4. Báo Cáo Tố Cáo */}
             <button
               id="task-btn-reports"
               type="button"
               onClick={() => { setActiveTask('reports'); setSelectedItemId(null); }}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border shadow-sm active:scale-95 ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 active:scale-95 cursor-pointer ${
                 activeTask === 'reports'
-                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 shadow-rose-950/50 ring-1 ring-rose-500/30'
-                  : 'bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-white border-slate-800 hover:border-slate-700'
+                  ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/50 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
               }`}
             >
-              <div className={`p-1 rounded-lg ${activeTask === 'reports' ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-800 text-slate-400'}`}>
-                <Flag className="w-3.5 h-3.5" />
-              </div>
-              <span>6. Báo Cáo Tố Cáo</span>
+              <Flag className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>Báo Cáo Tố Cáo</span>
               {reports.filter(r => r.status === 'pending').length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-bold animate-pulse">
-                  {reports.filter(r => r.status === 'pending').length}
+                <span className="text-[11px] font-mono tabular-nums text-rose-400 font-bold">
+                  ({reports.filter(r => r.status === 'pending').length})
                 </span>
               )}
             </button>
@@ -1908,20 +2524,13 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           className="w-full md:w-72 lg:w-80 shrink-0 border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/60 p-3 sm:p-4 flex flex-col"
         >
           <div className="flex items-center justify-between pb-2 sm:pb-3 border-b border-slate-800/80 mb-2 sm:mb-3">
-            <div className="flex items-center gap-2 text-emerald-400">
-              <PanelLeft className="w-4 h-4" />
-              <h3 className="text-xs sm:text-sm font-bold tracking-wide uppercase">
-                2. Phân Loại & Bộ Lọc
+            <div className="flex items-center gap-2 text-slate-200">
+              <PanelLeft className="w-4 h-4 text-emerald-400" />
+              <h3 className="text-xs sm:text-sm font-bold tracking-wide">
+                Bộ Lọc & Phân Loại
               </h3>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 hidden sm:inline-block">
-                {activeTask === 'rooms' && 'Phân loại phòng'}
-                {activeTask === 'users' && 'Check Online'}
-                {activeTask === 'violators' && 'Hệ thống lọc'}
-                {activeTask === 'banned' && 'Lọc người Ban'}
-                {activeTask === 'broadcast' && 'Kênh thông báo'}
-              </span>
               {/* Nút bấm thu gọn/mở rộng bộ lọc trên màn hình điện thoại */}
               <button
                 type="button"
@@ -1929,370 +2538,334 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                 className="md:hidden flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 active:scale-95 transition-all cursor-pointer"
                 title="Bấm để ẩn hoặc hiện danh sách bộ lọc trên điện thoại"
               >
-                <span>{isMobileFilterOpen ? 'Thu gọn bộ lọc' : 'Mở bộ lọc'}</span>
+                <span>{isMobileFilterOpen ? 'Thu gọn' : 'Bộ lọc'}</span>
                 <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isMobileFilterOpen ? 'rotate-180' : ''}`} />
               </button>
             </div>
           </div>
 
-          {/* NỘI DUNG KHUNG 2 THEO TỪNG TÁC VỤ: Trên mobile mặc định ẩn hoặc mở theo nút, tối đa 220px để chừa chỗ cho dữ liệu */}
+          {/* NỘI DUNG BỘ LỌC THEO TỪNG TÁC VỤ */}
           <div className={`${isMobileFilterOpen ? 'flex' : 'hidden md:flex'} flex-1 flex flex-col gap-2 max-h-56 md:max-h-none overflow-y-auto`}>
 
-            {/* MỤC 1. CÁC PHÒNG CHAT */}
-            {activeTask === 'rooms' && (
-              <div className="space-y-2">
-                <div className="text-[11px] font-medium text-slate-400 px-1 uppercase tracking-wider">
-                  Phân loại phòng chat:
-                </div>
-
-                {/* 1. Tất cả phòng */}
-                <button
-                  type="button"
-                  onClick={() => { setRoomFilter('all'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
-                    roomFilter === 'all'
-                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Layers className="w-4 h-4 text-emerald-400" />
-                    <span>Tất cả phòng</span>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-                    {roomsWithViolations.length}
-                  </span>
-                </button>
-
-                {/* 2. Các phòng Public */}
-                <button
-                  type="button"
-                  onClick={() => { setRoomFilter('public'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
-                    roomFilter === 'public'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-semibold shadow-sm'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                      <Globe className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-semibold text-slate-200">Các phòng Public</div>
-                      <div className="text-[10px] text-slate-400">Công khai, vào tự do</div>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    {roomsWithViolations.filter(r => !r.isPrivate).length}
-                  </span>
-                </button>
-
-                {/* 3. Các phòng Private */}
-                <button
-                  type="button"
-                  onClick={() => { setRoomFilter('private'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
-                    roomFilter === 'private'
-                      ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 font-semibold shadow-sm'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-6 h-6 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center">
-                      <Lock className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="text-left">
-                      <div className="font-semibold text-slate-200">Các phòng Private</div>
-                      <div className="text-[10px] text-slate-400">Khóa mã PIN riêng</div>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 border border-purple-500/30">
-                    {roomsWithViolations.filter(r => !!r.isPrivate).length}
-                  </span>
-                </button>
-              </div>
-            )}
-
-            {/* MỤC 2. NHỮNG NGƯỜI DÙNG */}
-            {activeTask === 'users' && (
-              <div className="space-y-2">
-                <div className="text-[11px] font-medium text-slate-400 px-1 uppercase tracking-wider">
-                  Phân loại & Bộ lọc Người Dùng:
-                </div>
-
-                {/* 1. Tất cả người dùng */}
-                <button
-                  type="button"
-                  onClick={() => { setUserFilter('all'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
-                    userFilter === 'all'
-                      ? 'bg-sky-500/20 text-sky-300 border-sky-500/50 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Users className="w-4 h-4 text-sky-400" />
-                    <span>Tất cả người dùng</span>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                    {evaluatedUsersWithViolations.length}
-                  </span>
-                </button>
-
-                {/* 2. Người dùng Online */}
-                <button
-                  type="button"
-                  onClick={() => { setUserFilter('online'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
-                    userFilter === 'online'
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-semibold shadow-sm'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-                    <div className="text-left">
-                      <div className="font-semibold text-emerald-400">Người dùng Online</div>
-                      <div className="text-[10px] text-slate-400">Đang hoạt động trên hệ thống</div>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    {verifiedOnlineUsersCount}
-                  </span>
-                </button>
-
-                {/* 3. Người dùng Offline */}
-                <button
-                  type="button"
-                  onClick={() => { setUserFilter('offline'); setSelectedItemId(null); }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
-                    userFilter === 'offline'
-                      ? 'bg-slate-800 text-slate-200 border-slate-600 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-400 border-slate-800/80'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-                    <div className="text-left">
-                      <div className="font-semibold text-slate-300">Người dùng Offline</div>
-                      <div className="text-[10px] text-slate-500">Ngoại tuyến / Không hoạt động</div>
-                    </div>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-                    {evaluatedUsersWithViolations.length - verifiedOnlineUsersCount}
-                  </span>
-                </button>
-              </div>
-            )}
-
-            {/* MỤC 3. CÁC VI PHẠM (NGƯỜI DÙNG & PHÒNG CHAT VI PHẠM TẬP TRUNG) */}
-            {activeTask === 'violators' && (
+            {/* MỤC 1. PHÒNG CHAT & NGƯỜI DÙNG */}
+            {activeTask === 'rooms_users' && (
               <div className="space-y-3">
-                <div className="text-[11px] font-medium text-amber-400 px-1 uppercase tracking-wider flex items-center gap-1.5">
-                  <Filter className="w-3 h-3 text-amber-400" />
-                  <span>3. Phân Loại Các Vi Phạm:</span>
-                </div>
-
-                {/* Chuyển đổi giữa Người Dùng Vi Phạm & Phòng Chat Vi Phạm */}
-                <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-900/90 rounded-2xl border border-slate-800">
+                {/* Sub-tab toggle */}
+                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 rounded-xl border border-slate-800">
                   <button
                     type="button"
-                    onClick={() => {
-                      setViolatorTarget('users');
-                      setViolatorFilter('all');
-                      setSelectedItemId(null);
-                    }}
-                    className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all flex flex-col items-center justify-center gap-1 border ${
-                      violatorTarget === 'users'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
-                        : 'text-slate-400 border-transparent hover:text-white'
+                    onClick={() => { setRoomsUsersSubTab('rooms'); setSelectedItemId(null); }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                      roomsUsersSubTab === 'rooms'
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-sky-400" />
-                      <span>Người Dùng</span>
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>Phòng Chat</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRoomsUsersSubTab('users'); setSelectedItemId(null); }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                      roomsUsersSubTab === 'users'
+                        ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span>Người Dùng</span>
+                  </button>
+                </div>
+
+                {roomsUsersSubTab === 'rooms' ? (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                      Chế độ phòng chat
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-slate-950/80 text-amber-400 border border-amber-500/30">
-                      {countUserSeverity.all}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setViolatorTarget('rooms');
-                      setViolatorFilter('all');
-                      setSelectedItemId(null);
-                    }}
-                    className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all flex flex-col items-center justify-center gap-1 border ${
-                      violatorTarget === 'rooms'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
-                        : 'text-slate-400 border-transparent hover:text-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Phòng Chat</span>
+                    <button
+                      type="button"
+                      onClick={() => { setRoomFilter('all'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
+                        roomFilter === 'all'
+                          ? 'bg-emerald-500/15 text-emerald-300 font-semibold border-emerald-500/40 shadow-sm'
+                          : 'border-transparent text-slate-300 hover:text-white hover:bg-slate-900/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Tất cả phòng</span>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                        {roomsWithViolations.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRoomFilter('public'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
+                        roomFilter === 'public'
+                          ? 'bg-emerald-500/15 text-emerald-300 font-semibold border-emerald-500/40 shadow-sm'
+                          : 'border-transparent text-slate-300 hover:text-white hover:bg-slate-900/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Globe className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Phòng Public (Tự do)</span>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-emerald-300">
+                        {publicRoomsCount}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setRoomFilter('private'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
+                        roomFilter === 'private'
+                          ? 'bg-purple-500/15 text-purple-300 font-semibold border-purple-500/40 shadow-sm'
+                          : 'border-transparent text-slate-300 hover:text-white hover:bg-slate-900/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Lock className="w-4 h-4 text-purple-400 shrink-0" />
+                        <span>Phòng Private (Mã PIN)</span>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-purple-300">
+                        {privateRoomsCount}
+                      </span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                      Trạng thái hoạt động
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-slate-950/80 text-emerald-400 border border-emerald-500/30">
-                      {countRoomSeverity.all}
-                    </span>
-                  </button>
-                </div>
-
-                {/* Danh sách các mức độ vi phạm tương ứng */}
-                <div className="space-y-1.5">
-                  <button
-                    type="button"
-                    onClick={() => { setViolatorFilter('all'); setSelectedItemId(null); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                      violatorFilter === 'all'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-semibold shadow-sm'
-                        : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                    }`}
-                  >
-                    <span>⚠️ Tất cả {violatorTarget === 'users' ? 'người dùng' : 'phòng'} vi phạm</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                      {violatorTarget === 'users' ? countUserSeverity.all : countRoomSeverity.all}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { setViolatorFilter('light'); setSelectedItemId(null); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                      violatorFilter === 'light'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-semibold'
-                        : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                      <span>🟢 Mức độ: Nhẹ</span>
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {violatorTarget === 'users' ? countUserSeverity.light : countRoomSeverity.light}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { setViolatorFilter('medium'); setSelectedItemId(null); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                      violatorFilter === 'medium'
-                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-semibold'
-                        : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-amber-400" />
-                      <span>🟡 Mức độ: Bình Thường</span>
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {violatorTarget === 'users' ? countUserSeverity.medium : countRoomSeverity.medium}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { setViolatorFilter('heavy'); setSelectedItemId(null); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                      violatorFilter === 'heavy'
-                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-semibold'
-                        : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-rose-400" />
-                      <span>🟠 Mức độ: Nặng</span>
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                      {violatorTarget === 'users' ? countUserSeverity.heavy : countRoomSeverity.heavy}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { setViolatorFilter('critical'); setSelectedItemId(null); }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                      violatorFilter === 'critical'
-                        ? 'bg-red-600/30 text-red-200 border-red-500 font-semibold ring-1 ring-red-500/50'
-                        : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                      <span>🔴 Mức độ: Hết Cứu</span>
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-red-300">
-                      {violatorTarget === 'users' ? countUserSeverity.critical : countRoomSeverity.critical}
-                    </span>
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => { setUserFilter('all'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
+                        userFilter === 'all'
+                          ? 'bg-sky-500/15 text-sky-300 border-sky-500/40 font-semibold'
+                          : 'border-transparent hover:bg-slate-900/80 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Users className="w-4 h-4 text-sky-400 shrink-0" />
+                        <span>Tất cả người dùng</span>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                        {evaluatedUsersWithViolations.length}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setUserFilter('online'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
+                        userFilter === 'online'
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 font-semibold shadow-sm'
+                          : 'border-transparent hover:bg-slate-900/80 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div className="text-left">
+                          <div className="font-semibold text-emerald-400">Đang Online</div>
+                          <div className="text-[10px] text-slate-400">Hoạt động trên hệ thống</div>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-emerald-400">
+                        {verifiedOnlineUsersCount}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setUserFilter('offline'); setSelectedItemId(null); }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs transition-all border ${
+                        userFilter === 'offline'
+                          ? 'bg-slate-800 text-slate-200 border-slate-600 font-semibold'
+                          : 'border-transparent hover:bg-slate-900/80 text-slate-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <UserX className="w-4 h-4 text-slate-500 shrink-0" />
+                        <div className="text-left">
+                          <div className="font-semibold text-slate-300">Đang Offline</div>
+                          <div className="text-[10px] text-slate-500">Ngoại tuyến</div>
+                        </div>
+                      </div>
+                      <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                        {evaluatedUsersWithViolations.length - verifiedOnlineUsersCount}
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* MỤC 4. NHỮNG NGƯỜI DÙNG ĐÃ BỊ BANNED -> Lọc những người bị Ban */}
-            {activeTask === 'banned' && (
-              <div className="space-y-2">
-                <div className="text-[11px] font-medium text-rose-400 px-1 uppercase tracking-wider flex items-center gap-1.5">
-                  <Ban className="w-3 h-3 text-rose-400" />
-                  <span>Bộ lọc người bị Ban:</span>
+            {/* MỤC 2. KIỂM DUYỆT & VI PHẠM (Gộp Vi Phạm + Đã Khóa + OpenAI Kiểm Duyệt) */}
+            {activeTask === 'violators_banned' && (
+              <div className="space-y-3">
+                {/* Sub-tab toggle: Vi Phạm vs Đã Khóa */}
+                <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => { setViolatorsBannedSubTab('violators'); setSelectedItemId(null); }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                      violatorsBannedSubTab === 'violators'
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>Vi Phạm</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setViolatorsBannedSubTab('banned'); setSelectedItemId(null); }}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                      violatorsBannedSubTab === 'banned'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Ban className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>Đã Khóa</span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => setBannedFilter('all')}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                    bannedFilter === 'all'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <span>🚫 Tất cả người bị Ban</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                    {filteredItems.length}
-                  </span>
-                </button>
+                {violatorsBannedSubTab === 'violators' ? (
+                  <div className="space-y-3">
+                    {/* Box AI Kiểm Duyệt OpenAI */}
+                    <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                        <Bot className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>AI Kiểm Duyệt OpenAI</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Quét nội dung tin nhắn, báo cáo và phân loại tự động vào các tab mức độ vi phạm.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleStartOpenAiModeration}
+                        disabled={isBatchAuditing}
+                        className="w-full py-2 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer"
+                      >
+                        {isBatchAuditing ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Đang kiểm duyệt...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>Kiểm Duyệt</span>
+                          </>
+                        )}
+                      </button>
+                      {batchAuditSummary && (
+                        <div className="text-[11px] font-mono tabular-nums text-emerald-300 pt-1 border-t border-slate-800">
+                          Đã quét {batchAuditSummary.totalScanned} mục · {batchAuditSummary.flaggedCount} vi phạm ({batchAuditSummary.source})
+                        </div>
+                      )}
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => setBannedFilter('perm')}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                    bannedFilter === 'perm'
-                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="text-left">
-                    <div className="font-semibold text-rose-300">Ban Vĩnh Viễn</div>
-                    <div className="text-[10px] text-slate-400">Không có hạn mở khóa</div>
-                  </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                    Vĩnh viễn
-                  </span>
-                </button>
+                    {/* Chọn đối tượng: Người dùng hoặc Phòng chat */}
+                    <div>
+                      <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1.5">
+                        Đối tượng phân loại
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 rounded-xl border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => { setViolatorTarget('users'); setSelectedItemId(null); }}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                            violatorTarget === 'users'
+                              ? 'bg-slate-800 text-amber-300 border border-amber-500/30'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <Users className="w-3.5 h-3.5 shrink-0" />
+                          <span>Người Dùng</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setViolatorTarget('rooms'); setSelectedItemId(null); }}
+                          className={`py-1.5 px-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+                            violatorTarget === 'rooms'
+                              ? 'bg-slate-800 text-amber-300 border border-amber-500/30'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 shrink-0" />
+                          <span>Phòng Chat</span>
+                        </button>
+                      </div>
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => setBannedFilter('temp')}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
-                    bannedFilter === 'temp'
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 font-semibold'
-                      : 'bg-slate-900/60 hover:bg-slate-850 text-slate-300 border-slate-800/80'
-                  }`}
-                >
-                  <div className="text-left">
-                    <div className="font-semibold text-amber-300">Tạm đình chỉ (3d - 6m)</div>
-                    <div className="text-[10px] text-slate-400">Có thời hạn hết hạn</div>
+                    {/* Các tab mức độ vi phạm */}
+                    <div className="space-y-1">
+                      <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                        Phân loại mức độ vi phạm
+                      </div>
+                      {[
+                        { key: 'all' as const, label: 'Tất cả vi phạm', count: violatorTarget === 'users' ? countUserSeverity.all : countRoomSeverity.all, textCls: 'text-slate-200', activeCls: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
+                        { key: 'light' as const, label: 'Nhẹ (Cảnh cáo)', count: violatorTarget === 'users' ? countUserSeverity.light : countRoomSeverity.light, textCls: 'text-emerald-300', activeCls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+                        { key: 'medium' as const, label: 'Bình Thường', count: violatorTarget === 'users' ? countUserSeverity.medium : countRoomSeverity.medium, textCls: 'text-amber-300', activeCls: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
+                        { key: 'heavy' as const, label: 'Nặng (Tạm khóa)', count: violatorTarget === 'users' ? countUserSeverity.heavy : countRoomSeverity.heavy, textCls: 'text-orange-300', activeCls: 'bg-orange-500/15 text-orange-300 border-orange-500/40' },
+                        { key: 'critical' as const, label: 'Hết Cứu (Nghiêm trọng)', count: violatorTarget === 'users' ? countUserSeverity.critical : countRoomSeverity.critical, textCls: 'text-rose-300', activeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/50' }
+                      ].map(tab => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => { setViolatorFilter(tab.key); setSelectedItemId(null); }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-all border ${
+                            violatorFilter === tab.key
+                              ? `${tab.activeCls} font-semibold shadow-sm`
+                              : 'border-transparent text-slate-300 hover:bg-slate-900/80'
+                          }`}
+                        >
+                          <span className={violatorFilter === tab.key ? '' : tab.textCls}>{tab.label}</span>
+                          <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                            {tab.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">
-                    Tạm khóa
-                  </span>
-                </button>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                      Lọc danh sách đang khóa
+                    </div>
+                    {[
+                      { key: 'all' as const, label: 'Tất cả đang khóa', icon: Ban, cls: 'text-rose-400' },
+                      { key: 'perm' as const, label: 'Cấm vĩnh viễn', icon: ShieldAlert, cls: 'text-red-400' },
+                      { key: 'temp' as const, label: 'Tạm khóa tài khoản', icon: Clock, cls: 'text-amber-400' },
+                      { key: 'muted' as const, label: 'Khóa chat / Cảnh cáo', icon: VolumeX, cls: 'text-slate-300' }
+                    ].map(f => {
+                      const IconComp = f.icon;
+                      return (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => { setBannedFilter(f.key); setSelectedItemId(null); }}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
+                            bannedFilter === f.key
+                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/40 font-semibold'
+                              : 'border-transparent text-slate-300 hover:bg-slate-900/80'
+                          }`}
+                        >
+                          <IconComp className={`w-4 h-4 ${f.cls} shrink-0`} />
+                          <span>{f.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
+
+
 
             {/* MỤC 5. THÔNG BÁO TOÀN MÁY CHỦ -> Phân loại kênh phát sóng máy chủ */}
             {activeTask === 'broadcast' && (
@@ -2553,136 +3126,162 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                 </button>
               </div>
             </div>
-          ) : activeTask === 'rooms' && selectedItemId && selectedItemData ? (
+          ) : activeTask === 'rooms_users' && roomsUsersSubTab === 'rooms' && selectedItemId && selectedItemData ? (
             /* GIAO DIỆN PHÒNG CHAT TRỰC TIẾP DÀNH CHO DEV (LIVE STREAM & CÁC TAB CHI TIẾT) */
             <div className="flex-1 flex flex-col h-full overflow-hidden">
-              {/* Header của phòng chat trong DataStore - Thiết kế 2 tầng chuẩn mực không bị đè chữ */}
-              <div className="flex flex-col gap-2.5 pb-2.5 border-b border-slate-800/80 shrink-0 bg-slate-900/40 p-2.5 rounded-2xl mb-2">
-                {/* HÀNG 1: Nút Danh Sách Phòng ở góc trái + Tên phòng & Thông tin + Nút Xóa Phòng ở góc phải */}
-                <div className="flex items-center justify-between gap-2.5 w-full min-w-0">
-                  <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                    {/* Nút Danh Sách Phòng nhỏ gọn ở góc trái */}
+              {/* Header của phòng chat trong DataStore */}
+              <div className="flex flex-col gap-2 pb-2.5 border-b border-slate-800/80 shrink-0 bg-slate-900/40 p-2.5 rounded-2xl mb-2">
+                {/* HÀNG 1: Breadcrumb + Icon + Tên phòng & Badges + Live Console & Nút Xóa Phòng */}
+                <div className="flex items-center justify-between gap-3 w-full min-w-0">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     <button
                       type="button"
                       onClick={() => setSelectedItemId(null)}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-semibold border border-slate-700/80 transition-all active:scale-95 shrink-0 shadow-sm"
-                      title="Quay lại danh sách các phòng chat"
+                      className="p-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-all active:scale-95 shrink-0 border border-slate-700/70 shadow-sm"
+                      title="Quay lại danh sách phòng"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Danh Sách Phòng</span>
+                      <ChevronLeft className="w-4 h-4 text-emerald-400" />
                     </button>
 
-                    <div className="h-4 w-px bg-slate-800 shrink-0" />
-
-                    {/* Tên phòng & các huy hiệu chi tiết */}
-                    <div className="min-w-0 flex items-center gap-2.5 flex-1">
-                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
-                        (selectedItemData as any).isPrivate 
-                          ? 'bg-purple-500/20 text-purple-400 border border-purple-500/40' 
-                          : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                      }`}>
-                        {(selectedItemData as any).isPrivate ? <Lock className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div
+                        className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10 overflow-hidden"
+                        style={{ backgroundColor: (selectedItemData as any).avatarColor || '#10b981' }}
+                      >
+                        {(selectedItemData as any).avatar ? (
+                          <img src={(selectedItemData as any).avatar} alt={(selectedItemData as any).name} className="w-full h-full object-cover" />
+                        ) : (selectedItemData as any).id === 'public-relay-lounge' ? (
+                          <img src={DEFAULT_GLOBAL_LOUNGE_AVATAR} alt="Đại Sảnh Toàn Cầu" className="w-full h-full object-cover" />
+                        ) : (
+                          <span>{((selectedItemData as any).name || 'P').charAt(0).toUpperCase()}</span>
+                        )}
+                        <span
+                          className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center border border-slate-900 ${
+                            (selectedItemData as any).isPrivate ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          {(selectedItemData as any).isPrivate ? <Lock className="w-2 h-2" /> : <Globe className="w-2 h-2" />}
+                        </span>
                       </div>
-                      <div className="truncate min-w-0">
+
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-xs sm:text-sm text-slate-100 truncate">
+                          <span className="font-bold text-sm text-slate-100 truncate">
                             {(selectedItemData as any).name}
                           </span>
-                          <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border shrink-0 ${
-                            (selectedItemData as any).isPrivate ? 'bg-purple-500/15 text-purple-400 border-purple-500/30' : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          <span className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded-md border shrink-0 ${
+                            (selectedItemData as any).isPrivate 
+                              ? 'bg-purple-500/10 text-purple-300 border-purple-500/20' 
+                              : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'
                           }`}>
-                            {(selectedItemData as any).isPrivate ? 'Phòng Private' : 'Phòng Public'}
+                            {(selectedItemData as any).isPrivate ? 'Private' : 'Public'}
                           </span>
-                          {/* Huy hiệu vi phạm của phòng nếu có */}
                           {(selectedItemData as any).violationSeverity === 'light' && (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
                               🟢 Vi phạm: Nhẹ
                             </span>
                           )}
                           {(selectedItemData as any).violationSeverity === 'medium' && (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20">
                               🟡 Vi phạm: Bình Thường
                             </span>
                           )}
                           {(selectedItemData as any).violationSeverity === 'heavy' && (
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-300 border border-rose-500/20">
                               🟠 Vi phạm: Nặng
                             </span>
                           )}
                           {(selectedItemData as any).violationSeverity === 'critical' && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-600/30 text-red-200 border border-red-500 animate-pulse">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-600/20 text-red-300 border border-red-500/40 animate-pulse">
                               🔴 Vi phạm: Hết Cứu
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
-                          Mã phòng: <strong className="text-emerald-400 font-bold">#{(selectedItemData as any).code}</strong> • Tạo bởi: {(selectedItemData as any).createdByName || 'Người dùng'}
+                        <div className="text-[11px] text-slate-400 font-mono mt-0.5 truncate flex items-center gap-2">
+                          <span>Mã: <strong className="text-emerald-400">#{(selectedItemData as any).code}</strong></span>
+                          <span className="text-slate-600">•</span>
+                          <span>Tạo bởi: {(selectedItemData as any).createdByName || 'Hệ thống'}</span>
                           {(selectedItemData as any).violationReason && (
-                            <span className="text-amber-400 ml-1.5">• {(selectedItemData as any).violationReason}</span>
+                            <>
+                              <span className="text-slate-600">•</span>
+                              <span className="text-amber-400">{(selectedItemData as any).violationReason}</span>
+                            </>
                           )}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Nút Xóa Phòng ở góc phải */}
-                  {(selectedItemData as any).id !== 'public-relay-lounge' && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRoom((selectedItemData as any).id)}
-                      className="px-2.5 py-1.5 rounded-xl bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/40 text-xs font-semibold transition-all flex items-center gap-1 shadow-sm active:scale-95 shrink-0"
-                      title="Xóa vĩnh viễn phòng này"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                      <span className="hidden sm:inline">Xóa Phòng</span>
-                    </button>
-                  )}
+                  {/* Nhóm nút bên phải: Live Console badge + Xóa Phòng */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-mono">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span>Live Console</span>
+                    </div>
+
+                    {(selectedItemData as any).id !== 'public-relay-lounge' && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRoom((selectedItemData as any).id)}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/30 text-xs font-semibold transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+                        title="Xóa vĩnh viễn phòng này"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span className="hidden sm:inline">Xóa Phòng</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* HÀNG 2: THANH TÁC VỤ (CÁC TAB CHUYỂN ĐỔI Ở DƯỚI) */}
-                <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-800/60 overflow-x-auto scrollbar-none shrink-0">
+                {/* HÀNG 2: THANH SEGMENTED CONTROL GỌN GÀNG, ĐỒNG BỘ */}
+                <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950/70 border border-slate-800/80 overflow-x-auto scrollbar-none">
                   <button
                     type="button"
                     onClick={() => setRoomDetailsTab('chat')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'chat'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-white border-slate-800'
+                        ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                     }`}
                   >
-                    <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Phòng Chat (Live)</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Live Chat</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setRoomDetailsTab('users')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'users'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-white border-slate-800'
+                        ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                     }`}
                   >
                     <Users className="w-3.5 h-3.5" />
-                    <span>Thành Viên ({roomUsersList.length})</span>
+                    <span>Thành Viên</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700/60 font-mono text-slate-300">
+                      {roomUsersList.length}
+                    </span>
                   </button>
 
-                  {/* 3 Tab Kiểm Toán theo yêu cầu */}
                   <button
                     type="button"
                     onClick={() => {
                       setRoomDetailsTab('messages');
                       setAuditFilter('all');
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'messages' && auditFilter === 'all'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-white border-slate-800'
+                        ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                     }`}
                     title="Xem toàn bộ tổng số tin nhắn lưu trữ kiểm toán"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    <span>Tổng tin nhắn ({roomMessages.length})</span>
+                    <span>Tin Nhắn</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700/60 font-mono text-slate-300">
+                      {roomMessages.length}
+                    </span>
                   </button>
 
                   <button
@@ -2691,15 +3290,18 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                       setRoomDetailsTab('messages');
                       setAuditFilter('deleted');
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'messages' && auditFilter === 'deleted'
-                        ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-amber-300 border-slate-800'
+                        ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-amber-300 hover:bg-slate-900'
                     }`}
                     title="Xem danh sách tin nhắn mà Client đã xóa"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Số tin nhắn đã xóa ({roomMessagesDeletedCount})</span>
+                    <span>Đã Xóa</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 border border-amber-500/30 font-mono text-amber-300">
+                      {roomMessagesDeletedCount}
+                    </span>
                   </button>
 
                   <button
@@ -2708,28 +3310,34 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                       setRoomDetailsTab('messages');
                       setAuditFilter('warned');
                     }}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'messages' && auditFilter === 'warned'
-                        ? 'bg-rose-600 text-white border-rose-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-rose-300 border-slate-800'
+                        ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-rose-300 hover:bg-slate-900'
                     }`}
                     title="Xem danh sách tin nhắn bị cảnh cáo vi phạm"
                   >
                     <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Cảnh cáo ({roomMessagesWarnedCount})</span>
+                    <span>Cảnh Báo</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 border border-rose-500/30 font-mono text-rose-300">
+                      {roomMessagesWarnedCount}
+                    </span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setRoomDetailsTab('images')}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap border ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                       roomDetailsTab === 'images'
-                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                        : 'bg-slate-900/80 text-slate-400 hover:text-white border-slate-800'
+                        ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
                     }`}
                   >
                     <ImageIcon className="w-3.5 h-3.5" />
-                    <span>Hình Ảnh ({roomImagesList.length})</span>
+                    <span>Hình Ảnh</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700/60 font-mono text-slate-300">
+                      {roomImagesList.length}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -2806,16 +3414,28 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 mb-1 px-1 text-[11px] text-slate-400 flex-wrap">
-                            <div 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleNavigateToUser(msg.senderId, { displayName: msg.senderName, email: msg.senderEmail, deviceName: msg.senderDevice });
-                              }}
-                              className="w-5 h-5 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[9px] text-slate-300 font-bold shrink-0 cursor-pointer hover:ring-2 hover:ring-emerald-400"
-                              title="Nhấp để chuyển sang xem người dùng này"
-                            >
-                              {msg.senderName?.charAt(0).toUpperCase() || 'U'}
-                            </div>
+                            {(() => {
+                              const matchedSender = evaluatedUsers.find(eu => eu.uid === msg.senderId || (msg.senderEmail && eu.email?.toLowerCase() === msg.senderEmail.toLowerCase()));
+                              const resolvedAvatar = msg.senderAvatar || matchedSender?.customAvatarUrl || matchedSender?.avatarUrl || matchedSender?.photoURL;
+                              const resolvedColor = msg.senderAvatarColor || matchedSender?.avatarColor || '#334155';
+                              return (
+                                <div 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleNavigateToUser(msg.senderId, { displayName: msg.senderName, email: msg.senderEmail, deviceName: msg.senderDevice });
+                                  }}
+                                  className="w-5 h-5 rounded-full border border-slate-700 flex items-center justify-center text-[9px] text-white font-bold shrink-0 cursor-pointer hover:ring-2 hover:ring-emerald-400 overflow-hidden"
+                                  style={{ backgroundColor: resolvedColor }}
+                                  title="Nhấp để chuyển sang xem người dùng này"
+                                >
+                                  {resolvedAvatar ? (
+                                    <img src={resolvedAvatar} alt={msg.senderName} className="w-full h-full object-cover" />
+                                  ) : (
+                                    msg.senderName?.charAt(0).toUpperCase() || 'U'
+                                  )}
+                                </div>
+                              );
+                            })()}
                             <span 
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2874,7 +3494,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                           {/* Nội dung tin nhắn (Trong DataStore hiển thị 100% nội dung gốc rawText không che) */}
                           <div className="select-text font-normal">
-                            {msg.rawText || msg.text}
+                            {unwrapSecureBase64Message(msg.rawText || msg.text || '')}
                           </div>
 
                           {/* Đính kèm hình ảnh hoặc tệp tin chuẩn Hình 2 */}
@@ -2980,26 +3600,12 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-[11px] px-1">
-                  <div className="flex items-center gap-1.5 text-amber-400 font-semibold">
-                    <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                    <span>Nhắn tin với tư cách:</span>
-                    <span className="text-emerald-400 font-bold underline">
-                      {(currentUser?.displayName || settings.deviceName || 'Admin').trim()} DEV
-                    </span>
-                    <span className="text-[10px] text-slate-500 font-normal hidden sm:inline">(Miễn trừ PIN • Tự do giám sát & điều hành)</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                    ⚡ Live Console
-                  </span>
-                </div>
-
                 <form onSubmit={handleSendDevMessage} className="flex items-center gap-2">
                   {/* Nút đính kèm tệp */}
                   <button
                     type="button"
                     onClick={() => devFileInputRef.current?.click()}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all active:scale-95 shadow-sm"
+                    className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-100 border border-slate-700/70 transition-all active:scale-95 shadow-sm shrink-0"
                     title="Đính kèm tệp tài liệu"
                   >
                     <Paperclip className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
@@ -3009,29 +3615,36 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                   <button
                     type="button"
                     onClick={() => devImageInputRef.current?.click()}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-all active:scale-95 shadow-sm"
+                    className="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-100 border border-slate-700/70 transition-all active:scale-95 shadow-sm shrink-0"
                     title="Đính kèm hình ảnh"
                   >
                     <Camera className="w-4 h-4 text-slate-400 hover:text-emerald-400" />
                   </button>
 
-                  {/* Ô nhập nội dung tin nhắn */}
-                  <input
-                    type="text"
-                    placeholder="Nhập nội dung nhắn vào phòng này với tư cách DEV (Không cần nhập mã PIN)..."
-                    value={devInputText}
-                    onChange={(e) => setDevInputText(e.target.value)}
-                    className="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700/80 focus:border-emerald-500 text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none transition-colors shadow-inner"
-                  />
+                  {/* Ô nhập nội dung tin nhắn có gắn badge DEV trực tiếp */}
+                  <div className="flex-1 relative flex items-center">
+                    <div className="absolute left-2.5 flex items-center gap-1 pointer-events-none select-none z-10">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                        <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" /> DEV
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Nhắn tin với tư cách DEV (Miễn trừ PIN)..."
+                      value={devInputText}
+                      onChange={(e) => setDevInputText(e.target.value)}
+                      className="w-full pl-20 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 focus:border-emerald-500 text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none transition-colors shadow-inner"
+                    />
+                  </div>
 
                   {/* Nút Gửi */}
                   <button
                     type="submit"
                     disabled={(!devInputText.trim() && devAttachments.length === 0) || isSendingDevMessage}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg shadow-emerald-950/50 flex items-center gap-1.5 disabled:opacity-50 transition-all active:scale-95 shrink-0"
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-950/40 flex items-center gap-1.5 disabled:opacity-40 transition-all active:scale-95 shrink-0"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Gửi (DEV)</span>
+                    <span className="hidden sm:inline">Gửi</span>
                   </button>
                 </form>
               </div>
@@ -3056,10 +3669,14 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <div 
-                          className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 relative group-hover:scale-105 transition-transform"
+                          className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 relative group-hover:scale-105 transition-transform overflow-hidden"
                           style={{ backgroundColor: user.avatarColor || '#10b981' }}
                         >
-                          {user.displayName?.charAt(0).toUpperCase() || 'U'}
+                          {((user as any).customAvatarUrl || (user as any).avatarUrl || (user as any).photoURL) ? (
+                            <img src={(user as any).customAvatarUrl || (user as any).avatarUrl || (user as any).photoURL} alt={user.displayName} className="w-full h-full object-cover" />
+                          ) : (
+                            user.displayName?.charAt(0).toUpperCase() || 'U'
+                          )}
                           {user.onlineStatus?.isOnline && (
                             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5" />
                           )}
@@ -3293,7 +3910,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                           {/* Nội dung nguyên bản 100% không che */}
                           <div className="select-text font-normal">
-                            {msg.rawText || msg.text}
+                            {unwrapSecureBase64Message(msg.rawText || msg.text || '')}
                           </div>
 
                           {/* Đính kèm hình ảnh hoặc tệp tin */}
@@ -3393,7 +4010,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             </div>
           )}
         </div>
-      ) : activeTask === 'users' && selectedItemId && selectedItemData ? (
+      ) : activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && selectedItemId && selectedItemData ? (
         /* GIAO DIỆN QUẢN TRỊ NGƯỜI DÙNG TOÀN DIỆN CHO DEV (ĐỒNG BỘ WORKSPACE PHÒNG CHAT) */
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Header người dùng */}
@@ -3413,10 +4030,14 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
               <div className="min-w-0 flex items-center gap-2.5 flex-1">
                 <div 
-                  className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10"
+                  className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10 overflow-hidden"
                   style={{ backgroundColor: (selectedItemData as any).avatarColor || '#0284c7' }}
                 >
-                  {(selectedItemData as any).displayName?.charAt(0).toUpperCase() || 'U'}
+                  {((selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL) ? (
+                    <img src={(selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL} alt={(selectedItemData as any).displayName} className="w-full h-full object-cover" />
+                  ) : (
+                    (selectedItemData as any).displayName?.charAt(0).toUpperCase() || 'U'
+                  )}
                   {(selectedItemData as any).onlineCheck?.isOnline && (
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 animate-pulse" />
                   )}
@@ -3501,72 +4122,36 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             </div>
           </div>
 
-          {/* Thanh 4 Tab Người Dùng: Thông Tin & Thiết Bị, Thông Báo Riêng, Kỷ Luật & 12 Luật AI, Nhật Ký Tin Nhắn */}
-          <div className="flex items-center gap-1.5 border-b border-slate-800 pb-2 px-1 mb-2 overflow-x-auto scrollbar-none shrink-0">
+          {/* Thanh 2 Tab Người Dùng: Thiết Bị & Hồ Sơ, Nhật Ký Tin Nhắn */}
+          <div className="flex items-center gap-1 p-1 rounded-xl bg-slate-950/70 border border-slate-800/80 mb-3 overflow-x-auto scrollbar-none shrink-0">
             <button
               type="button"
               onClick={() => setUserDetailsTab('info')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 userDetailsTab === 'info'
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/50 shadow-sm'
-                  : 'bg-slate-900/60 hover:bg-slate-850 text-slate-400 hover:text-slate-200 border-slate-800'
+                  ? 'bg-slate-800 text-sky-400 border border-sky-500/30 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
               <Laptop className="w-3.5 h-3.5" />
-              <span>1. Thông Tin & Thiết Bị</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-sky-400">
+              <span>Thiết Bị & Hồ Sơ</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700/60 text-slate-300 font-mono">
                 {userDevicesList.length}
               </span>
             </button>
 
             <button
               type="button"
-              onClick={() => setUserDetailsTab('notify')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border ${
-                userDetailsTab === 'notify'
-                  ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-sm'
-                  : 'bg-slate-900/60 hover:bg-slate-850 text-slate-400 hover:text-slate-200 border-slate-800'
-              }`}
-            >
-              <Bell className="w-3.5 h-3.5" />
-              <span>2. Thông Báo Riêng (DEV)</span>
-              {sentPrivateNotifs.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-300">
-                  {sentPrivateNotifs.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setUserDetailsTab('moderation')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border ${
-                userDetailsTab === 'moderation'
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
-                  : 'bg-slate-900/60 hover:bg-slate-850 text-slate-400 hover:text-slate-200 border-slate-800'
-              }`}
-            >
-              <Bot className="w-3.5 h-3.5 text-amber-400" />
-              <span>3. Kỷ Luật & 12 Luật AI</span>
-              {(selectedItemData as any).violationSeverity && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 animate-pulse">
-                  Vi phạm
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
               onClick={() => setUserDetailsTab('messages')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap border ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
                 userDetailsTab === 'messages'
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
-                  : 'bg-slate-900/60 hover:bg-slate-850 text-slate-400 hover:text-slate-200 border-slate-800'
+                  ? 'bg-slate-800 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
               }`}
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>4. Nhật Ký Tin Nhắn</span>
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-300 font-mono">
+              <span>Nhật Ký Tin Nhắn</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700/60 text-slate-300 font-mono">
                 {userMessages.length}
               </span>
             </button>
@@ -3575,29 +4160,47 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           {/* TAB 1: THÔNG TIN VÀ THIẾT BỊ ĐĂNG NHẬP */}
           {userDetailsTab === 'info' && (
             <div className="flex-1 overflow-y-auto space-y-4 p-2 sm:p-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Thẻ tóm tắt thông tin hồ sơ */}
+              {/* Thẻ tóm tắt thông tin hồ sơ (Thiết Bị & Hồ Sơ) */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Họ Tên / Biệt Danh</div>
+                  <div className="text-[11px] text-slate-400 font-medium">Họ Tên / Tên đệm / Biệt Danh</div>
                   <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                    <span>{(selectedItemData as any).displayName}</span>
-                    {(selectedItemData as any).isAnonymous && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">Ẩn danh</span>
-                    )}
+                    <span>{(selectedItemData as any).displayName || 'Người dùng'}</span>
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Email Tài Khoản</div>
-                  <div className="text-sm font-semibold text-slate-200 truncate">
+                  <div className="text-[11px] text-slate-400 font-medium">Tên Tài Khoản (Username)</div>
+                  <div className="text-sm font-semibold text-slate-200 font-mono truncate">
+                    {(selectedItemData as any).username || (selectedItemData as any).email?.split('@')[0] || (selectedItemData as any).displayName || 'user'}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Ngày / Tháng / Năm Đăng Ký</div>
+                  <div className="text-xs font-mono text-emerald-400 font-semibold">
+                    {(selectedItemData as any).createdAt ? new Date((selectedItemData as any).createdAt).toLocaleDateString('vi-VN', { dateStyle: 'full' }) : 'Hôm nay / Phiên hiện tại'}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Số Điện Thoại (SĐT)</div>
+                  <div className="text-sm font-mono text-slate-200">
+                    {(selectedItemData as any).phone || (selectedItemData as any).phoneNumber || <span className="text-slate-500 italic">Chưa cập nhật SĐT</span>}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Gmail / Email Liên Kết</div>
+                  <div className="text-sm font-semibold text-slate-200 truncate font-mono">
                     {(selectedItemData as any).email || <span className="text-slate-500 italic">Chưa liên kết</span>}
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Tổng Tin Nhắn Đã Gửi</div>
+                  <div className="text-[11px] text-slate-400 font-medium">Tổng Tin Nhắn Hoạt Động</div>
                   <div className="text-sm font-bold text-emerald-400 font-mono">
-                    {userMessages.length} tin nhắn (qua các phòng)
+                    {userMessages.length} tin nhắn (qua hệ thống)
                   </div>
                 </div>
               </div>
@@ -3651,343 +4254,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             </div>
           )}
 
-          {/* TAB 2: GỬI THÔNG BÁO RIÊNG CHO NGƯỜI DÙNG */}
-          {userDetailsTab === 'notify' && (
-            <div className="flex-1 overflow-y-auto space-y-4 p-2 sm:p-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
-              <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-xs text-indigo-300 flex items-center gap-3">
-                <Bell className="w-5 h-5 text-indigo-400 shrink-0" />
-                <div>
-                  <strong className="text-white text-xs sm:text-sm block">Kênh Thông Báo Riêng DEV ➔ Người Dùng:</strong>
-                  <span>Gửi lời nhắn riêng tư, nhắc nhở hoặc chỉ dẫn trực tiếp tới tài khoản [{(selectedItemData as any).displayName}]. Thông báo sẽ hiện nổi bật trên ứng dụng của họ.</span>
-                </div>
-              </div>
-
-              {privateNotifStatus && (
-                <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{privateNotifStatus}</span>
-                </div>
-              )}
-
-              {/* Form soạn thông báo */}
-              <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-lg">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300">Nội dung tin thông báo riêng:</span>
-                  <span className="text-[11px] text-slate-400 font-mono">
-                    💡 Nhấn <strong>Enter</strong> để gửi thông báo (Shift+Enter để xuống dòng)
-                  </span>
-                </div>
-
-                <textarea
-                  rows={4}
-                  placeholder={`Nhập nội dung gửi riêng cho ${(selectedItemData as any).displayName}...\n\n(Ví dụ: Bạn đang có dấu hiệu vi phạm điều luật cộng đồng số 4, vui lòng chú ý phát ngôn hoặc tài khoản sẽ bị tạm khóa).`}
-                  value={privateMsgText}
-                  onChange={(e) => setPrivateMsgText(e.target.value)}
-                  onKeyDown={handlePrivateMsgKeyDown}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500 resize-none font-sans"
-                />
-
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] text-slate-500">
-                    Gửi từ: <strong className="text-emerald-400">{currentUser?.displayName || 'Quản Trị Viên'} (DEV)</strong>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleSendPrivateNotification}
-                    disabled={!privateMsgText.trim() || isSendingPrivateNotif}
-                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-indigo-950/50 flex items-center gap-1.5 transition-all active:scale-95"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Gửi Thông Báo Riêng</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Danh sách các thông báo riêng đã gửi */}
-              {sentPrivateNotifs.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Lịch sử thông báo đã gửi ({sentPrivateNotifs.length}):</h4>
-                  <div className="space-y-2">
-                    {sentPrivateNotifs.map((n) => (
-                      <div key={n.id} className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-300 space-y-1">
-                        <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
-                          <span>{formatMessageTime(n.createdAt)}</span>
-                          <span className="text-indigo-400">Đã gửi thành công</span>
-                        </div>
-                        <div className="text-slate-200 whitespace-pre-wrap">{n.message}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 3: ĐIỀU KIỂM VI PHẠM & 12 LUẬT CỘNG ĐỒNG AI */}
-          {userDetailsTab === 'moderation' && (
-            <div className="flex-1 overflow-y-auto space-y-4 p-2 sm:p-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Nút kích hoạt quét AI */}
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <strong className="text-white text-xs sm:text-sm">Trí Tuệ Nhân Tạo AI Quét 12 Điều Luật Cộng Đồng:</strong>
-                  </div>
-                  <p className="text-xs text-slate-300 mt-1">
-                    AI sẽ tự động đọc phân tích toàn bộ tin nhắn, báo cáo, và lịch sử của người dùng này để phát hiện vi phạm và gợi ý mức phạt chuẩn xác.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleRunAiAudit}
-                  disabled={isAiAuditing}
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-950/50 active:scale-95 shrink-0 transition-all"
-                >
-                  <Bot className={`w-4 h-4 ${isAiAuditing ? 'animate-spin' : ''}`} />
-                  <span>{isAiAuditing ? 'Đang Quét 12 Luật...' : 'Quét Tự Động 12 Luật AI'}</span>
-                </button>
-              </div>
-
-              {/* Kết quả phân tích từ AI nếu có */}
-              {aiAuditResult && (
-                <div className={`p-4 rounded-2xl border space-y-3 ${
-                  aiAuditResult.hasViolation 
-                    ? 'bg-rose-950/20 border-rose-500/40 text-rose-200' 
-                    : 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 font-bold text-sm">
-                      {aiAuditResult.hasViolation ? <ShieldAlert className="w-5 h-5 text-rose-400" /> : <ShieldCheck className="w-5 h-5 text-emerald-400" />}
-                      <span>{aiAuditResult.hasViolation ? `⚠️ Phát Hiện Vi Phạm (Điểm: ${aiAuditResult.score}/100)` : '✅ Người Dùng Trong Sạch'}</span>
-                    </div>
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-700">
-                      Gợi ý: {aiAuditResult.recommendedLabel}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-200 leading-relaxed">{aiAuditResult.summary}</p>
-
-                  {/* Danh sách các điều luật bị vi phạm */}
-                  {aiAuditResult.findings && aiAuditResult.findings.length > 0 && (
-                    <div className="space-y-1.5 pt-1">
-                      <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">Chi tiết điều luật vi phạm:</div>
-                      {aiAuditResult.findings.map((f, idx) => (
-                        <div key={idx} className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs text-slate-300 space-y-1">
-                          <div className="flex items-center justify-between text-amber-400 font-semibold">
-                            <span>{f.ruleNumber}: {f.ruleTitle}</span>
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">{f.severity}</span>
-                          </div>
-                          <div className="text-[11px] text-slate-400 italic">Bằng chứng: "{f.evidence}"</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {aiAuditResult.hasViolation && aiAuditResult.recommendedTier && (
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction(aiAuditResult.recommendedTier as any, aiAuditResult.summary)}
-                      className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2 transition-all active:scale-95"
-                    >
-                      <Ban className="w-4 h-4" />
-                      <span>Áp Dụng Hình Phạt Được Khuyến Nghị ({aiAuditResult.recommendedLabel})</span>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* BẢNG ĐIỀU KHIỂN KỶ LUẬT 5 CẤP ĐỘ CHUẨN ROBLOX (TÙY CHỈNH VĂN BẢN GỬI ĐI) */}
-              <div className="space-y-3.5 bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-                    <Ban className="w-4 h-4 text-rose-400" />
-                    <span>Bảng Điều Khiển Xử Lý Kỷ Luật Chuẩn Roblox (5 Cấp Độ):</span>
-                  </div>
-                  <span className="text-[10px] text-amber-300 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                    💡 Bạn có thể chỉnh sửa văn bản gửi đi bất kỳ lúc nào
-                  </span>
-                </div>
-
-                {/* Các trường nhập liệu tùy biến cho bản án Roblox */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-slate-300 block">Lý do xử phạt (Reason):</label>
-                    <input
-                      type="text"
-                      placeholder="VD: Sử dụng ngôn từ xúc phạm / Vi phạm quy tắc an toàn"
-                      value={sanctionCustomReason}
-                      onChange={(e) => setSanctionCustomReason(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-rose-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-slate-300 block">Điều luật áp dụng (Rule):</label>
-                    <input
-                      type="text"
-                      placeholder="VD: Điều 1: Tôn trọng & Ngôn từ trong sạch"
-                      value={sanctionCustomRule}
-                      onChange={(e) => setSanctionCustomRule(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-emerald-300 focus:outline-none focus:border-emerald-500 font-mono"
-                    />
-                  </div>
-
-                  <div className="space-y-1 sm:col-span-2">
-                    <label className="text-[11px] font-semibold text-rose-300 block">Bằng chứng / Đoạn chat vi phạm (Offensive Item):</label>
-                    <input
-                      type="text"
-                      placeholder="Dán đoạn chat vi phạm của thành viên này vào đây..."
-                      value={sanctionCustomOffensiveItem}
-                      onChange={(e) => setSanctionCustomOffensiveItem(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-rose-200 focus:outline-none focus:border-rose-500 font-mono"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* Cấp 1 */}
-                  <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between text-emerald-400 font-bold text-xs">
-                        <span>🟢 Cấp 1: Cảnh Báo (Warning)</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20">Khóa chat 15 phút</span>
-                      </div>
-                      <div className="mt-1.5 space-y-1">
-                        <span className="text-[10px] text-slate-400 font-mono">Moderator Note:</span>
-                        <input
-                          type="text"
-                          value={sanctionCustomNotes.level_1}
-                          onChange={(e) => setSanctionCustomNotes(prev => ({ ...prev, level_1: e.target.value }))}
-                          className="w-full px-3 py-1.5 rounded-xl bg-[#020712] border border-[#1e3a5f] text-xs text-cyan-300 italic font-sans focus:outline-none focus:border-cyan-500 shadow-inner"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction('level_1')}
-                      className="w-full py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all active:scale-95 shadow-md"
-                    >
-                      Áp Dụng Cấp 1 (15 Phút)
-                    </button>
-                  </div>
-
-                  {/* Cấp 2 */}
-                  <div className="p-3.5 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between text-amber-400 font-bold text-xs">
-                        <span>🟡 Cấp 2: Tạm Khóa Chat 1 Tiếng</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20">Khóa chat 1 giờ</span>
-                      </div>
-                      <div className="mt-1.5 space-y-1">
-                        <span className="text-[10px] text-slate-400 font-mono">Moderator Note:</span>
-                        <input
-                          type="text"
-                          value={sanctionCustomNotes.level_2}
-                          onChange={(e) => setSanctionCustomNotes(prev => ({ ...prev, level_2: e.target.value }))}
-                          className="w-full px-3 py-1.5 rounded-xl bg-[#020712] border border-[#1e3a5f] text-xs text-cyan-300 italic font-sans focus:outline-none focus:border-cyan-500 shadow-inner"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction('level_2')}
-                      className="w-full py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition-all active:scale-95 shadow-md"
-                    >
-                      Áp Dụng Cấp 2 (1 Giờ)
-                    </button>
-                  </div>
-
-                  {/* Cấp 3 */}
-                  <div className="p-3.5 rounded-2xl bg-orange-950/20 border border-orange-500/30 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between text-orange-400 font-bold text-xs">
-                        <span>🟠 Cấp 3: Banned 1 Ngày</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-orange-500/20">Khóa tài khoản 24h</span>
-                      </div>
-                      <div className="mt-1.5 space-y-1">
-                        <span className="text-[10px] text-slate-400 font-mono">Moderator Note:</span>
-                        <input
-                          type="text"
-                          value={sanctionCustomNotes.level_3}
-                          onChange={(e) => setSanctionCustomNotes(prev => ({ ...prev, level_3: e.target.value }))}
-                          className="w-full px-3 py-1.5 rounded-xl bg-[#020712] border border-[#1e3a5f] text-xs text-cyan-300 italic font-sans focus:outline-none focus:border-cyan-500 shadow-inner"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction('level_3')}
-                      className="w-full py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs transition-all active:scale-95 shadow-md"
-                    >
-                      Áp Dụng Cấp 3 (1 Ngày)
-                    </button>
-                  </div>
-
-                  {/* Cấp 4 */}
-                  <div className="p-3.5 rounded-2xl bg-rose-950/20 border border-rose-500/30 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between text-rose-400 font-bold text-xs">
-                        <span>🔴 Cấp 4: Banned 7 Ngày</span>
-                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20">Khóa 7 ngày</span>
-                      </div>
-                      <div className="mt-1.5 space-y-1">
-                        <span className="text-[10px] text-slate-400 font-mono">Moderator Note:</span>
-                        <input
-                          type="text"
-                          value={sanctionCustomNotes.level_4}
-                          onChange={(e) => setSanctionCustomNotes(prev => ({ ...prev, level_4: e.target.value }))}
-                          className="w-full px-3 py-1.5 rounded-xl bg-[#020712] border border-[#1e3a5f] text-xs text-cyan-300 italic font-sans focus:outline-none focus:border-cyan-500 shadow-inner"
-                        />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction('level_4')}
-                      className="w-full py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-all active:scale-95 shadow-md"
-                    >
-                      Áp Dụng Cấp 4 (7 Ngày)
-                    </button>
-                  </div>
-                </div>
-
-                {/* Nút Cấm Vĩnh Viễn (Mức 5) & Nút Mở Khóa / Ân Xá */}
-                <div className="p-3 rounded-2xl bg-red-950/30 border border-red-500/40 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-red-300">⛔ Mức 5 (Tối Cao): Account Deleted (Cấm Vĩnh Viễn)</span>
-                    <span className="text-[10px] text-red-400 font-mono font-bold">Thu hồi quyền vĩnh viễn</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={sanctionCustomNotes.level_perm}
-                    onChange={(e) => setSanctionCustomNotes(prev => ({ ...prev, level_perm: e.target.value }))}
-                    className="w-full px-3 py-1.5 rounded-xl bg-[#020712] border border-[#1e3a5f] text-xs text-cyan-300 italic font-sans focus:outline-none focus:border-cyan-500 shadow-inner"
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleApplyTierSanction('level_perm')}
-                      className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-red-700 via-rose-700 to-red-800 hover:from-red-600 hover:to-rose-600 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-red-950/60 border border-red-500/50 active:scale-95 transition-all"
-                    >
-                      <Ban className="w-4 h-4" />
-                      <span>⛔ CẤM TÀI KHOẢN VĨNH VIỄN</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleUnbanUser((selectedItemData as any).uid || (selectedItemData as any).id)}
-                      className="py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-850 text-emerald-400 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 border border-emerald-500/40 active:scale-95 transition-all"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                      <span>🟢 Mở Khóa / Ân Xá Toàn Bộ</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: NHẬT KÝ TOÀN BỘ TIN NHẮN CỦA NGƯỜI DÙNG */}
+          {/* TAB 2: NHẬT KÝ TOÀN BỘ TIN NHẮN CỦA NGƯỜI DÙNG */}
           {userDetailsTab === 'messages' && (
             <div className="flex-1 overflow-y-auto space-y-2.5 p-2 sm:p-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
               {userMessages.length === 0 ? (
@@ -4031,8 +4298,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         </div>
                       </div>
 
-                    <div className="text-xs sm:text-sm text-slate-100 whitespace-pre-wrap leading-relaxed">
-                      {msg.text || msg.rawText || (msg.fileUrl ? '📁 Đính kèm tập tin/hình ảnh' : 'Tin nhắn trống')}
+                    <div className="text-xs sm:text-sm text-slate-100 whitespace-pre-wrap leading-relaxed select-text">
+                      {unwrapSecureBase64Message(msg.text || msg.rawText || '') || (msg.fileUrl ? '📁 Đính kèm tập tin/hình ảnh' : 'Tin nhắn trống')}
                     </div>
 
                     {msg.fileUrl && (
@@ -4058,55 +4325,178 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             /* HIỂN THỊ DANH SÁCH BẢN GHI (KHI CHƯA CHỌN PHÒNG HOẶC TÁC VỤ KHÁC) */
             <>
               {/* Header & Thanh tìm kiếm Khung Giữa */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/60 gap-2 mb-3">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <FileText className="w-4 h-4" />
-                  <h3 className="text-xs sm:text-sm font-bold tracking-wide uppercase">
-                    3. Danh Sách Bản Ghi ({filteredItems.length})
-                  </h3>
-                </div>
+              <div className="flex flex-col gap-2.5 pb-3 border-b border-slate-800/60 mb-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5 text-emerald-400">
+                    <FileText className="w-4 h-4 shrink-0" />
+                    <h3 className="text-xs sm:text-sm font-bold tracking-wide text-slate-100">
+                      {activeTask === 'rooms_users' && roomsUsersSubTab === 'rooms' && `Danh Sách Phòng Chat (${filteredItems.length})`}
+                      {activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && `Danh Sách Người Dùng (${filteredItems.length})`}
+                      {activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && `Vi Phạm & Kiểm Duyệt OpenAI (${filteredItems.length})`}
+                      {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && `Danh Sách Đang Bị Khóa (${filteredItems.length})`}
+                      {activeTask === 'reports' && `Danh Sách Tố Cáo & Khiếu Nại (${filteredItems.length})`}
+                    </h3>
+                  </div>
 
-                {/* Ô tìm kiếm nhanh & nút dọn dẹp phòng / user test */}
-                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                  {activeTask === 'rooms' && rooms.some(r => r.id !== 'public-relay-lounge') && (
-                    <button
-                      type="button"
-                      onClick={handlePurgeTestRooms}
-                      className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap"
-                      title="Xóa tất cả phòng thử nghiệm / phòng không thật, chỉ giữ lại Đại Sảnh Toàn Cầu"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                      <span>Dọn phòng test</span>
-                    </button>
-                  )}
+                  {/* Ô tìm kiếm nhanh & nút tác vụ */}
+                  <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    {activeTask === 'violators_banned' && (
+                      <button
+                        type="button"
+                        onClick={handleStartOpenAiModeration}
+                        disabled={isBatchAuditing}
+                        className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap cursor-pointer"
+                        title="Bắt đầu kiểm duyệt tự động bằng OpenAI Moderation và phân loại vào các tab vi phạm"
+                      >
+                        {isBatchAuditing ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isBatchAuditing ? 'Đang kiểm duyệt...' : 'Kiểm Duyệt'}</span>
+                      </button>
+                    )}
 
-                  {activeTask === 'users' && (
-                    <button
-                      type="button"
-                      onClick={handlePurgeTestUsers}
-                      className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap"
-                      title="Dọn dẹp và xóa các tài khoản thử nghiệm / tài khoản không thật khỏi Firestore"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                      <span>Dọn tài khoản test</span>
-                    </button>
-                  )}
+                    {activeTask === 'rooms_users' && roomsUsersSubTab === 'rooms' && rooms.some(r => r.id !== 'public-relay-lounge') && (
+                      <button
+                        type="button"
+                        onClick={handlePurgeTestRooms}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap"
+                        title="Xóa tất cả phòng thử nghiệm / phòng không thật, chỉ giữ lại Đại Sảnh Toàn Cầu"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Dọn phòng test</span>
+                      </button>
+                    )}
 
-                  <div className="relative min-w-[180px] max-w-xs">
-                    <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm nhanh..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
-                    />
+                    {activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && (
+                      <button
+                        type="button"
+                        onClick={handlePurgeTestUsers}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap"
+                        title="Dọn dẹp và xóa các tài khoản thử nghiệm / tài khoản không thật khỏi Firestore"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Dọn tài khoản test</span>
+                      </button>
+                    )}
+
+                    <div className="relative min-w-[180px] max-w-xs">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Tìm kiếm nhanh..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-emerald-500/50"
+                      />
+                    </div>
                   </div>
                 </div>
+
+                {/* Thanh chuyển nhanh Phòng Chat / Người Dùng ngay trong header danh sách */}
+                {activeTask === 'rooms_users' && (
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => { setRoomsUsersSubTab('rooms'); setSelectedItemId(null); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                          roomsUsersSubTab === 'rooms'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        <span>Phòng Chat ({roomsWithViolations.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setRoomsUsersSubTab('users'); setSelectedItemId(null); }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                          roomsUsersSubTab === 'users'
+                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>Người Dùng ({evaluatedUsersWithViolations.length})</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Thanh phân loại mức độ vi phạm & chuyển Vi Phạm / Đã Khóa ngay trong danh sách */}
+                {activeTask === 'violators_banned' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => { setViolatorsBannedSubTab('violators'); setSelectedItemId(null); }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                          violatorsBannedSubTab === 'violators'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Vi Phạm
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setViolatorsBannedSubTab('banned'); setSelectedItemId(null); }}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
+                          violatorsBannedSubTab === 'banned'
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        Đã Khóa ({sanctions.filter(s => s.isBanned).length})
+                      </button>
+                    </div>
+
+                    {violatorsBannedSubTab === 'violators' && (
+                      <div className="flex items-center gap-1 overflow-x-auto scrollbar-none p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                        {[
+                          { key: 'all' as const, label: 'Tất cả', count: violatorTarget === 'users' ? countUserSeverity.all : countRoomSeverity.all },
+                          { key: 'light' as const, label: 'Nhẹ', count: violatorTarget === 'users' ? countUserSeverity.light : countRoomSeverity.light },
+                          { key: 'medium' as const, label: 'Bình Thường', count: violatorTarget === 'users' ? countUserSeverity.medium : countRoomSeverity.medium },
+                          { key: 'heavy' as const, label: 'Nặng', count: violatorTarget === 'users' ? countUserSeverity.heavy : countRoomSeverity.heavy },
+                          { key: 'critical' as const, label: 'Hết Cứu', count: violatorTarget === 'users' ? countUserSeverity.critical : countRoomSeverity.critical }
+                        ].map(sevTab => (
+                          <button
+                            key={sevTab.key}
+                            type="button"
+                            onClick={() => { setViolatorFilter(sevTab.key); setSelectedItemId(null); }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap tabular-nums ${
+                              violatorFilter === sevTab.key
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            {sevTab.label} ({sevTab.count})
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTask === 'violators_banned' && batchAuditSummary && (
+                  <div className="px-3 py-2 rounded-xl bg-slate-900/80 border border-amber-500/30 text-xs text-slate-300 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Bot className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>
+                        Kết quả <strong>{batchAuditSummary.source}</strong> lúc {batchAuditSummary.timestamp}: quét{' '}
+                        <span className="font-mono tabular-nums text-slate-100">{batchAuditSummary.totalScanned}</span> đối tượng · phát hiện{' '}
+                        <span className="font-mono tabular-nums text-amber-300 font-bold">{batchAuditSummary.flaggedCount}</span> vi phạm.
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Banner cảnh báo người dùng vi phạm nghiêm trọng nhất - Hiển thị tập trung tại Tab 3 Các Vi Phạm */}
-              {activeTask === 'violators' && worstViolatorUser && (
+              {activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && worstViolatorUser && (
                 <div className="mb-3 p-3 rounded-2xl bg-gradient-to-r from-red-950/50 via-rose-950/40 to-slate-900 border border-red-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-red-600/20 border border-red-500/50 flex items-center justify-center text-red-400 shrink-0">
@@ -4126,13 +4516,15 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedItemId(worstViolatorUser.uid || worstViolatorUser.id);
-                      setActiveTask('users');
-                      setUserDetailsTab('moderation');
+                      const targetId = worstViolatorUser.uid || worstViolatorUser.id;
+                      setViolatorTarget('users');
+                      setSelectedItemId(targetId);
+                      fetchViolationDetailsForTarget(targetId, 'users');
+                      setShowDetailModal(true);
                     }}
                     className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shrink-0 flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all"
                   >
-                    <span>Kiểm Tra & Xử Lý Kỷ Luật &gt;</span>
+                    <span>Xem Chi Tiết Vi Phạm &gt;</span>
                   </button>
                 </div>
               )}
@@ -4155,17 +4547,12 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         id={`record-item-${itemId}`}
                         onClick={() => {
                           setSelectedItemId(itemId);
-                          if (activeTask === 'violators') {
-                            if (violatorTarget === 'users') {
-                              setActiveTask('users');
-                              setUserDetailsTab('moderation');
-                            } else {
-                              setActiveTask('rooms');
-                              setRoomDetailsTab('chat');
-                            }
+                          if (activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators') {
+                            fetchViolationDetailsForTarget(itemId, violatorTarget);
+                            setShowDetailModal(true);
                             return;
                           }
-                          if (activeTask !== 'rooms' && activeTask !== 'users') {
+                          if (activeTask !== 'rooms_users') {
                             setShowDetailModal(true);
                           }
                         }}
@@ -4176,13 +4563,27 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         }`}
                       >
                         {/* TH1: HIỂN THỊ PHÒNG CHAT (CÁC PHÒNG CHAT - TAB 1) */}
-                        {activeTask === 'rooms' && (
+                        {activeTask === 'rooms_users' && roomsUsersSubTab === 'rooms' && (
                           <div className="flex items-center justify-between w-full min-w-0">
                             <div className="flex items-center gap-3 min-w-0">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
-                                item.isPrivate ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                              }`}>
-                                {item.isPrivate ? <Lock className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
+                              <div
+                                className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10 overflow-hidden"
+                                style={{ backgroundColor: item.avatarColor || '#10b981' }}
+                              >
+                                {item.avatar ? (
+                                  <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" />
+                                ) : item.id === 'public-relay-lounge' ? (
+                                  <img src={DEFAULT_GLOBAL_LOUNGE_AVATAR} alt="Đại Sảnh Toàn Cầu" className="w-full h-full object-cover" />
+                                ) : (
+                                  <span>{(item.name || 'P').charAt(0).toUpperCase()}</span>
+                                )}
+                                <span
+                                  className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border border-slate-900 ${
+                                    item.isPrivate ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
+                                  }`}
+                                >
+                                  {item.isPrivate ? <Lock className="w-2.5 h-2.5" /> : <Globe className="w-2.5 h-2.5" />}
+                                </span>
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -4228,15 +4629,19 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         )}
 
                         {/* TH2: HIỂN THỊ NGƯỜI DÙNG (NHỮNG NGƯỜI DÙNG - TAB 2) */}
-                        {activeTask === 'users' && (
+                        {activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && (
                           <div className="flex items-center justify-between w-full min-w-0">
                             <div className="flex items-center gap-3 min-w-0">
                               {/* Ảnh Avatar người dùng */}
                               <div 
-                                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-inner relative border border-white/10"
+                                className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-inner relative border border-white/10 overflow-hidden"
                                 style={{ backgroundColor: item.avatarColor || '#10b981' }}
                               >
-                                {item.displayName?.charAt(0).toUpperCase() || 'U'}
+                                {(item.customAvatarUrl || item.avatarUrl || item.photoURL) ? (
+                                  <img src={item.customAvatarUrl || item.avatarUrl || item.photoURL} alt={item.displayName} className="w-full h-full object-cover" />
+                                ) : (
+                                  item.displayName?.charAt(0).toUpperCase() || 'U'
+                                )}
                                 {item.onlineCheck?.isOnline && (
                                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 animate-pulse" />
                                 )}
@@ -4279,16 +4684,20 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         )}
 
                         {/* TH3: HIỂN THỊ CÁC VI PHẠM (CÁC VI PHẠM - TAB 3 TẬP TRUNG) */}
-                        {activeTask === 'violators' && (
+                        {activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && (
                           <div className="flex items-center justify-between w-full min-w-0">
                             {violatorTarget === 'users' ? (
                               /* 1. Bản ghi Người Dùng Vi Phạm */
                               <div className="flex items-center gap-3 min-w-0 flex-1">
                                 <div 
-                                  className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 border border-amber-500/40 relative shadow-inner"
+                                  className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 border border-amber-500/40 relative shadow-inner overflow-hidden"
                                   style={{ backgroundColor: item.avatarColor || '#f59e0b' }}
                                 >
-                                  {item.displayName?.charAt(0).toUpperCase() || 'V'}
+                                  {(item.customAvatarUrl || item.avatarUrl || item.photoURL) ? (
+                                    <img src={item.customAvatarUrl || item.avatarUrl || item.photoURL} alt={item.displayName} className="w-full h-full object-cover" />
+                                  ) : (
+                                    item.displayName?.charAt(0).toUpperCase() || 'V'
+                                  )}
                                   {item.isWorstViolator && (
                                     <span className="w-3.5 h-3.5 rounded-full bg-red-600 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 flex items-center justify-center text-[9px] text-white font-bold animate-pulse">
                                       !
@@ -4339,10 +4748,24 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                             ) : (
                               /* 2. Bản ghi Phòng Chat Vi Phạm */
                               <div className="flex items-center gap-3 min-w-0 flex-1">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${
-                                  item.isPrivate ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                }`}>
-                                  {item.isPrivate ? <Lock className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
+                                <div
+                                  className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10 overflow-hidden"
+                                  style={{ backgroundColor: item.avatarColor || '#10b981' }}
+                                >
+                                  {item.avatar ? (
+                                    <img src={item.avatar} alt={item.name} className="w-full h-full object-cover" />
+                                  ) : item.id === 'public-relay-lounge' ? (
+                                    <img src={DEFAULT_GLOBAL_LOUNGE_AVATAR} alt="Đại Sảnh Toàn Cầu" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <span>{(item.name || 'P').charAt(0).toUpperCase()}</span>
+                                  )}
+                                  <span
+                                    className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center border border-slate-900 ${
+                                      item.isPrivate ? 'bg-purple-600 text-white' : 'bg-emerald-600 text-white'
+                                    }`}
+                                  >
+                                    {item.isPrivate ? <Lock className="w-2.5 h-2.5" /> : <Globe className="w-2.5 h-2.5" />}
+                                  </span>
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2 flex-wrap">
@@ -4387,7 +4810,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                             <div className="flex items-center gap-2 shrink-0">
                               <span className="text-[11px] text-amber-400 font-medium hidden sm:inline hover:underline">
-                                {violatorTarget === 'users' ? 'Xử lý kỷ luật >' : 'Kiểm tra phòng >'}
+                                Xem chi tiết vi phạm &gt;
                               </span>
                               <ChevronRight className="w-4 h-4 text-slate-500" />
                             </div>
@@ -4395,24 +4818,38 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         )}
 
                         {/* TH4: HIỂN THỊ NGƯỜI DÙNG ĐÃ BỊ BANNED */}
-                        {activeTask === 'banned' && (
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center font-bold text-xs shrink-0">
-                              <Ban className="w-4 h-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold text-xs sm:text-sm text-rose-300 truncate">
-                                  {item.displayName}
-                                </span>
-                                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40">
-                                  BANNED
-                                </span>
+                        {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && (
+                          <div className="flex items-center justify-between w-full min-w-0">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-9 h-9 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center font-bold text-xs shrink-0">
+                                <Ban className="w-4 h-4" />
                               </div>
-                              <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                                {item.email} • {item.reason || 'Vi phạm nội quy'}
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-xs sm:text-sm text-rose-300 truncate">
+                                    {item.displayName || 'Người dùng'}
+                                  </span>
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40">
+                                    {item.lastSanctionType === 'ban_perm' ? 'CẤM VĨNH VIỄN' : 'TẠM KHÓA'}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                                  {item.email || 'Không có email'} • {item.reason || 'Vi phạm nội quy'}
+                                </div>
                               </div>
                             </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUnbanUser(item.uid, item.email);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-xs font-semibold shrink-0 transition-all active:scale-95 flex items-center gap-1 shadow-sm"
+                              title="Gỡ lệnh cấm ngay lập tức"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>Gỡ Cấm</span>
+                            </button>
                           </div>
                         )}
 
@@ -4468,7 +4905,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       </div>
 
       {/* MODAL CHI TIẾT & TÁC VỤ KỶ LUẬT (CHỈ MỞ KHI DEV NHẤP CHỌN BẢN GHI KHÔNG PHẢI PHÒNG CHAT HOẶC NGƯỜI DÙNG) */}
-      {showDetailModal && selectedItemData && activeTask !== 'rooms' && activeTask !== 'users' && (
+      {showDetailModal && selectedItemData && activeTask !== 'rooms_users' && (
         <div 
           className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
           onClick={() => setShowDetailModal(false)}
@@ -4632,6 +5069,233 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                   );
                 }
 
+                if (activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators') {
+                  const targetId = item.id || item.uid;
+                  const isRoomTarget = violatorTarget === 'rooms';
+                  const incidents = violationIncidentsMap[targetId] || [];
+                  const targetAvatar = isRoomTarget
+                    ? (item.avatar || (item.id === 'public-relay-lounge' ? DEFAULT_GLOBAL_LOUNGE_AVATAR : ''))
+                    : (item.customAvatarUrl || item.avatarUrl || item.photoURL);
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Header thông tin đối tượng vi phạm */}
+                      <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-12 h-12 ${isRoomTarget ? 'rounded-2xl' : 'rounded-full'} flex items-center justify-center font-bold text-sm text-white shrink-0 border border-white/15 overflow-hidden shadow-md`}
+                            style={{ backgroundColor: item.avatarColor || '#f59e0b' }}
+                          >
+                            {targetAvatar ? (
+                              <img src={targetAvatar} alt={item.displayName || item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{(item.displayName || item.name || 'V').charAt(0).toUpperCase()}</span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-base text-slate-100 truncate">
+                                {item.displayName || item.name}
+                              </h4>
+                              {isRoomTarget && item.code && (
+                                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-emerald-300 border border-slate-700">
+                                  #{item.code}
+                                </span>
+                              )}
+                              {item.violationSeverity === 'light' && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  Mức độ: Nhẹ
+                                </span>
+                              )}
+                              {item.violationSeverity === 'medium' && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                  Mức độ: Bình Thường
+                                </span>
+                              )}
+                              {item.violationSeverity === 'heavy' && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                  Mức độ: Nặng
+                                </span>
+                              )}
+                              {item.violationSeverity === 'critical' && (
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-600/30 text-red-200 border border-red-500">
+                                  Mức độ: Hết Cứu
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-400 font-mono mt-0.5 truncate">
+                              {isRoomTarget
+                                ? `${item.isPrivate ? 'Phòng Riêng tư' : 'Phòng Công khai'} • Tạo bởi: ${item.createdByName || 'Hệ thống'}`
+                                : `${item.email || 'Chưa có email'} ${item.deviceName ? `• Thiết bị: ${item.deviceName}` : ''}`}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-[11px] font-mono text-slate-400 shrink-0 tabular-nums">
+                          ID: <span className="text-emerald-400">{targetId}</span>
+                        </div>
+                      </div>
+
+                      {/* Tóm tắt lý do */}
+                      {item.violationReason && (
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+                          <span className="font-bold text-amber-400">Tổng hợp lý do: </span>
+                          {item.violationReason}
+                        </div>
+                      )}
+
+                      {/* Danh sách chi tiết: Ở phòng chat nào, thời điểm nào, trên thiết bị nào */}
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>Chi Tiết Vi Phạm Theo Phòng, Thời Điểm & Thiết Bị ({incidents.length})</span>
+                          </span>
+                          {isLoadingViolationDetails && (
+                            <span className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5">
+                              <RefreshCw className="w-3 h-3 animate-spin text-emerald-400" />
+                              Đang quét bằng chứng...
+                            </span>
+                          )}
+                        </div>
+
+                        {isLoadingViolationDetails && incidents.length === 0 ? (
+                          <div className="p-6 rounded-2xl bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400">
+                            Đang truy xuất lịch sử phòng chat, thời điểm và thiết bị gửi tin...
+                          </div>
+                        ) : incidents.length === 0 ? (
+                          <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs text-slate-300 space-y-1">
+                            <p className="font-semibold text-emerald-300">
+                              Không phát hiện tin nhắn ngôn từ vi phạm nào trong các phòng chat.
+                            </p>
+                            <p className="text-slate-400">
+                              Nếu đối tượng vẫn hiển thị do khóa chat thử nghiệm (test) hoặc báo cáo cũ, bạn có thể nhấn nút "Xóa Lịch Sử / Gỡ Vi Phạm Test" bên dưới.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+                            {incidents.map((inc) => (
+                              <div key={inc.id} className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <MessageSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                    <span className="text-slate-400 shrink-0">Phòng:</span>
+                                    <span className="font-semibold text-slate-100 truncate">
+                                      {inc.roomName}{inc.roomCode ? ` (#${inc.roomCode})` : ''}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    <span className="text-slate-400 shrink-0">Lúc:</span>
+                                    <span className="font-mono text-amber-200 truncate tabular-nums">
+                                      {formatMessageTime(inc.createdAt, inc.timestamp) || 'Không rõ'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <Monitor className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                    <span className="text-slate-400 shrink-0">Thiết bị:</span>
+                                    <span className="font-mono text-sky-300 truncate">
+                                      {inc.senderDevice || 'Không rõ thiết bị'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-slate-400 border-t border-slate-800/80 pt-1.5">
+                                  <span>
+                                    {isRoomTarget && inc.senderName ? `Người gửi: ${inc.senderName} • ` : ''}
+                                    Nguồn:{' '}
+                                    <strong className="text-slate-200">
+                                      {inc.source === 'openai_moderation'
+                                        ? 'OpenAI Moderation'
+                                        : inc.source === 'word_filter'
+                                        ? 'Bộ lọc từ ngữ'
+                                        : inc.source === 'user_report'
+                                        ? 'Tố cáo người dùng'
+                                        : 'Lệnh kỷ luật'}
+                                    </strong>
+                                  </span>
+                                  <span className="text-amber-300 truncate max-w-[60%]">{inc.reason}</span>
+                                </div>
+
+                                <div className="p-2.5 rounded-xl bg-slate-900 border border-rose-500/25 text-xs font-mono text-rose-200 whitespace-pre-wrap break-words">
+                                  "{inc.content}"
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Nhóm nút xử lý trực tiếp tại modal */}
+                      <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleClearTestViolations(targetId, violatorTarget, item.email, item.displayName || item.name)}
+                          className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>Xóa Lịch Sử / Gỡ Vi Phạm Test</span>
+                        </button>
+
+                        {!isRoomTarget && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const targetUid = item.uid || item.id;
+                              const targetEmail = item.email || '';
+                              if (targetUid) {
+                                try {
+                                  const notifId = `warn-${Date.now()}`;
+                                  await setDoc(doc(db, 'user_notifications', notifId), {
+                                    id: notifId,
+                                    targetUid,
+                                    targetEmail,
+                                    title: '⚠️ CẢNH CÁO TỪ BAN QUẢN TRỊ DEV',
+                                    message: 'Tài khoản của bạn đã có hành vi vi phạm tiêu chuẩn cộng đồng. Vui lòng chấm dứt ngay các hành vi vi phạm để tránh bị khóa tài khoản.',
+                                    reason: item.violationReason || 'Vi phạm nội quy hệ thống',
+                                    createdAt: new Date().toISOString(),
+                                    timestamp: Date.now(),
+                                    level: 'warn',
+                                    read: false
+                                  });
+                                  alert(`✅ Đã gửi thông báo cảnh cáo chính thức tới tài khoản [${item.displayName || item.name || 'người dùng'}]!`);
+                                } catch (err) {
+                                  console.error('Error sending warning notification:', err);
+                                  alert('Đã gửi thông báo cảnh cáo vi phạm.');
+                                }
+                              }
+                              setShowDetailModal(false);
+                            }}
+                            className="flex-1 py-2.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span>Gửi Cảnh Cáo Vi Phạm</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowDetailModal(false);
+                            setActiveTask('rooms_users');
+                            if (isRoomTarget) {
+                              setRoomsUsersSubTab('rooms');
+                              setRoomDetailsTab('chat');
+                            } else {
+                              setRoomsUsersSubTab('users');
+                              setUserDetailsTab('info');
+                            }
+                          }}
+                          className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>{isRoomTarget ? 'Mở Phòng Chat' : 'Mở Hồ Sơ'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div className="space-y-4">
                     <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-3">
@@ -4679,31 +5343,17 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                     </div>
 
                     <div className="pt-2 flex flex-col gap-2">
-                      {activeTask === 'banned' && (
+                      {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && (
                         <button
                           type="button"
                           onClick={() => {
-                            handleUnbanUser(item.uid);
+                            handleUnbanUser(item.uid, item.email);
                             setShowDetailModal(false);
                           }}
                           className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           <span>Gỡ Ban Tài Khoản Này (Unban)</span>
-                        </button>
-                      )}
-
-                      {activeTask === 'violators' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            alert('Đã gửi thông báo cảnh cáo vi phạm tới tài khoản người dùng!');
-                            setShowDetailModal(false);
-                          }}
-                          className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
-                        >
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                          <span>Gửi Cảnh Cáo Vi Phạm (Warning)</span>
                         </button>
                       )}
                     </div>

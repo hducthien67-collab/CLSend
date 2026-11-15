@@ -168,6 +168,7 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
           window.history.pushState(null, '', '/?page=datastore');
           window.location.reload();
         })}
+        forceMobileLayout={true}
       />
     </div>
   );

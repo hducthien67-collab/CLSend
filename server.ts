@@ -9,6 +9,11 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { Readable } from 'stream';
 import crypto from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import os from 'os';
+
+const execFileAsync = promisify(execFile);
 
 dotenv.config();
 
@@ -189,6 +194,13 @@ const chunkUpload = multer({
   }
 });
 
+const tgMemoryUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 22 * 1024 * 1024 // 22 MB limit per Telegram shard
+  }
+});
+
 async function startServer() {
   const app = express();
 
@@ -197,11 +209,156 @@ async function startServer() {
   const distIndex = path.join(distPath, 'index.html');
   const isProduction = process.env.NODE_ENV === 'production' && fs.existsSync(distIndex);
 
+  // Stream cache directory for browser-compatible MP4 faststart / container remux
+  const STREAM_CACHE_DIR = path.join(UPLOADS_DIR, '_stream_cache');
+  try {
+    if (!fs.existsSync(STREAM_CACHE_DIR)) {
+      fs.mkdirSync(STREAM_CACHE_DIR, { recursive: true });
+    }
+  } catch {}
+
+  const fastStartInFlight = new Map<string, Promise<void>>();
+  const fastStartDone = new Map<string, number>();
+  const playableRemuxInFlight = new Map<string, Promise<string | null>>();
+
+  const isAlreadyFastStart = (filePath: string): boolean => {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const probeSize = Math.min(512 * 1024, fs.fstatSync(fd).size);
+      const buf = Buffer.alloc(probeSize);
+      fs.readSync(fd, buf, 0, probeSize, 0);
+      fs.closeSync(fd);
+      const moovIdx = buf.indexOf('moov');
+      const mdatIdx = buf.indexOf('mdat');
+      if (moovIdx !== -1 && (mdatIdx === -1 || moovIdx < mdatIdx)) {
+        return true;
+      }
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  const ensureFastStartVideo = async (filePath: string): Promise<void> => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (!['.mp4', '.m4v', '.mov'].includes(ext)) return;
+    if (fastStartInFlight.has(filePath)) {
+      return fastStartInFlight.get(filePath);
+    }
+
+    let currentMtime = 0;
+    let currentSize = 0;
+    try {
+      const stat = fs.statSync(filePath);
+      currentMtime = stat.mtimeMs;
+      currentSize = stat.size;
+    } catch {
+      return;
+    }
+
+    if (fastStartDone.get(filePath) === currentMtime) return;
+
+    const task = (async () => {
+      try {
+        if (currentSize <= 1024 || currentSize > 350 * 1024 * 1024) {
+          fastStartDone.set(filePath, currentMtime);
+          return;
+        }
+        if (isAlreadyFastStart(filePath)) {
+          fastStartDone.set(filePath, currentMtime);
+          return;
+        }
+        const tmpOut = `${filePath}.faststart.mp4`;
+        try {
+          await execFileAsync(
+            'ffmpeg',
+            ['-y', '-i', filePath, '-c', 'copy', '-movflags', '+faststart', tmpOut],
+            { timeout: 25000, maxBuffer: 8 * 1024 * 1024 }
+          );
+          if (fs.existsSync(tmpOut) && fs.statSync(tmpOut).size > 1024) {
+            await fs.promises.rename(tmpOut, filePath);
+            try {
+              currentMtime = (await fs.promises.stat(filePath)).mtimeMs;
+            } catch {}
+          } else if (fs.existsSync(tmpOut)) {
+            await fs.promises.unlink(tmpOut).catch(() => {});
+          }
+        } catch {
+          try { if (fs.existsSync(tmpOut)) await fs.promises.unlink(tmpOut); } catch {}
+        }
+        fastStartDone.set(filePath, currentMtime);
+      } finally {
+        fastStartInFlight.delete(filePath);
+      }
+    })();
+
+    fastStartInFlight.set(filePath, task);
+    return task;
+  };
+
+  const ensureBrowserPlayableVideo = async (filePath: string, rawId: string): Promise<string | null> => {
+    const ext = path.extname(filePath).toLowerCase();
+    if (!['.mkv', '.avi', '.wmv', '.flv'].includes(ext)) return null;
+    const cachedPath = path.join(STREAM_CACHE_DIR, `${rawId}.mp4`);
+    if (fs.existsSync(cachedPath) && fs.statSync(cachedPath).size > 1024) {
+      return cachedPath;
+    }
+    if (playableRemuxInFlight.has(rawId)) {
+      return playableRemuxInFlight.get(rawId) || null;
+    }
+
+    const task = (async () => {
+      const tmpCached = `${cachedPath}.tmp.mp4`;
+      try {
+        const stat = fs.statSync(filePath);
+        if (stat.size > 200 * 1024 * 1024) return null;
+        try {
+          await execFileAsync(
+            'ffmpeg',
+            ['-y', '-i', filePath, '-c:v', 'copy', '-c:a', 'aac', '-movflags', '+faststart', tmpCached],
+            { timeout: 25000, maxBuffer: 8 * 1024 * 1024 }
+          );
+        } catch {
+          try { if (fs.existsSync(tmpCached)) fs.unlinkSync(tmpCached); } catch {}
+          if (stat.size <= 100 * 1024 * 1024) {
+            await execFileAsync(
+              'ffmpeg',
+              ['-y', '-i', filePath, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '24', '-c:a', 'aac', '-movflags', '+faststart', tmpCached],
+              { timeout: 45000, maxBuffer: 8 * 1024 * 1024 }
+            );
+          }
+        }
+        if (fs.existsSync(tmpCached) && fs.statSync(tmpCached).size > 1024) {
+          fs.renameSync(tmpCached, cachedPath);
+          return cachedPath;
+        }
+        return null;
+      } catch {
+        try { if (fs.existsSync(tmpCached)) fs.unlinkSync(tmpCached); } catch {}
+        return null;
+      } finally {
+        playableRemuxInFlight.delete(rawId);
+      }
+    })();
+
+    playableRemuxInFlight.set(rawId, task);
+    return task;
+  };
+
   // Gzip / Deflate high-speed compression for API JSON responses and production assets
   app.use((compression as any)({
     level: 6,
     threshold: 1024,
     filter: (req: any, res: any) => {
+      const urlPath = req.originalUrl || req.path || '';
+      // Never compress or buffer binary media/video/GIF/Range streams
+      if (
+        urlPath.startsWith('/api/files/') ||
+        urlPath.startsWith('/api/telegram/') ||
+        Boolean(req.headers?.range)
+      ) {
+        return false;
+      }
       // In development mode, Vite handles module transforms, source maps, and streaming.
       // Compressing Vite's internal module responses (like /src/*, /@vite/*, /node_modules/*)
       // corrupts dynamic module imports in the browser iframe.
@@ -297,11 +454,17 @@ async function startServer() {
       }
 
       const isHeic = ext === '.heic' || ext === '.heif' || file.mimetype === 'image/heic' || file.mimetype === 'image/heif';
+      const isGif = ext === '.gif' || file.mimetype === 'image/gif';
       const isImage = file.mimetype?.startsWith('image/') || isHeic || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(ext);
 
-      // Try generating a lightweight server thumbnail for immediate card/chat preview
+      // Optimize MP4/MOV moov atom asynchronously in the background so upload finishes immediately
+      if (['.mp4', '.m4v', '.mov'].includes(ext) && file.size <= 150 * 1024 * 1024) {
+        void ensureFastStartVideo(file.path).catch(() => {});
+      }
+
+      // Generate lightweight server thumbnail for static photos (keep animated GIFs intact)
       let thumbnailBase64: string | undefined = undefined;
-      if (isImage) {
+      if (isImage && !isGif) {
         try {
           const thumbBuffer = await sharp(file.path)
             .rotate() // auto-orient based on EXIF camera orientation
@@ -314,10 +477,12 @@ async function startServer() {
         }
       }
 
+      const finalSize = fs.existsSync(file.path) ? fs.statSync(file.path).size : file.size;
+
       // Record metadata
       fileMetaMap[file.filename] = {
         originalName: originalName,
-        size: file.size,
+        size: finalSize,
         mimeType: isHeic ? 'image/heic' : (file.mimetype || 'application/octet-stream'),
         createdAt: new Date().toISOString(),
         isHeic: isHeic,
@@ -463,48 +628,88 @@ async function startServer() {
           });
         }
 
-        // All chunks present -> assemble them in order safely
+        // All chunks present -> assemble them asynchronously with high-throughput streaming
         const ext = path.extname(safeName).toLowerCase();
         const safeExt = ext.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 10);
         const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}${safeExt}`;
         const finalFilePath = path.join(UPLOADS_DIR, uniqueId);
 
-        // Initialize empty file
-        fs.writeFileSync(finalFilePath, Buffer.alloc(0));
         let totalBytesWritten = 0;
+        const writeStream = fs.createWriteStream(finalFilePath, { highWaterMark: 1024 * 1024 });
+        writeStream.setMaxListeners(0);
 
-        for (let i = 0; i < totalChunks; i++) {
-          const partPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
-          if (!fs.existsSync(partPath)) {
-            throw new Error(`Mảnh tệp ${i + 1}/${totalChunks} chưa sẵn sàng để ghép`);
+        let streamWriteErr: Error | null = null;
+        writeStream.on('error', (err) => {
+          streamWriteErr = err;
+        });
+
+        try {
+          for (let i = 0; i < totalChunks; i++) {
+            const partPath = path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`);
+            const stat = await fs.promises.stat(partPath).catch(() => null);
+            if (!stat) {
+              throw new Error(`Mảnh tệp ${i + 1}/${totalChunks} chưa sẵn sàng để ghép`);
+            }
+            totalBytesWritten += stat.size;
+            const rs = fs.createReadStream(partPath, { highWaterMark: 1024 * 1024 });
+            for await (const chunkBuf of rs) {
+              if (streamWriteErr) throw streamWriteErr;
+              if (!writeStream.write(chunkBuf)) {
+                await new Promise<void>((resolve, reject) => {
+                  const onDrain = () => {
+                    writeStream.off('error', onErr);
+                    resolve();
+                  };
+                  const onErr = (err: Error) => {
+                    writeStream.off('drain', onDrain);
+                    reject(err);
+                  };
+                  writeStream.once('drain', onDrain);
+                  writeStream.once('error', onErr);
+                });
+              }
+            }
           }
-          const chunkBuf = fs.readFileSync(partPath);
-          fs.appendFileSync(finalFilePath, chunkBuf);
-          totalBytesWritten += chunkBuf.length;
+          if (streamWriteErr) throw streamWriteErr;
+          await new Promise<void>((resolve, reject) => {
+            writeStream.once('error', reject);
+            writeStream.end(() => resolve());
+          });
+        } catch (pipeErr) {
+          try { writeStream.destroy(); } catch {}
+          await fs.promises.unlink(finalFilePath).catch(() => {});
+          throw pipeErr;
         }
 
-        // Clean up temporary chunk files only after whole file is assembled successfully
-        for (let i = 0; i < totalChunks; i++) {
-          try { fs.unlinkSync(path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`)); } catch {}
-        }
+        // Clean up temporary chunk files concurrently in background
+        void Promise.all(
+          Array.from({ length: totalChunks }, (_, i) =>
+            fs.promises.unlink(path.join(CHUNKS_DIR, `${uploadId}_chunk_${i}`)).catch(() => {})
+          )
+        );
 
         // SVG sanitization
         const isSvg = ext === '.svg' || fileType === 'image/svg+xml';
         if (isSvg) {
           try {
-            const rawBuf = fs.readFileSync(finalFilePath);
+            const rawBuf = await fs.promises.readFile(finalFilePath);
             const cleanBuf = sanitizeSvgBuffer(rawBuf);
-            fs.writeFileSync(finalFilePath, cleanBuf);
+            await fs.promises.writeFile(finalFilePath, cleanBuf);
           } catch (svgErr) {
             console.warn('SVG sanitization error on assembled file:', svgErr);
           }
         }
 
         const isHeic = ext === '.heic' || ext === '.heif' || fileType === 'image/heic' || fileType === 'image/heif';
+        const isGif = ext === '.gif' || fileType === 'image/gif';
         const isImage = fileType.startsWith('image/') || isHeic || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i.test(ext);
 
+        if (['.mp4', '.m4v', '.mov'].includes(ext) && totalBytesWritten <= 250 * 1024 * 1024) {
+          void ensureFastStartVideo(finalFilePath).catch(() => {});
+        }
+
         let thumbnailBase64: string | undefined = undefined;
-        if (isImage) {
+        if (isImage && !isGif) {
           try {
             const thumbBuffer = await sharp(finalFilePath)
               .rotate()
@@ -968,8 +1173,351 @@ async function startServer() {
     }
   });
 
-  // Telegram Cloud Storage Download & Media Streaming Proxy (Bypasses CORS, supports audio/video inline streaming & range requests)
-  // Supports dynamic token and fileId to handle Telegram link expiration and bot-specific constraints.
+  // Telegram Cloud Storage Manifest & File Path Caches (eliminates repeated getFile lookups & enables Range 206 across shards)
+  const TG_MANIFESTS_DIR = path.join(UPLOADS_DIR, '_tg_manifests');
+  try {
+    if (!fs.existsSync(TG_MANIFESTS_DIR)) {
+      fs.mkdirSync(TG_MANIFESTS_DIR, { recursive: true });
+    }
+  } catch {}
+
+  const tgManifestCache = new Map<string, any>();
+  const tgFilePathCache = new Map<string, { fileUrl: string; fileSize?: number; expiresAt: number }>();
+
+  const getSafeManifestId = (fileId: string) => fileId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+
+  const loadCachedManifest = (fileId: string): any | null => {
+    if (!fileId) return null;
+    if (tgManifestCache.has(fileId)) return tgManifestCache.get(fileId);
+    try {
+      const p = path.join(TG_MANIFESTS_DIR, `${getSafeManifestId(fileId)}.json`);
+      if (fs.existsSync(p)) {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        if (parsed && (parsed.schema === 'clsend_tg_manifest_v2' || (parsed.totalParts && Array.isArray(parsed.parts)))) {
+          tgManifestCache.set(fileId, parsed);
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  };
+
+  const saveCachedManifest = (fileId: string, manifest: any) => {
+    if (!fileId || !manifest) return;
+    tgManifestCache.set(fileId, manifest);
+    if (tgManifestCache.size > 500) {
+      const firstKey = tgManifestCache.keys().next().value;
+      if (firstKey) tgManifestCache.delete(firstKey);
+    }
+    try {
+      const p = path.join(TG_MANIFESTS_DIR, `${getSafeManifestId(fileId)}.json`);
+      fs.writeFileSync(p, JSON.stringify(manifest), 'utf-8');
+    } catch {}
+  };
+
+  const resolveTelegramFileUrl = async (
+    fileId: string,
+    botToken: string,
+    fallbackUrl = '',
+    forceRefresh = false
+  ): Promise<{ fileUrl: string; fileSize?: number }> => {
+    const cacheKey = `${botToken}:${fileId}`;
+    if (!forceRefresh && fileId && botToken) {
+      const cached = tgFilePathCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) {
+        return { fileUrl: cached.fileUrl, fileSize: cached.fileSize };
+      }
+    }
+
+    if (!forceRefresh && fallbackUrl && fallbackUrl.startsWith('https://api.telegram.org/file/bot')) {
+      return { fileUrl: fallbackUrl };
+    }
+
+    if (fileId && botToken) {
+      try {
+        const getFileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(fileId)}`);
+        const getFileData: any = await getFileRes.json();
+        if (getFileData.ok && getFileData.result?.file_path) {
+          const freshUrl = `https://api.telegram.org/file/bot${botToken}/${getFileData.result.file_path}`;
+          const fileSize = typeof getFileData.result.file_size === 'number' ? getFileData.result.file_size : undefined;
+          tgFilePathCache.set(cacheKey, {
+            fileUrl: freshUrl,
+            fileSize,
+            expiresAt: Date.now() + 40 * 60 * 1000
+          });
+          if (tgFilePathCache.size > 2000) {
+            const firstKey = tgFilePathCache.keys().next().value;
+            if (firstKey) tgFilePathCache.delete(firstKey);
+          }
+          return { fileUrl: freshUrl, fileSize };
+        }
+      } catch (e) {
+        console.warn('Could not resolve Telegram file_path:', e);
+      }
+    }
+
+    return { fileUrl: fallbackUrl };
+  };
+
+  const resolveMimeFromFilename = (fileName: string, fallbackMime = 'application/octet-stream'): string => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus'].includes(ext)) {
+      return ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' ? 'audio/ogg' : ext === 'm4a' ? 'audio/mp4' : `audio/${ext}`;
+    }
+    if (['mp4', 'mov', 'm4v'].includes(ext)) return 'video/mp4';
+    if (ext === 'webm') return 'video/webm';
+    if (ext === 'mkv') return 'video/x-matroska';
+    if (ext === 'avi') return 'video/x-msvideo';
+    if (ext === '3gp') return 'video/3gpp';
+    if (ext === 'ogv') return 'video/ogg';
+    if (ext === 'gif') return 'image/gif';
+    if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+    if (ext === 'png') return 'image/png';
+    if (ext === 'webp') return 'image/webp';
+    if (ext === 'svg') return 'image/svg+xml';
+    if (ext === 'zip') return 'application/zip';
+    if (ext === 'pdf') return 'application/pdf';
+    return fallbackMime;
+  };
+
+  // Register a sharded Telegram manifest immediately after upload so playback skips extra roundtrips
+  app.post('/api/telegram/register-manifest', (req, res) => {
+    try {
+      const { fileId, manifest } = req.body || {};
+      if (!fileId || !manifest || typeof manifest !== 'object') {
+        return res.status(400).json({ ok: false, error: 'Missing fileId or manifest' });
+      }
+      saveCachedManifest(String(fileId), manifest);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Manifest registration error' });
+    }
+  });
+
+  // Server-side Telegram shard relay (used if client direct fetch to api.telegram.org is blocked/rate-limited)
+  app.post('/api/telegram/upload-chunk', (tgMemoryUpload.single('file') as any), async (req: express.Request, res: express.Response) => {
+    try {
+      const file = (req as any).file as Express.Multer.File | undefined;
+      const botToken = String(req.body?.botToken || '').trim();
+      const chatId = String(req.body?.chatId || '@ClsendStorage').trim();
+      const endpoint = ['sendAudio', 'sendVideo', 'sendDocument'].includes(req.body?.endpoint)
+        ? req.body.endpoint
+        : 'sendDocument';
+      const caption = String(req.body?.caption || '');
+
+      if (!file || !botToken) {
+        return res.status(400).json({ ok: false, error: 'Missing file or botToken' });
+      }
+
+      const fieldName = endpoint === 'sendAudio' ? 'audio' : endpoint === 'sendVideo' ? 'video' : 'document';
+      const form = new FormData();
+      form.append('chat_id', chatId);
+      form.append(fieldName, new Blob([new Uint8Array(file.buffer)], { type: file.mimetype || 'application/octet-stream' }), file.originalname);
+      if (caption) form.append('caption', caption);
+      if (endpoint === 'sendVideo') form.append('supports_streaming', 'true');
+
+      const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
+        method: 'POST',
+        body: form as any
+      });
+      const data: any = await tgRes.json();
+      return res.status(tgRes.ok ? 200 : tgRes.status).json(data);
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Telegram upload relay failed' });
+    }
+  });
+
+  const TG_CACHE_DIR = path.join(STREAM_CACHE_DIR, 'tg_cache');
+  try {
+    if (!fs.existsSync(TG_CACHE_DIR)) {
+      fs.mkdirSync(TG_CACHE_DIR, { recursive: true });
+    }
+  } catch {}
+
+  const tgShardFetchInFlight = new Map<string, Promise<string | null>>();
+
+  const trimTgCacheIfNeeded = () => {
+    try {
+      const files = fs.readdirSync(TG_CACHE_DIR).map((f) => {
+        const p = path.join(TG_CACHE_DIR, f);
+        const st = fs.statSync(p);
+        return { p, size: st.size, mtime: st.mtimeMs };
+      });
+      const total = files.reduce((acc, f) => acc + f.size, 0);
+      const MAX_TG_CACHE = 600 * 1024 * 1024;
+      if (total > MAX_TG_CACHE) {
+        files.sort((a, b) => a.mtime - b.mtime);
+        let freed = 0;
+        for (const f of files) {
+          if (total - freed <= 400 * 1024 * 1024) break;
+          try {
+            fs.unlinkSync(f.p);
+            freed += f.size;
+          } catch {}
+        }
+      }
+    } catch {}
+  };
+
+  const fetchTelegramWithRetry = async (
+    fileId: string,
+    botToken: string,
+    fallbackUrl = '',
+    headers: Record<string, string> = {}
+  ): Promise<globalThis.Response> => {
+    let resolved = await resolveTelegramFileUrl(fileId, botToken, fallbackUrl, false);
+    if (!resolved.fileUrl || !resolved.fileUrl.startsWith('https://api.telegram.org/file/bot')) {
+      resolved = await resolveTelegramFileUrl(fileId, botToken, '', true);
+    }
+    if (!resolved.fileUrl) {
+      throw new Error('Could not resolve Telegram file URL');
+    }
+    let upstreamRes = await fetch(resolved.fileUrl, { headers });
+    if (!upstreamRes.ok && (upstreamRes.status === 404 || upstreamRes.status === 403 || upstreamRes.status === 400) && fileId && botToken) {
+      const refreshed = await resolveTelegramFileUrl(fileId, botToken, '', true);
+      if (refreshed.fileUrl) {
+        upstreamRes = await fetch(refreshed.fileUrl, { headers });
+      }
+    }
+    return upstreamRes;
+  };
+
+  const detectMagicMime = (buf: Buffer): string | null => {
+    if (!buf || buf.length < 4) return null;
+    const header6 = buf.subarray(0, 6).toString('ascii');
+    if (header6 === 'GIF87a' || header6 === 'GIF89a') return 'image/gif';
+    if (buf.length >= 8 && buf.subarray(4, 8).toString('ascii') === 'ftyp') return 'video/mp4';
+    if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'video/webm';
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (buf.length >= 12 && buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP') {
+      return 'image/webp';
+    }
+    return null;
+  };
+
+  const readHeaderMagicMime = (filePath: string): string | null => {
+    try {
+      const fd = fs.openSync(filePath, 'r');
+      const buf = Buffer.alloc(16);
+      const bytesRead = fs.readSync(fd, buf, 0, 16, 0);
+      fs.closeSync(fd);
+      return detectMagicMime(buf.subarray(0, bytesRead));
+    } catch {
+      return null;
+    }
+  };
+
+  const ensureGifFromCachedMedia = async (sourcePath: string): Promise<string | null> => {
+    const magic = readHeaderMagicMime(sourcePath);
+    if (magic === 'image/gif') return sourcePath;
+    if (magic !== 'video/mp4' && magic !== 'video/webm') return null;
+    const gifCachePath = `${sourcePath}.animated.gif`;
+    if (fs.existsSync(gifCachePath) && fs.statSync(gifCachePath).size > 0) {
+      return gifCachePath;
+    }
+    const tmpGifPath = `${gifCachePath}.tmp_${Date.now()}.gif`;
+    try {
+      await execFileAsync(
+        'ffmpeg',
+        [
+          '-y',
+          '-i',
+          sourcePath,
+          '-vf',
+          "fps=15,scale='min(480,iw)':-1:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5",
+          '-loop',
+          '0',
+          tmpGifPath
+        ],
+        { timeout: 25000 }
+      );
+      if (fs.existsSync(tmpGifPath) && fs.statSync(tmpGifPath).size > 0) {
+        fs.renameSync(tmpGifPath, gifCachePath);
+        trimTgCacheIfNeeded();
+        return gifCachePath;
+      }
+    } catch (gifErr) {
+      console.warn('Telegram MP4->GIF conversion fallback notice:', gifErr);
+      try { if (fs.existsSync(tmpGifPath)) fs.unlinkSync(tmpGifPath); } catch {}
+    }
+    return null;
+  };
+
+  const ensureCachedTelegramFile = async (
+    cacheKeyName: string,
+    fileId: string,
+    botToken: string,
+    fallbackUrl = '',
+    fastStartExt = ''
+  ): Promise<string | null> => {
+    const safeKey = cacheKeyName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 140);
+    const targetPath = path.join(TG_CACHE_DIR, safeKey);
+    if (fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0) {
+      return targetPath;
+    }
+    if (tgShardFetchInFlight.has(safeKey)) {
+      return tgShardFetchInFlight.get(safeKey) || null;
+    }
+    const task = (async () => {
+      const tmpPath = `${targetPath}.tmp_${Date.now()}`;
+      try {
+        const res = await fetchTelegramWithRetry(fileId, botToken, fallbackUrl);
+        if (!res.ok) return null;
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length === 0) return null;
+        fs.writeFileSync(tmpPath, buf);
+        if (fastStartExt && ['.mp4', '.m4v', '.mov'].includes(fastStartExt)) {
+          await ensureFastStartVideo(tmpPath).catch(() => {});
+        }
+        fs.renameSync(tmpPath, targetPath);
+        trimTgCacheIfNeeded();
+        return targetPath;
+      } catch {
+        try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch {}
+        return null;
+      } finally {
+        tgShardFetchInFlight.delete(safeKey);
+      }
+    })();
+    tgShardFetchInFlight.set(safeKey, task);
+    return task;
+  };
+
+  const parseByteRange = (
+    rangeHeader: string,
+    totalSize: number,
+    maxOpenChunk = 8 * 1024 * 1024
+  ): { valid: boolean; start: number; end: number } => {
+    const cleaned = rangeHeader.replace(/^bytes=/i, '').split(',')[0].trim();
+    const parts = cleaned.split('-');
+    if (parts.length !== 2) return { valid: false, start: 0, end: 0 };
+
+    const startStr = parts[0].trim();
+    const endStr = parts[1].trim();
+
+    if (startStr === '' && endStr !== '') {
+      // Suffix range: bytes=-500
+      const suffixLen = parseInt(endStr, 10);
+      if (isNaN(suffixLen) || suffixLen <= 0) return { valid: false, start: 0, end: 0 };
+      const start = Math.max(0, totalSize - suffixLen);
+      const end = totalSize - 1;
+      return { valid: start <= end, start, end };
+    }
+
+    const start = parseInt(startStr, 10);
+    if (isNaN(start) || start < 0 || start >= totalSize) {
+      return { valid: false, start: 0, end: 0 };
+    }
+    const rawEnd = endStr !== '' ? parseInt(endStr, 10) : (start + maxOpenChunk - 1);
+    if (isNaN(rawEnd) || rawEnd < start) {
+      return { valid: false, start: 0, end: 0 };
+    }
+    const end = Math.min(rawEnd, totalSize - 1);
+    return { valid: true, start, end };
+  };
+
+  // Telegram Cloud Storage Download & Multi-Shard Media Streaming Proxy (HTTP Range 206 + Local Shard Cache + Auto-Refresh)
   const handleTelegramDownload = async (req: express.Request, res: express.Response) => {
     try {
       let fileUrl = (req.query.url as string) || '';
@@ -978,7 +1526,6 @@ async function startServer() {
       const originalName = sanitizeServerFilename((req.query.name as string) || 'telegram-file');
       const isInline = req.query.inline === 'true' || req.query.view === 'true';
 
-      // Extract effective bot token: either from query param or from fileUrl
       let effectiveBotToken = (botToken || '').trim();
       if (!effectiveBotToken && fileUrl) {
         const tokenMatch = fileUrl.match(/\/file\/bot([^/]+)\//);
@@ -987,44 +1534,384 @@ async function startServer() {
         }
       }
 
-      // If fileUrl is missing but fileId and botToken are available, fetch fresh file_path from Telegram
-      if (!fileUrl && fileId && effectiveBotToken) {
-        try {
-          const getFileRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${fileId}`);
-          const getFileData: any = await getFileRes.json();
-          if (getFileData.ok && getFileData.result?.file_path) {
-            fileUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${getFileData.result.file_path}`;
+      // Check manifest cache first so Range requests on sharded videos never accidentally skip manifest resolution
+      let manifest: any = fileId ? loadCachedManifest(fileId) : null;
+      let resolvedFileSize: number | undefined;
+
+      if (!manifest) {
+        const resolved = await resolveTelegramFileUrl(fileId, effectiveBotToken, fileUrl, false);
+        fileUrl = resolved.fileUrl;
+        resolvedFileSize = resolved.fileSize;
+
+        if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
+          return res.status(400).json({ success: false, error: 'URL Telegram không hợp lệ hoặc thiếu fileId/botToken.' });
+        }
+
+        // If Telegram metadata says the file is tiny (<= 256 KB), inspect once (even if req.headers.range is present!)
+        // so sharded video manifests are automatically detected and cached on the very first <video> probe.
+        if ((resolvedFileSize !== undefined && resolvedFileSize <= 256 * 1024) || originalName.includes('.clsend_manifest')) {
+          let probeRes = await fetch(fileUrl);
+          if (!probeRes.ok && (probeRes.status === 404 || probeRes.status === 403 || probeRes.status === 400) && fileId && effectiveBotToken) {
+            const refreshed = await resolveTelegramFileUrl(fileId, effectiveBotToken, '', true);
+            if (refreshed.fileUrl) {
+              fileUrl = refreshed.fileUrl;
+              probeRes = await fetch(fileUrl);
+            }
           }
-        } catch (e) {
-          console.warn('Could not fetch file_path from Telegram:', e);
+          if (probeRes.ok) {
+            const probeBuf = Buffer.from(await probeRes.arrayBuffer());
+            if (probeBuf.length > 0 && probeBuf.length <= 256 * 1024) {
+              const firstByte = probeBuf.toString('utf-8', 0, Math.min(32, probeBuf.length)).trimStart();
+              if (firstByte.startsWith('{')) {
+                try {
+                  const parsed = JSON.parse(probeBuf.toString('utf-8'));
+                  if (parsed && (parsed.schema === 'clsend_tg_manifest_v2' || (parsed.totalParts && Array.isArray(parsed.parts)))) {
+                    manifest = parsed;
+                    if (fileId) saveCachedManifest(fileId, manifest);
+                  }
+                } catch {}
+              }
+            }
+
+            // If it was NOT a manifest, serve this small payload directly (auto-restoring GIF if Telegram converted it to MP4)
+            if (!manifest) {
+              let outBuf = probeBuf;
+              let magicMime = detectMagicMime(outBuf);
+              if (
+                isInline &&
+                originalName.toLowerCase().endsWith('.gif') &&
+                (magicMime === 'video/mp4' || magicMime === 'video/webm')
+              ) {
+                const tempSrc = path.join(TG_CACHE_DIR, `small_${(fileId || 'tmp').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)}.mp4`);
+                try {
+                  if (!fs.existsSync(tempSrc) || fs.statSync(tempSrc).size === 0) {
+                    fs.writeFileSync(tempSrc, probeBuf);
+                  }
+                  const convertedGif = await ensureGifFromCachedMedia(tempSrc);
+                  if (convertedGif && fs.existsSync(convertedGif)) {
+                    outBuf = fs.readFileSync(convertedGif);
+                    magicMime = 'image/gif';
+                  }
+                } catch {}
+              }
+
+              const smallSize = outBuf.length;
+              const smallMime = magicMime || resolveMimeFromFilename(originalName, probeRes.headers.get('content-type') || 'application/octet-stream');
+              const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+              const dispositionType = isInline ? 'inline' : 'attachment';
+
+              res.setHeader('Content-Type', smallMime);
+              res.setHeader('Accept-Ranges', 'bytes');
+              res.setHeader('Cache-Control', 'public, max-age=3600');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+              res.setHeader(
+                'Content-Disposition',
+                `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+              );
+
+              if (req.method === 'HEAD') {
+                res.setHeader('Content-Length', smallSize);
+                return res.status(200).end();
+              }
+
+              const rangeHeader = req.headers.range;
+              if (rangeHeader && smallSize > 0) {
+                const parsedRange = parseByteRange(rangeHeader, smallSize, smallSize);
+                if (!parsedRange.valid) {
+                  res.status(416).setHeader('Content-Range', `bytes */${smallSize}`);
+                  return res.end();
+                }
+                const slice = outBuf.subarray(parsedRange.start, parsedRange.end + 1);
+                res.status(206);
+                res.setHeader('Content-Range', `bytes ${parsedRange.start}-${parsedRange.end}/${smallSize}`);
+                res.setHeader('Content-Length', slice.length);
+                return res.send(slice);
+              }
+
+              res.setHeader('Content-Length', smallSize);
+              return res.status(200).send(outBuf);
+            }
+          }
         }
       }
 
-      if (!fileUrl || !fileUrl.startsWith('https://api.telegram.org/file/bot')) {
-        return res.status(400).json({ success: false, error: 'URL Telegram không hợp lệ hoặc thiếu fileId/botToken.' });
+      // -----------------------------------------------------------------------
+      // SHARDED MANIFEST STREAMING (v2 multi-bot shards + legacy v1 parts)
+      // Full HTTP 206 Partial Content byte-range slicing with cached shards!
+      // -----------------------------------------------------------------------
+      if (manifest) {
+        const totalSize = Number(manifest.size || 0);
+        const manifestName = sanitizeServerFilename(manifest.name || originalName);
+        const manifestMime = resolveMimeFromFilename(manifestName, manifest.type || 'application/octet-stream');
+        const safeAscii = manifestName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+        const dispositionType = isInline ? 'inline' : 'attachment';
+
+        res.setHeader('Content-Type', manifestMime);
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+        res.setHeader(
+          'Content-Disposition',
+          `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(manifestName)}`
+        );
+
+        if (req.method === 'HEAD') {
+          if (totalSize > 0) res.setHeader('Content-Length', totalSize);
+          return res.status(200).end();
+        }
+
+        // Build normalized shard descriptor list with byte offsets
+        let shardList: Array<{ start: number; end: number; size: number; fileId: string; botToken: string }> = [];
+        if (manifest.schema === 'clsend_tg_manifest_v2' && Array.isArray(manifest.shards)) {
+          shardList = manifest.shards.map((s: any) => ({
+            start: Number(s.start),
+            end: Number(s.end),
+            size: Number(s.size),
+            fileId: String(s.fileId),
+            botToken: String(s.botToken || effectiveBotToken)
+          }));
+        } else if (Array.isArray(manifest.parts)) {
+          const estChunk = Number(manifest.chunkSize || Math.ceil(totalSize / (manifest.parts.length || 1)));
+          let offset = 0;
+          shardList = manifest.parts.map((partId: string, idx: number) => {
+            const isLast = idx === manifest.parts.length - 1;
+            const sz = isLast && totalSize > 0 ? Math.max(0, totalSize - offset) : estChunk;
+            const entry = {
+              start: offset,
+              end: offset + sz,
+              size: sz,
+              fileId: String(partId),
+              botToken: effectiveBotToken
+            };
+            offset += sz;
+            return entry;
+          });
+        }
+
+        const rangeHeader = req.headers.range;
+        let reqStart = 0;
+        let reqEnd = totalSize > 0 ? totalSize - 1 : 0;
+        let isPartial = false;
+
+        if (rangeHeader && totalSize > 0) {
+          const parsedRange = parseByteRange(rangeHeader, totalSize, 8 * 1024 * 1024);
+          if (!parsedRange.valid) {
+            res.status(416).setHeader('Content-Range', `bytes */${totalSize}`);
+            return res.end();
+          }
+          reqStart = parsedRange.start;
+          reqEnd = parsedRange.end;
+          isPartial = true;
+        }
+
+        const overlappingShards = shardList.filter(
+          (shard) => totalSize <= 0 || (shard.end > reqStart && shard.start <= reqEnd)
+        );
+
+        // Pre-cache / verify overlapping shards BEFORE committing 206 headers so any failure yields clean HTTP error
+        const shardPaths: Array<{ shard: typeof shardList[0]; filePath: string }> = [];
+        if (isPartial) {
+          for (const shard of overlappingShards) {
+            const cachedPath = await ensureCachedTelegramFile(
+              `shard_${shard.fileId}`,
+              shard.fileId,
+              shard.botToken
+            );
+            if (!cachedPath) {
+              return res.status(502).json({ success: false, error: 'Không thể tải mảnh video từ Telegram.' });
+            }
+            shardPaths.push({ shard, filePath: cachedPath });
+          }
+
+          res.status(206);
+          res.setHeader('Content-Range', `bytes ${reqStart}-${reqEnd}/${totalSize}`);
+          res.setHeader('Content-Length', (reqEnd - reqStart) + 1);
+
+          let clientAborted = false;
+          res.on('close', () => {
+            clientAborted = true;
+          });
+
+          for (const { shard, filePath: shardFilePath } of shardPaths) {
+            if (clientAborted) break;
+            const localStart = Math.max(0, reqStart - shard.start);
+            const localEnd = Math.min(shard.size - 1, reqEnd - shard.start);
+            if (localEnd < localStart) continue;
+
+            await new Promise<void>((resolve, reject) => {
+              const stream = fs.createReadStream(shardFilePath, {
+                start: localStart,
+                end: localEnd,
+                highWaterMark: 256 * 1024
+              });
+              const onClose = () => {
+                try { stream.destroy(); } catch {}
+                resolve();
+              };
+              res.once('close', onClose);
+              stream.on('data', (chunk) => {
+                if (!res.write(chunk)) {
+                  stream.pause();
+                  res.once('drain', () => stream.resume());
+                }
+              });
+              stream.on('end', () => {
+                res.removeListener('close', onClose);
+                resolve();
+              });
+              stream.on('error', (err) => {
+                res.removeListener('close', onClose);
+                reject(err);
+              });
+            });
+          }
+          return res.end();
+        }
+
+        // Full non-Range download stream across shards
+        res.status(200);
+        if (totalSize > 0) res.setHeader('Content-Length', totalSize);
+
+        let clientAborted = false;
+        res.on('close', () => {
+          clientAborted = true;
+        });
+
+        for (const shard of overlappingShards) {
+          if (clientAborted) break;
+          const cachedPath = await ensureCachedTelegramFile(
+            `shard_${shard.fileId}`,
+            shard.fileId,
+            shard.botToken
+          );
+          if (!cachedPath) break;
+          await new Promise<void>((resolve, reject) => {
+            const stream = fs.createReadStream(cachedPath, { highWaterMark: 256 * 1024 });
+            const onClose = () => {
+              try { stream.destroy(); } catch {}
+              resolve();
+            };
+            res.once('close', onClose);
+            stream.on('data', (chunk) => {
+              if (!res.write(chunk)) {
+                stream.pause();
+                res.once('drain', () => stream.resume());
+              }
+            });
+            stream.on('end', () => {
+              res.removeListener('close', onClose);
+              resolve();
+            });
+            stream.on('error', (err) => {
+              res.removeListener('close', onClose);
+              reject(err);
+            });
+          });
+        }
+        return res.end();
       }
 
-      // Forward range request if requested by audio/video players
+      // -----------------------------------------------------------------------
+      // SINGLE-FILE TELEGRAM STREAMING (GIF / Video / Audio <= 20MB)
+      // Cache locally on Range/inline playback so MP4 faststart & 206 seeking work 100%!
+      // -----------------------------------------------------------------------
+      const ext = path.extname(originalName).toLowerCase();
+      const isMediaPreview = isInline || Boolean(req.headers.range);
+
+      if (isMediaPreview && fileId && effectiveBotToken) {
+        const fastExt = ['.mp4', '.m4v', '.mov'].includes(ext) ? ext : '';
+        const cachedSinglePath = await ensureCachedTelegramFile(
+          `single_${fileId}${ext || '.bin'}`,
+          fileId,
+          effectiveBotToken,
+          fileUrl,
+          fastExt
+        );
+
+        if (cachedSinglePath && fs.existsSync(cachedSinglePath)) {
+          let servePath = cachedSinglePath;
+          let actualMagicMime = readHeaderMagicMime(servePath);
+
+          if (
+            isInline &&
+            originalName.toLowerCase().endsWith('.gif') &&
+            (actualMagicMime === 'video/mp4' || actualMagicMime === 'video/webm')
+          ) {
+            const convertedGifPath = await ensureGifFromCachedMedia(servePath);
+            if (convertedGifPath && fs.existsSync(convertedGifPath)) {
+              servePath = convertedGifPath;
+              actualMagicMime = 'image/gif';
+            }
+          }
+
+          const stat = fs.statSync(servePath);
+          const fileSize = stat.size;
+          const mimeType = actualMagicMime || resolveMimeFromFilename(originalName, 'application/octet-stream');
+          const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+          const dispositionType = isInline ? 'inline' : 'attachment';
+
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Cache-Control', 'public, max-age=3600');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+          res.setHeader(
+            'Content-Disposition',
+            `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+          );
+
+          if (req.method === 'HEAD') {
+            res.setHeader('Content-Length', fileSize);
+            return res.status(200).end();
+          }
+
+          if (req.headers.range && fileSize > 0) {
+            const parsedRange = parseByteRange(req.headers.range, fileSize, 8 * 1024 * 1024);
+            if (!parsedRange.valid) {
+              res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+              return res.end();
+            }
+            const chunksize = (parsedRange.end - parsedRange.start) + 1;
+            const stream = fs.createReadStream(servePath, {
+              start: parsedRange.start,
+              end: parsedRange.end,
+              highWaterMark: 256 * 1024
+            });
+            res.writeHead(206, {
+              'Content-Range': `bytes ${parsedRange.start}-${parsedRange.end}/${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': chunksize,
+              'Content-Type': mimeType,
+              'Content-Disposition': `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`,
+              'Cache-Control': 'public, max-age=3600',
+              'Access-Control-Allow-Origin': '*',
+              'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type'
+            });
+            res.on('close', () => { try { stream.destroy(); } catch {} });
+            stream.on('error', () => { try { if (!res.headersSent) res.status(500).end(); else res.end(); } catch {} });
+            return stream.pipe(res);
+          }
+
+          res.setHeader('Content-Length', fileSize);
+          return res.sendFile(servePath);
+        }
+      }
+
+      // Direct proxy fallback if no fileId/cache available
       const headers: Record<string, string> = {};
       if (req.headers.range) {
         headers['range'] = req.headers.range;
       }
 
-      let upstreamRes = await fetch(fileUrl, { headers });
+      let upstreamRes = await fetch(fileUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers });
 
-      // If the URL returned 404 (Telegram expired temporary link after 1 hour)
-      // AND we have fileId + effectiveBotToken, refresh it automatically with the exact bot!
-      if (!upstreamRes.ok && upstreamRes.status === 404 && fileId && effectiveBotToken) {
-        console.log(`Telegram URL expired for ${originalName}, refreshing with bot token...`);
-        try {
-          const refreshRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${fileId}`);
-          const refreshData: any = await refreshRes.json();
-          if (refreshData.ok && refreshData.result?.file_path) {
-            fileUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${refreshData.result.file_path}`;
-            upstreamRes = await fetch(fileUrl, { headers });
-          }
-        } catch (refreshErr) {
-          console.warn('Failed to refresh expired Telegram link:', refreshErr);
+      if (!upstreamRes.ok && (upstreamRes.status === 404 || upstreamRes.status === 403 || upstreamRes.status === 400) && fileId && effectiveBotToken) {
+        const refreshed = await resolveTelegramFileUrl(fileId, effectiveBotToken, '', true);
+        if (refreshed.fileUrl) {
+          fileUrl = refreshed.fileUrl;
+          upstreamRes = await fetch(fileUrl, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers });
         }
       }
 
@@ -1032,24 +1919,13 @@ async function startServer() {
         return res.status(upstreamRes.status).json({
           success: false,
           error: upstreamRes.status === 404 ? 'telegram_link_expired' : 'telegram_fetch_failed',
-          message: upstreamRes.status === 404 
-            ? 'Đường dẫn Telegram tạm thời đã hết hạn sau 60 phút.' 
+          message: upstreamRes.status === 404
+            ? 'Đường dẫn Telegram tạm thời đã hết hạn.'
             : 'Không thể lấy tệp từ máy chủ Telegram.'
         });
       }
 
-      let mimeType = upstreamRes.headers.get('content-type') || 'application/octet-stream';
-      const ext = originalName.split('.').pop()?.toLowerCase() || '';
-      if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac', 'opus'].includes(ext)) {
-        mimeType = ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' ? 'audio/ogg' : `audio/${ext}`;
-      } else if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) {
-        mimeType = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : `video/${ext}`;
-      } else if (ext === 'zip') {
-        mimeType = 'application/zip';
-      } else if (ext === 'pdf') {
-        mimeType = 'application/pdf';
-      }
-
+      const mimeType = resolveMimeFromFilename(originalName, upstreamRes.headers.get('content-type') || 'application/octet-stream');
       const contentLength = upstreamRes.headers.get('content-length');
       const contentRange = upstreamRes.headers.get('content-range');
       const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
@@ -1057,76 +1933,52 @@ async function startServer() {
       res.status(upstreamRes.status);
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Accept-Ranges', 'bytes');
-      if (contentLength) {
-        res.setHeader('Content-Length', contentLength);
-      }
-      if (contentRange) {
-        res.setHeader('Content-Range', contentRange);
-      }
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+      if (contentRange) res.setHeader('Content-Range', contentRange);
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges');
-      
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
       const dispositionType = isInline ? 'inline' : 'attachment';
       res.setHeader(
         'Content-Disposition',
         `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
       );
 
-      const arrayBuffer = await upstreamRes.arrayBuffer();
-      let manifest: any = null;
-      try {
-        const text = Buffer.from(arrayBuffer).toString('utf-8');
-        manifest = JSON.parse(text);
-      } catch {}
-
-      if (manifest && manifest.totalParts && Array.isArray(manifest.parts)) {
-        res.setHeader('Content-Type', manifest.type || 'application/octet-stream');
-        res.setHeader('Content-Length', manifest.size);
-        const dispositionType = isInline ? 'inline' : 'attachment';
-        res.setHeader(
-          'Content-Disposition',
-          `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(manifest.name || originalName)}`
-        );
-
-        for (let i = 0; i < manifest.parts.length; i++) {
-          const partFileId = manifest.parts[i];
-          const partGetRes = await fetch(`https://api.telegram.org/bot${effectiveBotToken}/getFile?file_id=${partFileId}`);
-          const partGetData: any = await partGetRes.json();
-          if (partGetData.ok && partGetData.result?.file_path) {
-            const partUrl = `https://api.telegram.org/file/bot${effectiveBotToken}/${partGetData.result.file_path}`;
-            const partRes = await fetch(partUrl);
-            if (partRes.body) {
-              const readable = Readable.fromWeb(partRes.body as any);
-              await new Promise((resolve, reject) => {
-                readable.pipe(res, { end: false });
-                readable.on('end', resolve);
-                readable.on('error', reject);
-              });
-            }
-          }
-        }
+      if (req.method === 'HEAD') {
         return res.end();
       }
 
       if (upstreamRes.body) {
-        return Readable.fromWeb(upstreamRes.body as any).pipe(res);
+        const readable = Readable.fromWeb(upstreamRes.body as any);
+        res.on('close', () => {
+          try { readable.destroy(); } catch {}
+        });
+        readable.on('error', () => {
+          try { if (!res.headersSent) res.status(502).end(); else res.end(); } catch {}
+        });
+        return readable.pipe(res);
       }
 
-      return res.send(Buffer.from(arrayBuffer));
+      return res.end();
     } catch (err: any) {
       console.error('Telegram proxy download error:', err);
-      return res.status(500).json({ success: false, error: 'Lỗi khi tải tệp từ Telegram.' });
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, error: 'Lỗi khi tải tệp từ Telegram.' });
+      }
+      try { res.end(); } catch {}
     }
   };
 
   app.get('/api/telegram/download', handleTelegramDownload);
+  app.head('/api/telegram/download', handleTelegramDownload);
   app.get('/api/telegram/download-dynamic', handleTelegramDownload);
+  app.head('/api/telegram/download-dynamic', handleTelegramDownload);
 
-  // File Inline View Endpoint (For image/video preview in browser, with sandbox CSP for safety)
+  // File Inline View Endpoint (For image/video/GIF preview in browser with faststart Range streaming & caching)
   app.get('/api/files/view/:id', async (req, res) => {
     try {
       const rawId = path.basename(req.params.id);
-      const filePath = path.join(UPLOADS_DIR, rawId);
+      let filePath = path.join(UPLOADS_DIR, rawId);
 
       // Path containment check
       if (!path.resolve(filePath).startsWith(path.resolve(UPLOADS_DIR))) {
@@ -1138,7 +1990,7 @@ async function startServer() {
       }
 
       const meta = fileMetaMap[rawId];
-      const ext = path.extname(meta?.originalName || rawId).toLowerCase();
+      let ext = path.extname(meta?.originalName || rawId).toLowerCase();
       const isHeic = meta?.isHeic || ext === '.heic' || ext === '.heif' || meta?.mimeType === 'image/heic' || meta?.mimeType === 'image/heif';
 
       if (isHeic) {
@@ -1150,6 +2002,7 @@ async function startServer() {
             .toBuffer();
           res.setHeader('Content-Type', 'image/jpeg');
           res.setHeader('Content-Disposition', 'inline');
+          res.setHeader('Cache-Control', 'public, max-age=86400');
           res.setHeader('X-Content-Type-Options', 'nosniff');
           return res.send(jpegBuffer);
         } catch (convErr) {
@@ -1157,11 +2010,25 @@ async function startServer() {
         }
       }
 
+      // Ensure MP4/MOV has moov atom at front (instant cached lookup after first check; skip blocking on HEAD probes)
+      if (req.method !== 'HEAD') {
+        if (['.mp4', '.m4v', '.mov'].includes(ext)) {
+          await ensureFastStartVideo(filePath).catch(() => {});
+        } else if (['.mkv', '.avi', '.wmv', '.flv'].includes(ext)) {
+          // Remux/transcode non-web containers on demand into cached faststart MP4 so browsers can play them smoothly
+          const playablePath = await ensureBrowserPlayableVideo(filePath, rawId).catch(() => null);
+          if (playablePath && fs.existsSync(playablePath)) {
+            filePath = playablePath;
+            ext = '.mp4';
+          }
+        }
+      }
+
       let mimeType = meta?.mimeType;
       const videoMimeMap: Record<string, string> = {
         '.mp4': 'video/mp4',
         '.webm': 'video/webm',
-        '.mov': 'video/quicktime',
+        '.mov': 'video/mp4',
         '.m4v': 'video/mp4',
         '.mkv': 'video/x-matroska',
         '.avi': 'video/x-msvideo',
@@ -1194,35 +2061,43 @@ async function startServer() {
         res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox;");
       }
 
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
+      const etag = `"${fileSize}-${Math.floor(stat.mtimeMs)}"`;
+
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', 'inline');
       res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('ETag', etag);
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
       res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
 
-      const stat = fs.statSync(filePath);
-      const fileSize = stat.size;
+      if (req.method === 'HEAD') {
+        res.setHeader('Content-Length', fileSize);
+        return res.status(200).end();
+      }
+
       const range = req.headers.range;
 
       if (range) {
         const parts = range.replace(/bytes=/, '').split('-');
         const start = parseInt(parts[0], 10);
-        // Cực kỳ quan trọng: Giới hạn chunk stream tối đa 4MB khi client không chỉ định end (Range: bytes=0-)
-        // giúp Chrome/Safari nhận ngay 4MB đầu chỉ trong vài chục mili-giây, GPU bắt đầu phát ngay lập tức không bị giật lag hay xoay vòng!
-        const maxChunk = 4 * 1024 * 1024;
+        // 8MB adaptive chunk cap with 256KB read buffer keeps Range 206 streaming smooth without spinning stalls
+        const maxChunk = 8 * 1024 * 1024;
         const rawEnd = parts[1] ? parseInt(parts[1], 10) : (start + maxChunk - 1);
         const end = Math.min(rawEnd, fileSize - 1);
 
-        if (start >= fileSize || end >= fileSize || start > end) {
+        if (isNaN(start) || start >= fileSize || end >= fileSize || start > end) {
           res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
           return res.end();
         }
 
         const chunksize = (end - start) + 1;
-        const fileStream = fs.createReadStream(filePath, { start, end });
+        const fileStream = fs.createReadStream(filePath, { start, end, highWaterMark: 256 * 1024 });
 
         res.writeHead(206, {
           'Content-Range': `bytes ${start}-${end}/${fileSize}`,
@@ -1230,6 +2105,8 @@ async function startServer() {
           'Content-Length': chunksize,
           'Content-Type': mimeType,
           'Content-Disposition': 'inline',
+          'Cache-Control': 'public, max-age=86400',
+          'ETag': etag,
           'X-Content-Type-Options': 'nosniff',
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, Content-Type'
@@ -1237,6 +2114,9 @@ async function startServer() {
 
         req.on('close', () => {
           fileStream.destroy();
+        });
+        fileStream.on('error', () => {
+          try { if (!res.headersSent) res.status(500).end(); else res.end(); } catch {}
         });
 
         return fileStream.pipe(res);
@@ -1534,99 +2414,322 @@ async function startServer() {
     return aiClient;
   }
 
+  // Shared visual moderation helper for both images and video keyframes:
+  // - Detects explicit 18+ AND censored/covered/stickered/blurred 18+ bypass attempts
+  // - Preserves harmless memes & reaction images/videos
+  async function moderateVisualFramesWithAI(
+    rawInputs: string[],
+    fileName: string,
+    mediaKind: 'image' | 'video'
+  ): Promise<{ safe: boolean; category: 'clean' | 'nsfw_sex' | 'extreme_gore'; reason?: string; source?: string }> {
+    const lowerName = (fileName || '').toLowerCase();
+    const mediaLabel = mediaKind === 'video' ? 'video' : 'hình ảnh';
+    const mediaCap = mediaKind === 'video' ? 'Video' : 'Ảnh';
+
+    // 1. Explicit 18+ keyword filenames (Vietnamese & English)
+    const explicitKeywordRegex = /(?:^|[._\-\s])(?:porn|porno|hentai|xxx|sex_video|khoa_than|nude_photo|nude|nudes|naked|nsfw|boobs|tits|pussy|dick|cock|blowjob|cumshot|dam_duc|clip_nong|khieu_dam|jav|onlyfans)(?:[._\-\s]|$)/i;
+    if (explicitKeywordRegex.test(lowerName)) {
+      return {
+        safe: false,
+        category: 'nsfw_sex',
+        reason: `🚫 ${mediaCap} đã bị xóa ngay lập tức do tên tệp chứa từ khóa khiêu dâm 18+.`,
+        source: 'filename_filter'
+      };
+    }
+
+    interface ResolvedFrame {
+      openAiUrl: string;
+      geminiPayload: { mimeType: string; data: string } | null;
+    }
+
+    const resolvedFrames: ResolvedFrame[] = [];
+    for (const raw of rawInputs.slice(0, 5)) {
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      let resolvedUrl = raw.trim();
+      let geminiPayload: { mimeType: string; data: string } | null = null;
+
+      if (resolvedUrl.startsWith('/api/files/view/') || resolvedUrl.startsWith('/api/files/download/')) {
+        try {
+          const cleanId = path.basename(resolvedUrl.split('?')[0]);
+          const localPath = path.join(UPLOADS_DIR, cleanId);
+          if (path.resolve(localPath).startsWith(path.resolve(UPLOADS_DIR)) && fs.existsSync(localPath)) {
+            const resizedBuf = await sharp(localPath)
+              .rotate()
+              .resize(640, 640, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 78 })
+              .toBuffer();
+            const b64 = resizedBuf.toString('base64');
+            resolvedUrl = `data:image/jpeg;base64,${b64}`;
+            geminiPayload = { mimeType: 'image/jpeg', data: b64 };
+          }
+        } catch (convErr) {
+          console.warn('Could not read local image for moderation:', convErr);
+        }
+      } else if (resolvedUrl.startsWith('data:image/')) {
+        const match = resolvedUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+        if (match) {
+          const origMime = match[1].toLowerCase();
+          const origB64 = match[2];
+          try {
+            const compactBuf = await sharp(Buffer.from(origB64, 'base64'))
+              .rotate()
+              .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+              .jpeg({ quality: 76 })
+              .toBuffer();
+            const compactB64 = compactBuf.toString('base64');
+            if (origMime === 'image/heic' || origMime === 'image/heif') {
+              resolvedUrl = `data:image/jpeg;base64,${compactB64}`;
+            }
+            geminiPayload = { mimeType: 'image/jpeg', data: compactB64 };
+          } catch {
+            geminiPayload = { mimeType: origMime, data: origB64 };
+          }
+        }
+      }
+
+      if (resolvedUrl.startsWith('data:image/') || resolvedUrl.startsWith('https://') || resolvedUrl.startsWith('http://')) {
+        resolvedFrames.push({ openAiUrl: resolvedUrl, geminiPayload });
+      }
+    }
+
+    if (resolvedFrames.length === 0) {
+      return { safe: true, category: 'clean' };
+    }
+
+    // 2. OpenAI Moderation API (omni-moderation-latest - 100% Free check)
+    const openAiKey = process.env.OPENAI_API_KEY;
+    let openAiMaxSexual = 0;
+    let openAiMaxSexualMinors = 0;
+    let openAiMaxViolence = 0;
+    let openAiFlagged = false;
+    let openAiChecked = false;
+
+    if (openAiKey) {
+      const checks = await Promise.all(
+        resolvedFrames.map(async (fr) => {
+          try {
+            const modResp = await fetch('https://api.openai.com/v1/moderations', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openAiKey}`
+              },
+              body: JSON.stringify({
+                model: 'omni-moderation-latest',
+                input: [{ type: 'image_url', image_url: { url: fr.openAiUrl } }]
+              })
+            });
+            if (modResp.ok) {
+              const data = await modResp.json();
+              return data?.results?.[0] || null;
+            }
+          } catch {}
+          return null;
+        })
+      );
+
+      for (const r of checks) {
+        if (!r) continue;
+        openAiChecked = true;
+        const scores = (r.category_scores || {}) as Record<string, number>;
+        openAiMaxSexual = Math.max(openAiMaxSexual, scores['sexual'] || 0);
+        openAiMaxSexualMinors = Math.max(openAiMaxSexualMinors, scores['sexual/minors'] || 0);
+        openAiMaxViolence = Math.max(openAiMaxViolence, scores['violence/graphic'] || 0, scores['self-harm/intent'] || 0);
+        if (r.flagged) openAiFlagged = true;
+      }
+
+      // Definitively hardcore explicit pornography -> block immediately (0 Gemini tokens)
+      if (openAiMaxSexualMinors >= 0.25 || openAiMaxSexual >= 0.85) {
+        return {
+          safe: false,
+          category: 'nsfw_sex',
+          reason: `🚫 Phát hiện ${mediaLabel} 18+/khiêu dâm vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu. ${mediaCap} đã bị xóa ngay lập tức!`,
+          source: 'openai_moderation'
+        };
+      }
+      if (openAiMaxViolence >= 0.72) {
+        return {
+          safe: false,
+          category: 'extreme_gore',
+          reason: `🚫 Phát hiện ${mediaLabel} bạo lực/máu me cực đoan vi phạm tiêu chuẩn cộng đồng. ${mediaCap} đã bị xóa ngay lập tức!`,
+          source: 'openai_moderation'
+        };
+      }
+    }
+
+    // 3. Smart Contextual Vision Audit (Gemini):
+    // Catches censored/covered/stickered/blurred 18+ bypass attempts while protecting harmless memes!
+    const ai = getAiClient();
+    if (ai) {
+      try {
+        const inlineParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+        for (const fr of resolvedFrames) {
+          if (fr.geminiPayload?.data) {
+            inlineParts.push({ inlineData: fr.geminiPayload });
+          } else if (fr.openAiUrl.startsWith('https://') || fr.openAiUrl.startsWith('http://')) {
+            try {
+              const imgFetch = await fetch(fr.openAiUrl);
+              if (imgFetch.ok) {
+                const arrBuf = await imgFetch.arrayBuffer();
+                const mime = imgFetch.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
+                if (mime.startsWith('image/')) {
+                  inlineParts.push({
+                    inlineData: { mimeType: mime, data: Buffer.from(arrBuf).toString('base64') }
+                  });
+                }
+              }
+            } catch {}
+          }
+        }
+
+        if (inlineParts.length > 0) {
+          const visionPrompt = `Bạn là hệ thống AI kiểm duyệt ${mediaLabel} cho phòng chat cộng đồng Đại Sảnh Toàn Cầu.
+Hãy phân tích kỹ các khung hình đính kèm và phân loại chính xác theo 2 nhóm:
+
+NHÓM CẤM — BẮT BUỘC XÓA NGAY ("isNsfw18Plus": true):
+1. Ảnh/video 18+, khiêu dâm, khỏa thân, hentai, truyện tranh 18+, hoặc hành vi tình dục.
+2. ĐẶC BIỆT: Các ảnh/video 18+, khiêu dâm, nhạy cảm NHƯNG CỐ TÌNH CHE ĐI để qua mặt bộ lọc — ví dụ: dùng sticker, emoji, hình dán, vệt đen, khung chữ, làm mờ (blur/mosaic/pixelate) hoặc vật thể che bộ phận nhạy cảm trên nền cảnh khỏa thân/gợi dục/tình dục 18+. Dù đã che phần nhạy cảm nhưng bản chất vẫn là nội dung 18+/khiêu dâm -> BẮT BUỘC trả "isNsfw18Plus": true.
+3. Ảnh/video bạo lực cực đoan, máu me ghê rợn hoặc tự hại nghiêm trọng -> trả "isExtremeGore": true.
+
+NHÓM ĐƯỢC PHÉP — AN TOÀN ("isNsfw18Plus": false, "isMeme": true/false):
+1. MEME HÀI HƯỚC, ảnh chế, reaction meme, sticker vui, clip hài (kể cả meme có ghép hiệu ứng che mờ/bôi đen hài hước nhưng gốc KHÔNG phải ảnh/cảnh khiêu dâm 18+ hay khỏa thân) -> ĐƯỢC PHÉP, KHÔNG ĐƯỢC ĐÁNH DẤU VI PHẠM!
+2. Ảnh chân dung, selfie bình thường, đi biển/thời trang thông thường không khiêu dâm, đồ ăn, thú cưng, phong cảnh, game, chụp màn hình văn bản/code -> ĐƯỢC PHÉP.
+
+Trả về JSON chuẩn:
+{
+  "isNsfw18Plus": boolean,
+  "isCensoredBypassAttempt": boolean,
+  "isExtremeGore": boolean,
+  "isMeme": boolean,
+  "shortReason": "Lý do ngắn gọn bằng tiếng Việt"
+}`;
+
+          const gemResp = await ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: [...inlineParts, { text: visionPrompt }],
+            config: { responseMimeType: 'application/json' }
+          });
+
+          if (gemResp?.text) {
+            const parsed = JSON.parse(gemResp.text);
+            if (parsed?.isNsfw18Plus) {
+              return {
+                safe: false,
+                category: 'nsfw_sex',
+                reason: parsed?.isCensoredBypassAttempt
+                  ? `🚫 Cảnh báo: AI phát hiện ${mediaLabel} 18+/khiêu dâm (cố tình che/làm mờ để lách lọc). ${mediaCap} đã bị xóa ngay lập tức!`
+                  : `🚫 Cảnh báo: AI phát hiện ${mediaLabel} 18+/khiêu dâm vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu. ${mediaCap} đã bị xóa ngay lập tức!`,
+                source: 'gemini_vision_context'
+              };
+            }
+            if (parsed?.isExtremeGore) {
+              return {
+                safe: false,
+                category: 'extreme_gore',
+                reason: `🚫 Cảnh báo: AI phát hiện ${mediaLabel} bạo lực cực đoan vi phạm tiêu chuẩn cộng đồng. ${mediaCap} đã bị xóa ngay lập tức!`,
+                source: 'gemini_vision_context'
+              };
+            }
+            return { safe: true, category: 'clean', source: 'gemini_vision_context' };
+          }
+        }
+      } catch (gemErr) {
+        console.warn('Gemini visual moderation notice:', gemErr);
+      }
+    }
+
+    // Fallback if Gemini isn't available: rely on OpenAI moderate score
+    if (openAiChecked && (openAiFlagged || openAiMaxSexual >= 0.35)) {
+      return {
+        safe: false,
+        category: 'nsfw_sex',
+        reason: `🚫 Phát hiện ${mediaLabel} 18+/khiêu dâm vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu. ${mediaCap} đã bị xóa ngay lập tức!`,
+        source: 'openai_moderation'
+      };
+    }
+
+    return { safe: true, category: 'clean' };
+  }
+
   // Server-side AI Image Moderation Proxy
   app.post('/api/moderate-image', async (req, res) => {
     try {
       const { image, fileName } = req.body || {};
-      const lowerName = (fileName || '').toLowerCase();
+      const result = await moderateVisualFramesWithAI(
+        typeof image === 'string' ? [image] : [],
+        String(fileName || ''),
+        'image'
+      );
+      return res.json(result);
+    } catch {
+      return res.json({ safe: true, category: 'clean' });
+    }
+  });
 
-      // 1. Explicit 18+ keyword filenames (porn, hentai, xxx, etc.)
-      const explicitKeywordRegex = /(?:^|[._\-\s])(?:porn|hentai|xxx|sex_video|khoa_than|nude_photo|dam_duc)(?:[._\-\s]|$)/i;
-      if (explicitKeywordRegex.test(lowerName)) {
-        return res.json({
-          safe: false,
-          category: 'nsfw_sex',
-          reason: 'Tệp đã bị từ chối do tên tệp chứa từ khóa khiêu dâm 18+ rõ ràng.'
-        });
-      }
+  // Server-side AI Video Moderation Proxy (client keyframes + ffmpeg fallback)
+  app.post('/api/moderate-video', async (req, res) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clsend_vidmod_'));
+    try {
+      const { frames, fileName, videoUrl } = req.body || {};
+      let collectedFrames: string[] = Array.isArray(frames)
+        ? frames.filter((f: unknown): f is string => typeof f === 'string' && f.startsWith('data:image/')).slice(0, 5)
+        : [];
 
-      // 2. Personal camera photos (IMG_, PXL_, DSC_, SAM_, camera, photos from mobile devices)
-      const isMobileCameraPhoto = /(?:img_|pxl_|dsc_|sam_|photo_|dcim|image|camera|screenshot|snap|\d{8}_\d{6})/i.test(lowerName);
+      // If client could not extract frames (e.g., MKV/AVI/MOV or Cloud URL), extract keyframes on server via ffmpeg
+      if (collectedFrames.length === 0 && typeof videoUrl === 'string' && (videoUrl.startsWith('/api/files/view/') || videoUrl.startsWith('/api/files/download/'))) {
+        const cleanId = path.basename(videoUrl.split('?')[0]);
+        const localVideoPath = path.join(UPLOADS_DIR, cleanId);
+        if (path.resolve(localVideoPath).startsWith(path.resolve(UPLOADS_DIR)) && fs.existsSync(localVideoPath)) {
+          let duration = 0;
+          try {
+            const { stdout } = await execFileAsync('ffprobe', [
+              '-v', 'error',
+              '-show_entries', 'format=duration',
+              '-of', 'default=noprint_wrappers=1:nokey=1',
+              localVideoPath
+            ], { timeout: 5000 });
+            duration = parseFloat(String(stdout || '').trim()) || 0;
+          } catch {}
 
-      const ai = getAiClient();
-      if (!ai || !image) {
-        return res.json({ safe: true, category: 'clean' });
-      }
+          const seekPoints = duration > 1.5
+            ? [0.12, 0.38, 0.65, 0.88].map(r => Math.max(0.1, duration * r).toFixed(2))
+            : ['0.25', '1.0'];
 
-      const match = typeof image === 'string' ? image.match(/^data:([^;]+);base64,(.+)$/) : null;
-      if (!match) {
-        return res.json({ safe: true, category: 'clean' });
-      }
-      const mimeType = match[1];
-      const base64Data = match[2];
-
-      const candidateModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
-      let parsed = { safe: true, category: 'clean' };
-
-      for (const modelName of candidateModels) {
-        try {
-          const response = await ai.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType,
-                      data: base64Data,
-                    },
-                  },
-                  {
-                    text: `You are an automated safety filter for CloudSend, a personal file transfer and chat application.
-Users frequently take photos with their mobile phones to send to their computer (selfies, family photos, personal outfits, gym/fitness photos, beach/swimwear, home snapshots, food, pets, receipts, notes, or IDs).
-
-CRITICAL POLICY:
-1. Normal phone camera photos, selfies, portraits, family pictures, swimwear at a beach or pool, people in everyday clothes, casual home photos, and artistic shots are COMPLETELY SAFE and MUST NEVER be flagged (safe: true).
-2. ONLY flag explicit, unambiguous HARDCORE PORNOGRAPHY (actual visible genitals or overt sexual intercourse) or EXTREME GRAPHIC GORE (mutilated human corpses, visceral arterial blood).
-3. If this looks like a normal camera photo, selfie, person, or personal document, you MUST return "safe": true.
-4. If in doubt, ALWAYS return "safe": true. Do NOT falsely block innocent personal photos.
-
-Return strictly valid JSON:
-{
-  "safe": boolean,
-  "category": "nsfw_sex" | "extreme_gore" | "clean",
-  "reason": "Giải thích ngắn nếu phát hiện nội dung khiêu dâm hoặc bạo lực cực đoan rõ ràng"
-}`,
-                  },
-                ],
-              },
-            ],
-            config: {
-              responseMimeType: 'application/json',
-            },
-          });
-
-          if (response?.text) {
-            const result = JSON.parse(response.text);
-            if (typeof result.safe === 'boolean') {
-              if (isMobileCameraPhoto && result.safe === false && result.category !== 'nsfw_sex' && result.category !== 'extreme_gore') {
-                parsed = { safe: true, category: 'clean' };
-              } else {
-                parsed = result;
+          for (let i = 0; i < seekPoints.length; i++) {
+            const outImg = path.join(tempDir, `frame_${i}.jpg`);
+            try {
+              await execFileAsync('ffmpeg', [
+                '-y',
+                '-ss', seekPoints[i],
+                '-i', localVideoPath,
+                '-frames:v', '1',
+                '-vf', "scale='min(512,iw)':-2",
+                '-q:v', '5',
+                outImg
+              ], { timeout: 6000 });
+              if (fs.existsSync(outImg)) {
+                const buf = fs.readFileSync(outImg);
+                if (buf.length > 0) {
+                  collectedFrames.push(`data:image/jpeg;base64,${buf.toString('base64')}`);
+                }
               }
-              break;
-            }
+            } catch {}
           }
-        } catch {
-          parsed = { safe: true, category: 'clean' };
-          break;
         }
       }
 
-      return res.json(parsed);
+      const result = await moderateVisualFramesWithAI(
+        collectedFrames,
+        String(fileName || ''),
+        'video'
+      );
+      return res.json(result);
     } catch {
       return res.json({ safe: true, category: 'clean' });
+    } finally {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {}
     }
   });
 
@@ -1886,63 +2989,8 @@ Return strictly valid JSON:
         });
       }
 
-      // Gemini AI Context Fallback / Analysis
-      try {
-        const ai = getAiClient();
-        if (ai) {
-          const prompt = `Bạn là hệ thống AI Kiểm Duyệt Nội Dung cho phòng trò chuyện & chia sẻ tệp CloudSend.
-Kiểm tra xem câu sau có vi phạm tiêu chuẩn cộng đồng (chửi bậy tục tĩu quá đà, xúc phạm danh dự, quấy rối, phân biệt vùng miền, đe dọa, tự hại, khiêu dâm 18+) hay không.
-
-Nội dung:
-"${cleanText}"
-
-Quy định trả về JSON:
-{
-  "isFlagged": boolean,
-  "severity": "clean" | "light" | "medium" | "high" | "critical",
-  "matchedRule": "Tên vi phạm hoặc 'An toàn'",
-  "reason": "Lý do ngắn",
-  "recommendedTier": "level_1" | "level_2" | "level_3" | "level_4" | null,
-  "remindText": "Câu nhắc nhở tương ứng"
-}`;
-
-          const candidateModels = ['gemini-3.8-flash', 'gemini-flash-latest'];
-          let geminiResp: any = null;
-          for (const mName of candidateModels) {
-            try {
-              geminiResp = await ai.models.generateContent({
-                model: mName,
-                contents: prompt,
-                config: {
-                  responseMimeType: 'application/json'
-                }
-              });
-              if (geminiResp?.text) break;
-            } catch (mErr) {
-              console.warn(`Gemini model ${mName} moderation attempt notice:`, mErr);
-            }
-          }
-
-          if (geminiResp?.text) {
-            const parsed = JSON.parse(geminiResp.text);
-            if (parsed.isFlagged) {
-              return res.json({
-                success: true,
-                isFlagged: true,
-                source: 'gemini_moderation',
-                severity: parsed.severity || 'medium',
-                recommendedTier: parsed.recommendedTier || 'level_2',
-                matchedRule: parsed.matchedRule || 'Vi phạm tiêu chuẩn cộng đồng',
-                remindText: parsed.remindText || 'Cảnh cáo: Nội dung của bạn không phù hợp.',
-                message: parsed.reason || 'Nội dung bị AI kiểm duyệt chặn do vi phạm quy định.'
-              });
-            }
-          }
-        }
-      } catch (gemErr) {
-        console.warn('Gemini moderation check notice:', gemErr);
-      }
-
+      // Zero-cost policy: do NOT consume Gemini tokens during real-time public room chat moderation;
+      // rely on free OpenAI omni-moderation-latest + client/server word filters.
       return res.json({
         success: true,
         isFlagged: false,
@@ -1958,6 +3006,378 @@ Quy định trả về JSON:
         isFlagged: false,
         severity: 'clean'
       });
+    }
+  });
+
+  // ==========================================================
+  // BATCH AI MODERATION & CLASSIFICATION (OpenAI Moderation API + Rule Classifier)
+  // ==========================================================
+  app.post('/api/moderation/openai-batch-audit', async (req, res) => {
+    try {
+      interface AuditMessageInput {
+        id?: string;
+        roomId?: string;
+        roomName?: string;
+        roomCode?: string;
+        senderId?: string;
+        senderName?: string;
+        senderDevice?: string;
+        text: string;
+        createdAt?: string;
+        timestamp?: number;
+      }
+
+      interface AuditImageInput {
+        messageId?: string;
+        roomId?: string;
+        roomName?: string;
+        roomCode?: string;
+        senderId?: string;
+        senderName?: string;
+        senderDevice?: string;
+        fileName?: string;
+        url: string;
+        createdAt?: string;
+        timestamp?: number;
+      }
+
+      const items: Array<{
+        id: string;
+        type: 'user' | 'room';
+        name: string;
+        email?: string;
+        texts?: string[];
+        messages?: AuditMessageInput[];
+        images?: AuditImageInput[];
+        reportReasons?: string[];
+        violationCount?: number;
+      }> = Array.isArray(req.body?.items) ? req.body.items : [];
+
+      if (items.length === 0) {
+        return res.json({ success: true, source: 'openai_moderation', results: [] });
+      }
+
+      const openAiKey = process.env.OPENAI_API_KEY;
+      let usedSource: 'openai_moderation' | 'gemini_moderation' | 'rule_engine' = 'rule_engine';
+
+      // Unicode word boundaries for Vietnamese & English
+      const B_START = '(?<=^|[^a-zA-Z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ])';
+      const B_END = '(?=$|[^a-zA-Z0-9áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ])';
+
+      const INNOCENT_PHRASES = [
+        'lon nước', 'lon nuoc', 'lon bia', 'lon sữa', 'lon sua', 'lon nước ngọt', 'lon coca', 'lon pepsi',
+        'các bạn', 'cac ban', 'các anh', 'các chị', 'các em', 'buổi sáng', 'buổi chiều', 'buổi tối', 'buổi trưa',
+        'ví dụ', 'mặc dù', 'dù sao', 'du lịch', 'vui lòng', 'hài lòng', 'hạ long', 'thăng long', 'cầu lông',
+        'class', 'pass', 'glass', 'grass', 'bass', 'asset', 'assign', 'assist', 'shirt', 'shift', 'cocktail', 'peacock', 'shell', 'hello'
+      ];
+
+      const stripInnocent = (raw: string): string => {
+        let out = raw.toLowerCase();
+        for (const p of INNOCENT_PHRASES) {
+          out = out.split(p).join(' ');
+        }
+        return out;
+      };
+
+      const criticalRegex = new RegExp(`${B_START}(?:hentai|porn(?:o|ography)?|phim\\s+sex|clip\\s+nóng|lộ\\s+clip|khiêu\\s+dâm|tự\\s+tử|giết\\s+người|cắt\\s+cổ|chế\\s+tạo\\s+bom|trojan|phishing|kill\\s+yourself|kys)${B_END}|\\.(?:exe|bat|vbs|scr)(?=$|[^a-zA-Z0-9])`, 'i');
+      const heavyRegex = new RegExp(`${B_START}(?:bắc\\s+kỳ|nam\\s+kỳ|trung\\s+kỳ|bắc\\s+cầy|nam\\s+cầy|gạ\\s+tình|gạ\\s+gẫm|show\\s+hàng|chat\\s+sex|doxx|số\\s+cccd|số\\s+cmnd|địa\\s+chỉ\\s+nhà|tôi\\s+là\\s+admin|tôi\\s+là\\s+dev|gửi\\s+mật\\s+khẩu|nigger(?:s)?|nigga(?:s)?|faggot(?:s)?|retard(?:ed|s)?|nude(?:s)?|blowjob|handjob|cumshot)${B_END}`, 'i');
+      const mediumRegex = new RegExp(`${B_START}(?:địt(?:\\s+(?:mẹ|con\\s+mẹ|cụ|mày))?|đụ(?:\\s+(?:má|mẹ|móa))?|(?:cái\\s+|con\\s+)?lồn|(?:cái\\s+|con\\s+)?cặc|buồi|bú\\s+(?:cu|lồn|cặc)|đéo|vcl|vkl|đkm|dkm|đmm|đm|óc\\s+chó|súc\\s+vật|chó\\s+đẻ|motherfuck(?:er|ing|ers|s)?|fuck(?:ing|er|ers|ed|s)?|fuk|son\\s+of\\s+a\\s+bitch|bitch(?:es|ing|y)?|cunt(?:s)?|asshole(?:s)?|dumbass|jackass|bullshit|shit(?:head|ty|ting|s)?|cock(?:sucker|s)?|dick(?:head|s)?|pussy|pussies|whore(?:s)?|slut(?:s|tish)?|bastard(?:s)?|f[._\\-]+u[._\\-]+c[._\\-]+k|d[._\\-]+i[._\\-]+t)${B_END}`, 'i');
+      const lightRegex = new RegExp(`${B_START}(?:thằng\\s+ngu|con\\s+ngu|đồ\\s+ngu|ngu\\s+ngốc|ngu|chó\\s+chết|đồ\\s+chó|điên\\s+khùng|thằng\\s+điên|con\\s+điên|câm\\s+mồm|láo\\s+toét|vớ\\s+vẩn|wtf|stfu|gtfo|wanker(?:s)?|prick(?:s)?|twat(?:s)?)${B_END}`, 'i');
+
+      const prepared = items.slice(0, 60).map(item => {
+        const msgList: AuditMessageInput[] = Array.isArray(item.messages) && item.messages.length > 0
+          ? item.messages.slice(0, 30).filter(m => String(m?.text || '').trim().length > 0)
+          : (Array.isArray(item.texts) ? item.texts.slice(0, 30) : [])
+              .map(t => ({ text: String(t || '').trim() }))
+              .filter(m => m.text.length > 0);
+        const imgList: AuditImageInput[] = Array.isArray(item.images)
+          ? item.images.slice(0, 8).filter(im => im?.url && (im.url.startsWith('data:image/') || im.url.startsWith('https://') || im.url.startsWith('http://')))
+          : [];
+        const reportList = (Array.isArray(item.reportReasons) ? item.reportReasons.slice(0, 10) : [])
+          .map(s => String(s || '').trim())
+          .filter(Boolean);
+        return {
+          ...item,
+          msgList,
+          imgList,
+          reportList
+        };
+      });
+
+      // Scan individual messages with OpenAI Moderation API (omni-moderation-latest)
+      type FlatMsgRef = { itemIdx: number; msgIdx: number; text: string };
+      const flatMessages: FlatMsgRef[] = [];
+      prepared.forEach((item, itemIdx) => {
+        item.msgList.forEach((m, msgIdx) => {
+          const clean = String(m.text || '').trim();
+          if (clean.length >= 2) {
+            flatMessages.push({ itemIdx, msgIdx, text: clean.slice(0, 1000) });
+          }
+        });
+      });
+
+      const openAiMsgFlags = new Map<string, { flagged: boolean; categories: string[]; maxScore: number }>();
+
+      if (openAiKey && flatMessages.length > 0) {
+        for (let start = 0; start < flatMessages.length; start += 48) {
+          const chunk = flatMessages.slice(start, start + 48);
+          try {
+            const modResp = await fetch('https://api.openai.com/v1/moderations', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openAiKey}`
+              },
+              body: JSON.stringify({
+                input: chunk.map(c => c.text),
+                model: 'omni-moderation-latest'
+              })
+            });
+
+            if (modResp.ok) {
+              const modData = await modResp.json();
+              const resultsArr = Array.isArray(modData?.results) ? modData.results : [];
+              usedSource = 'openai_moderation';
+              resultsArr.forEach((r: any, pos: number) => {
+                const ref = chunk[pos];
+                if (!ref || !r) return;
+                const cats = Object.keys(r.categories || {}).filter(k => r.categories[k]);
+                const scores = Object.values(r.category_scores || {}) as number[];
+                const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
+                if (r.flagged) {
+                  openAiMsgFlags.set(`${ref.itemIdx}:${ref.msgIdx}`, {
+                    flagged: true,
+                    categories: cats,
+                    maxScore
+                  });
+                }
+              });
+            }
+          } catch (err) {
+            console.warn('OpenAI batch moderation notice:', err);
+          }
+        }
+      }
+
+      // Scan individual images with OpenAI Moderation API (omni-moderation-latest multimodal)
+      type FlatImgRef = { itemIdx: number; imgIdx: number; url: string };
+      const flatImages: FlatImgRef[] = [];
+      prepared.forEach((item, itemIdx) => {
+        item.imgList.forEach((im, imgIdx) => {
+          if (flatImages.length < 24) {
+            flatImages.push({ itemIdx, imgIdx, url: im.url });
+          }
+        });
+      });
+
+      const openAiImgFlags = new Map<string, { flagged: boolean; categories: string[]; maxScore: number }>();
+      if (openAiKey && flatImages.length > 0) {
+        await Promise.all(
+          flatImages.map(async (ref) => {
+            try {
+              const modResp = await fetch('https://api.openai.com/v1/moderations', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${openAiKey}`
+                },
+                body: JSON.stringify({
+                  model: 'omni-moderation-latest',
+                  input: [{ type: 'image_url', image_url: { url: ref.url } }]
+                })
+              });
+              if (modResp.ok) {
+                const modData = await modResp.json();
+                const r = modData?.results?.[0];
+                if (r && r.flagged) {
+                  usedSource = 'openai_moderation';
+                  const cats = Object.keys(r.categories || {}).filter(k => r.categories[k]);
+                  const scores = Object.values(r.category_scores || {}) as number[];
+                  const maxScore = scores.length > 0 ? Math.max(...scores) : 0;
+                  openAiImgFlags.set(`${ref.itemIdx}:${ref.imgIdx}`, {
+                    flagged: true,
+                    categories: cats,
+                    maxScore
+                  });
+                }
+              }
+            } catch {
+              // ignore individual image errors
+            }
+          })
+        );
+      }
+
+      const sevOrder: Record<string, number> = { clean: 0, light: 1, medium: 2, heavy: 3, critical: 4 };
+      const imgExplicitNameRegex = /(?:^|[._\-\s])(?:porn|porno|hentai|xxx|sex_video|khoa_than|nude_photo|nudes|blowjob|cumshot|dam_duc)(?:[._\-\s]|$)/i;
+
+      const results = prepared.map((item, idx) => {
+        const repCount = item.reportList.length;
+
+        let severity: 'clean' | 'light' | 'medium' | 'heavy' | 'critical' = 'clean';
+        const reasonsSet = new Set<string>();
+        const categoriesSet = new Set<string>();
+        const evidenceMessages: Array<{
+          messageId?: string;
+          roomId?: string;
+          roomName?: string;
+          roomCode?: string;
+          senderId?: string;
+          senderName?: string;
+          senderDevice?: string;
+          createdAt?: string;
+          timestamp?: number;
+          content: string;
+          reason: string;
+          source: 'openai_moderation' | 'word_filter';
+          severity: 'light' | 'medium' | 'heavy' | 'critical';
+        }> = [];
+
+        item.msgList.forEach((m, msgIdx) => {
+          const oa = openAiMsgFlags.get(`${idx}:${msgIdx}`);
+          const sanitized = stripInnocent(m.text);
+
+          let msgSev: 'clean' | 'light' | 'medium' | 'heavy' | 'critical' = 'clean';
+          const msgReasons: string[] = [];
+          let msgSource: 'openai_moderation' | 'word_filter' = 'word_filter';
+
+          if (oa?.flagged) {
+            msgSource = 'openai_moderation';
+            oa.categories.forEach(c => categoriesSet.add(c));
+            const hasCritCat = oa.categories.some(c =>
+              c.includes('sexual/minors') || c.includes('self-harm/intent') || c.includes('violence/graphic')
+            );
+            const hasHeavyCat = oa.categories.some(c =>
+              c.includes('hate/threatening') || c.includes('harassment/threatening') || c.includes('sexual') || c.includes('violence')
+            );
+            if (hasCritCat || oa.maxScore >= 0.85) {
+              msgSev = 'critical';
+            } else if (hasHeavyCat || oa.maxScore >= 0.55) {
+              msgSev = 'heavy';
+            } else {
+              msgSev = 'medium';
+            }
+            const oaReason = `OpenAI Moderation [${oa.categories.join(', ')}]`;
+            msgReasons.push(oaReason);
+            reasonsSet.add(oaReason);
+          }
+
+          if (criticalRegex.test(sanitized)) {
+            if (sevOrder.critical > sevOrder[msgSev]) msgSev = 'critical';
+            const r = 'Phát hiện nội dung 18+ / bạo lực cực đoan / mã độc';
+            msgReasons.push(r);
+            reasonsSet.add(r);
+          } else if (heavyRegex.test(sanitized)) {
+            if (sevOrder.heavy > sevOrder[msgSev]) msgSev = 'heavy';
+            const r = 'Kỳ thị, quấy rối, doxxing hoặc giả mạo Admin';
+            msgReasons.push(r);
+            reasonsSet.add(r);
+          } else if (mediumRegex.test(sanitized)) {
+            if (sevOrder.medium > sevOrder[msgSev]) msgSev = 'medium';
+            const r = 'Ngôn từ tục tĩu (VI/EN) vi phạm tiêu chuẩn cộng đồng';
+            msgReasons.push(r);
+            reasonsSet.add(r);
+          } else if (lightRegex.test(sanitized)) {
+            if (sevOrder.light > sevOrder[msgSev]) msgSev = 'light';
+            const r = 'Ngôn từ xúc phạm / thiếu chuẩn mực';
+            msgReasons.push(r);
+            reasonsSet.add(r);
+          }
+
+          if (msgSev !== 'clean') {
+            if (sevOrder[msgSev] > sevOrder[severity]) {
+              severity = msgSev;
+            }
+            evidenceMessages.push({
+              messageId: m.id,
+              roomId: m.roomId,
+              roomName: m.roomName,
+              roomCode: m.roomCode,
+              senderId: m.senderId,
+              senderName: m.senderName,
+              senderDevice: m.senderDevice,
+              createdAt: m.createdAt,
+              timestamp: m.timestamp,
+              content: m.text,
+              reason: msgReasons.join(' • '),
+              source: msgSource,
+              severity: msgSev
+            });
+          }
+        });
+
+        // Evaluate image attachments
+        item.imgList.forEach((im, imgIdx) => {
+          const oaImg = openAiImgFlags.get(`${idx}:${imgIdx}`);
+          const badName = im.fileName ? imgExplicitNameRegex.test(im.fileName.toLowerCase()) : false;
+          if (oaImg?.flagged || badName) {
+            const cats = oaImg?.categories || [];
+            cats.forEach(c => categoriesSet.add(c));
+            const imgSev: 'heavy' | 'critical' = cats.some(c => c.includes('sexual/minors') || c.includes('violence/graphic')) ? 'critical' : 'heavy';
+            if (sevOrder[imgSev] > sevOrder[severity]) severity = imgSev;
+            const imgReason = oaImg?.flagged
+              ? `OpenAI Image Moderation [${cats.join(', ')}]`
+              : 'Tên tệp hình ảnh chứa từ khóa vi phạm 18+';
+            reasonsSet.add(imgReason);
+            evidenceMessages.push({
+              messageId: im.messageId ? `img-${im.messageId}-${imgIdx}` : undefined,
+              roomId: im.roomId,
+              roomName: im.roomName,
+              roomCode: im.roomCode,
+              senderId: im.senderId,
+              senderName: im.senderName,
+              senderDevice: im.senderDevice,
+              createdAt: im.createdAt,
+              timestamp: im.timestamp,
+              content: `[Hình ảnh vi phạm]: ${im.fileName || 'Ảnh đính kèm'}`,
+              reason: imgReason,
+              source: oaImg?.flagged ? 'openai_moderation' : 'word_filter',
+              severity: imgSev
+            });
+          }
+        });
+
+        // Only count ACTIVE/pending community reports
+        const currentSevRank = sevOrder[severity];
+        if (repCount >= 5) {
+          severity = 'critical';
+          reasonsSet.add(`Bị tố cáo nghiêm trọng (${repCount} lượt chờ xử lý)`);
+        } else if (repCount >= 3 && currentSevRank < sevOrder.heavy) {
+          severity = 'heavy';
+          reasonsSet.add(`Bị tố cáo nhiều lần (${repCount} lượt)`);
+        } else if (repCount >= 2 && currentSevRank < sevOrder.medium) {
+          severity = 'medium';
+          reasonsSet.add(`Có ${repCount} lượt tố cáo cộng đồng`);
+        } else if (repCount === 1 && currentSevRank < sevOrder.light) {
+          severity = 'light';
+          reasonsSet.add(item.reportList[0] || 'Có 1 báo cáo vi phạm chờ kiểm tra');
+        }
+
+        const score =
+          severity === 'critical' ? 95 :
+          severity === 'heavy' ? 75 :
+          severity === 'medium' ? 50 :
+          severity === 'light' ? 25 : 0;
+
+        return {
+          id: item.id,
+          type: item.type,
+          severity,
+          reason: Array.from(reasonsSet).join(' • ') || 'Tuân thủ tiêu chuẩn cộng đồng',
+          categories: Array.from(categoriesSet),
+          score,
+          evidenceMessages
+        };
+      });
+
+      return res.json({
+        success: true,
+        source: usedSource,
+        results
+      });
+    } catch (err: any) {
+      console.warn('OpenAI batch audit error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Batch audit error' });
     }
   });
 
@@ -2403,6 +3823,10 @@ exit
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
+  // Keep sockets alive longer than GCP/Cloud Run load-balancer idle timeouts to prevent ECONNRESET / NETWORK_ERROR
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+  server.requestTimeout = 300000;
 
   const gracefulShutdown = (signal: string) => {
     console.log(`Received ${signal}, closing server gracefully`);

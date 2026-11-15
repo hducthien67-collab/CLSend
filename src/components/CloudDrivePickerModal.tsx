@@ -18,7 +18,7 @@ import { db } from '../firebase/config';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { CloudDriveFile } from './types';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { formatFileSize, isImageFile } from '../utils/fileUpload';
 
@@ -35,16 +35,19 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
   onSelectFiles,
   alreadySelectedUrls = []
 }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const { currentLang } = useLanguage();
-  const isEn = currentLang === 'en';
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const isEn = !isVi && !isZh;
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
   const [cloudFiles, setCloudFiles] = useState<CloudDriveFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'image' | 'video' | 'audio' | 'document' | 'favorite'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Listen to user's Cloud files in Firestore
+  // Listen to user's Cloud files in Firestore (including linked UIDs & verified email across Chrome profiles)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -55,47 +58,30 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
     }
 
     setLoading(true);
-    const q = query(
-      collection(db, 'cloud_files'),
-      where('userId', '==', currentUser.uid)
-    );
+    let active = true;
+    let unsub: () => void = () => {};
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const loaded: CloudDriveFile[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          loaded.push({
-            id: docSnap.id,
-            userId: data.userId || currentUser.uid,
-            userEmail: data.userEmail,
-            userName: data.userName,
-            name: data.name || 'Không tên',
-            size: Number(data.size) || 0,
-            type: data.type || 'application/octet-stream',
-            url: data.url,
-            viewUrl: data.viewUrl || data.url,
-            thumbnail: data.thumbnail,
-            category: data.category || 'other',
-            isFavorite: Boolean(data.isFavorite),
-            createdAt: data.createdAt || new Date().toISOString()
-          });
-        });
+    import('../utils/cloudSync').then(({ subscribeUserCloudFiles }) => {
+      if (!active) return;
+      unsub = subscribeUserCloudFiles(
+        currentUser,
+        userProfile,
+        (loaded) => {
+          setCloudFiles(loaded);
+          setLoading(false);
+        },
+        (err) => {
+          console.error('Lỗi khi tải tệp từ Cloud Drive:', err);
+          setLoading(false);
+        }
+      );
+    });
 
-        // Sort descending by date
-        loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-        setCloudFiles(loaded);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('Lỗi khi tải tệp từ Cloud Drive:', err);
-        setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [isOpen, currentUser?.uid]);
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, [isOpen, currentUser?.uid, currentUser?.email, currentUser?.linkedEmail, (currentUser?.linkedUids || []).join(','), userProfile?.linkedEmail, (userProfile?.linkedUids || []).join(',')]);
 
   // Reset selection when modal opens
   useEffect(() => {
@@ -167,13 +153,17 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <span>{isEn ? 'Select from Cloud Drive' : 'Chọn từ kho Cloud'}</span>
+                <span>{pick('Chọn từ kho Cloud', 'Select from Cloud Drive', '从云盘选择')}</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
-                  {cloudFiles.length} {isEn ? (cloudFiles.length === 1 ? 'file' : 'files') : 'tệp'}
+                  {cloudFiles.length} {pick('tệp', cloudFiles.length === 1 ? 'file' : 'files', '个文件')}
                 </span>
               </h2>
               <p className="text-xs text-slate-400 truncate">
-                {isEn ? 'Select files stored in your Cloud Drive to attach directly' : 'Chọn các tệp đã lưu trong kho Cloud cá nhân của bạn để thêm vào danh sách gửi'}
+                {pick(
+                  'Chọn các tệp đã lưu trong kho Cloud cá nhân của bạn để thêm vào danh sách gửi',
+                  'Select files stored in your Cloud Drive to attach directly',
+                  '从您的个人云盘中选择已保存的文件直接附加到发送列表'
+                )}
               </p>
             </div>
           </div>
@@ -182,7 +172,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0 cursor-pointer"
-            title={isEn ? "Close" : "Đóng"}
+            title={pick('Đóng', 'Close', '关闭')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -198,7 +188,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={isEn ? "Search files by name or extension..." : "Tìm kiếm tệp theo tên hoặc phần mở rộng..."}
+                placeholder={pick('Tìm kiếm tệp theo tên hoặc phần mở rộng...', 'Search files by name or extension...', '按文件名或扩展名搜索文件...')}
                 className="w-full bg-slate-900 border border-slate-700/80 rounded-xl pl-9 pr-8 py-2 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-colors"
               />
               {searchQuery && (
@@ -222,8 +212,8 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
                 <FileCheck className="w-4 h-4 text-emerald-400" />
                 <span>
                   {selectedIds.size === filteredFiles.length && filteredFiles.length > 0
-                    ? (isEn ? 'Deselect all' : 'Bỏ chọn tất cả')
-                    : (isEn ? 'Select all' : 'Chọn tất cả')}
+                    ? pick('Bỏ chọn tất cả', 'Deselect all', '取消全选')
+                    : pick('Chọn tất cả', 'Select all', '全选')}
                 </span>
               </button>
             )}
@@ -241,7 +231,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <HardDrive className="w-3.5 h-3.5" />
-              <span>{isEn ? `All (${cloudFiles.length})` : `Tất cả (${cloudFiles.length})`}</span>
+              <span>{pick(`Tất cả (${cloudFiles.length})`, `All (${cloudFiles.length})`, `全部 (${cloudFiles.length})`)}</span>
             </button>
 
             <button
@@ -254,7 +244,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <ImageIcon className="w-3.5 h-3.5 text-sky-400" />
-              <span>{isEn ? 'Images' : 'Hình ảnh'}</span>
+              <span>{pick('Hình ảnh', 'Images', '图片')}</span>
             </button>
 
             <button
@@ -267,7 +257,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <FileText className="w-3.5 h-3.5 text-amber-400" />
-              <span>{isEn ? 'Documents' : 'Tài liệu'}</span>
+              <span>{pick('Tài liệu', 'Documents', '文档')}</span>
             </button>
 
             <button
@@ -280,7 +270,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <Video className="w-3.5 h-3.5 text-rose-400" />
-              <span>{isEn ? 'Videos' : 'Video'}</span>
+              <span>{pick('Video', 'Videos', '视频')}</span>
             </button>
 
             <button
@@ -293,7 +283,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <Music className="w-3.5 h-3.5 text-violet-400" />
-              <span>{isEn ? 'Audio' : 'Âm thanh'}</span>
+              <span>{pick('Âm thanh', 'Audio', '音频')}</span>
             </button>
 
             <button
@@ -306,7 +296,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <Star className="w-3.5 h-3.5 text-yellow-400 fill-yellow-400" />
-              <span>{isEn ? 'Favorites' : 'Yêu thích'}</span>
+              <span>{pick('Yêu thích', 'Favorites', '收藏')}</span>
             </button>
           </div>
         </div>
@@ -316,40 +306,44 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
-              <p className="text-xs">{isEn ? 'Loading files from Cloud Drive...' : 'Đang tải danh sách tệp từ kho Cloud...'}</p>
+              <p className="text-xs">{pick('Đang tải danh sách tệp từ kho Cloud...', 'Loading files from Cloud Drive...', '正在从云盘加载文件列表...')}</p>
             </div>
           ) : !currentUser ? (
             <div className="text-center py-16 px-4">
               <Cloud className="w-12 h-12 text-slate-600 mx-auto mb-3" />
               <p className="text-sm text-slate-300 font-semibold mb-1">
-                {isEn ? 'Please sign in to your account' : 'Vui lòng đăng nhập tài khoản'}
+                {pick('Vui lòng đăng nhập tài khoản', 'Please sign in to your account', '请登录您的账号')}
               </p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                {isEn
-                  ? 'You need to sign in to access your personal Cloud Drive and attach files.'
-                  : 'Bạn cần đăng nhập để truy cập kho Cloud cá nhân và chọn tệp để gửi.'}
+                {pick(
+                  'Bạn cần đăng nhập để truy cập kho Cloud cá nhân và chọn tệp để gửi.',
+                  'You need to sign in to access your personal Cloud Drive and attach files.',
+                  '您需要登录后才能访问个人云盘并选择要发送的文件。'
+                )}
               </p>
             </div>
           ) : cloudFiles.length === 0 ? (
             <div className="text-center py-16 px-4">
               <FolderOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
               <p className="text-sm text-slate-300 font-semibold mb-1">
-                {isEn ? 'No files in your Cloud Drive yet' : 'Kho Cloud của bạn chưa có tệp nào'}
+                {pick('Kho Cloud của bạn chưa có tệp nào', 'No files in your Cloud Drive yet', '您的云盘中暂无文件')}
               </p>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-                {isEn
-                  ? 'Open the "Cloud Drive" tab in the top navigation to upload important files first.'
-                  : 'Hãy mở tab "Kho Cloud" ở thanh điều hướng trên cùng để tải các tệp quan trọng lên lưu trữ trước nhé.'}
+                {pick(
+                  'Hãy mở tab "Kho Cloud" ở thanh điều hướng trên cùng để tải các tệp quan trọng lên lưu trữ trước nhé.',
+                  'Open the "Cloud Drive" tab in the top navigation to upload important files first.',
+                  '请先打开顶部导航栏中的“云盘”选项卡上传重要文件。'
+                )}
               </p>
             </div>
           ) : filteredFiles.length === 0 ? (
             <div className="text-center py-12 px-4">
               <Search className="w-10 h-10 text-slate-600 mx-auto mb-2" />
               <p className="text-sm text-slate-300 font-medium">
-                {isEn ? 'No matching files found' : 'Không tìm thấy tệp nào phù hợp'}
+                {pick('Không tìm thấy tệp nào phù hợp', 'No matching files found', '未找到匹配的文件')}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {isEn ? 'Try changing your keyword or category filter' : 'Thử thay đổi từ khóa hoặc bộ lọc danh mục'}
+                {pick('Thử thay đổi từ khóa hoặc bộ lọc danh mục', 'Try changing your keyword or category filter', '请尝试更改关键词或分类筛选')}
               </p>
             </div>
           ) : (
@@ -418,7 +412,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
 
                       {isAlreadyInSendList && (
                         <span className="text-[10px] text-emerald-400/90 font-medium block mt-0.5">
-                          {isEn ? '✓ Already in send list' : '✓ Đang có trong danh sách gửi'}
+                          {pick('✓ Đang có trong danh sách gửi', '✓ Already in send list', '✓ 已在发送列表中')}
                         </span>
                       )}
                     </div>
@@ -432,9 +426,9 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
         {/* Modal Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-900/95 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-slate-300 flex items-center gap-2">
-            <span>{isEn ? 'Selected:' : 'Đã chọn:'}</span>
+            <span>{pick('Đã chọn:', 'Selected:', '已选择：')}</span>
             <strong className="text-emerald-400 font-bold text-sm">
-              {selectedIds.size} {isEn ? (selectedIds.size === 1 ? 'file' : 'files') : 'tệp'}
+              {selectedIds.size} {pick('tệp', selectedIds.size === 1 ? 'file' : 'files', '个文件')}
             </strong>
             {selectedIds.size > 0 && (
               <span className="text-slate-400">
@@ -449,7 +443,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               onClick={onClose}
               className="flex-1 sm:flex-initial px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold transition-all"
             >
-              {isEn ? 'Cancel' : 'Hủy bỏ'}
+              {pick('Hủy bỏ', 'Cancel', '取消')}
             </button>
 
             <button
@@ -464,9 +458,11 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
             >
               <Check className="w-4 h-4" />
               <span>
-                {isEn
-                  ? `Attach selected (${selectedIds.size})`
-                  : `Thêm vào gửi (${selectedIds.size})`}
+                {pick(
+                  `Thêm vào gửi (${selectedIds.size})`,
+                  `Attach selected (${selectedIds.size})`,
+                  `添加到发送 (${selectedIds.size})`
+                )}
               </span>
             </button>
           </div>

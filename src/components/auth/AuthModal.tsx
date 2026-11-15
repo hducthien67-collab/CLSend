@@ -59,6 +59,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
 
   // Form states
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [dob, setDob] = useState('');
@@ -218,6 +220,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
       await registerWithAccount({
         username: cleanUsername,
         pass: password,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
         dob: dob ? dob.trim() : undefined,
         gender: gender || 'Không Muốn Trả Lời',
         deviceName: deviceName ? deviceName.trim() : undefined
@@ -607,7 +611,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
                 <form onSubmit={handleLoginSubmit} className="space-y-3.5">
                   <div>
                     <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                      Tên tài khoản hoặc Email
+                      Tên tài khoản, Email hoặc SĐT
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -618,7 +622,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
                         autoComplete="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        placeholder="Nhập tên tài khoản"
+                        placeholder="Nhập tên tài khoản, email hoặc SĐT"
                         className="smooth-input w-full pl-10 pr-3 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition-all"
                       />
                     </div>
@@ -717,6 +721,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Nhập lại mật khẩu"
+                        className="smooth-input w-full px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Email & Số điện thoại liên kết (Tùy chọn) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-200 mb-1">
+                        Email (Tùy chọn)
+                      </label>
+                      <input
+                        id="reg-input-email"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="example@gmail.com"
+                        className="smooth-input w-full px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-200 mb-1">
+                        Số điện thoại (Tùy chọn)
+                      </label>
+                      <input
+                        id="reg-input-phone"
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="09xx xxx xxx"
                         className="smooth-input w-full px-3 py-2 bg-slate-950/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
                       />
                     </div>

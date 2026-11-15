@@ -25,7 +25,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
-import { useLanguage, LanguageCode } from '../context/LanguageContext';
+import { useLanguage, LanguageCode, pickLang } from '../context/LanguageContext';
 
 interface NavbarProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -37,6 +37,7 @@ interface NavbarProps {
   onToggleViewMode?: () => void;
   incomingCount?: number;
   unreadMessagesCount?: number;
+  onResetUnreadChat?: () => void;
   onOpenDesignStudio?: () => void;
 }
 
@@ -50,6 +51,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
   onToggleViewMode,
   incomingCount = 0,
   unreadMessagesCount = 0,
+  onResetUnreadChat,
   onOpenDesignStudio,
 }) => {
   const { currentUser, settings, userProfile, logout } = useAuth();
@@ -138,7 +140,10 @@ const NavbarComponent: React.FC<NavbarProps> = ({
             <button
               id="nav-chat-tab"
               type="button"
-              onClick={() => setActiveTab('chat')}
+              onClick={() => {
+                setActiveTab('chat');
+                onResetUnreadChat?.();
+              }}
               className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors duration-150 transform-gpu active:scale-95 cursor-pointer ${
                 activeTab === 'chat'
                   ? 'bg-emerald-600 text-white shadow-sm'
@@ -258,7 +263,12 @@ const NavbarComponent: React.FC<NavbarProps> = ({
               id="open-rules-navbar-btn"
               type="button"
               onClick={onOpenRules}
-              title={currentLang === 'en' ? "Terms of Use & Community Guidelines (Basis for violation handling)" : "Bảng Nội Quy & Điều Khoản Sử Dụng (Căn cứ xử lý vi phạm)"}
+              title={pickLang(
+                currentLang,
+                "Bảng Nội Quy & Điều Khoản Sử Dụng (Căn cứ xử lý vi phạm)",
+                "Terms of Use & Community Guidelines (Basis for violation handling)",
+                "使用条款与社区规范（违规处理依据）"
+              )}
               className="flex items-center gap-1 px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-amber-400 border border-slate-700/80 hover:border-amber-500/40 text-xs font-semibold transition-all shadow-sm group"
             >
               <Scale className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
@@ -301,7 +311,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                   }} 
                 />
                 
-                <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                <div className="absolute ltr:right-0 rtl:left-0 top-full mt-2 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-3 py-2 border-b border-slate-800 mb-1">
                     <p className="text-xs font-bold text-white truncate">
                       {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Tài khoản'}
@@ -359,7 +369,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                       </div>
                       <div className="flex items-center gap-1 text-[11px] text-slate-400">
                         <span>{languages.find(l => l.code === currentLang)?.flag || '🌐'}</span>
-                        <ChevronLeft className={`w-3.5 h-3.5 transition-transform duration-200 ${isLangSubMenuOpen ? 'rotate-180' : ''}`} />
+                        <ChevronLeft className={`w-3.5 h-3.5 transition-transform duration-200 ${isLangSubMenuOpen ? 'ltr:rotate-180 rtl:rotate-0' : 'rtl:rotate-180'}`} />
                       </div>
                     </button>
 
@@ -368,7 +378,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                       <div 
                         translate="no"
                         onClick={(e) => e.stopPropagation()}
-                        className="notranslate absolute right-full top-0 mr-2 w-56 rounded-2xl bg-slate-900/98 backdrop-blur-xl border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in slide-in-from-right-3 duration-200"
+                        className="notranslate absolute ltr:right-full ltr:mr-2 rtl:left-full rtl:ml-2 top-0 w-56 rounded-2xl bg-slate-900/98 backdrop-blur-xl border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in ltr:slide-in-from-right-3 rtl:slide-in-from-left-3 duration-200"
                       >
                         <div className="px-2.5 py-1 text-[10.5px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between mb-1">
                           <span className="flex items-center gap-1">

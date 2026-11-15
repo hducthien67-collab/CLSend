@@ -925,3 +925,455 @@ export const OFFICIAL_TERMS_OF_SERVICE_EN: MainArticle[] = [
     ]
   }
 ];
+
+// ==================== 简体中文官方服务条款 ====================
+export const OFFICIAL_TERMS_OF_SERVICE_ZH: MainArticle[] = [
+  // ==================== 第 1 条 ====================
+  {
+    id: 'dieu-1',
+    articleNumber: '第 1 条',
+    title: '聊天室交流语言与行为规范',
+    category: 'speech',
+    categoryLabel: '交流与言语',
+    summary: '适用于 ClSend 平台上的所有公共大厅、P2P 群聊室以及直接文本消息交流。',
+    subClauses: [
+      {
+        id: '1.1',
+        clauseNumber: '1.1',
+        title: '诽谤名誉、人身侮辱与骚扰',
+        description: '严禁任何使用粗俗语言、贬低、辱骂或诋毁其他成员尊严、外貌、背景或家庭的行为。',
+        examples: [
+          '使用粗鄙脏话或涉及人体敏感部位的攻击性词汇进行辱骂。',
+          '捏造毫无根据的谣言诋毁他人名誉或破坏他人声誉。',
+          '对特定群体、机构或社区使用仇恨言论。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：中',
+        penalty: '首次警告：系统自动将敏感词屏蔽为 ***；屡犯者将暂停发言权限 6 至 24 小时。'
+      },
+      {
+        id: '1.2',
+        clauseNumber: '1.2',
+        title: '故意规避审核过滤器与伪装脏话',
+        description: '严禁故意插入句号、下划线、空格、特殊符号、数字替代字母或火星文以绕过 AI 自动审核系统。',
+        examples: [
+          '故意拆开或加点拼写：f.u.c.k、s e x、b.i.t.c.h。',
+          '使用数字或字符替换字母：d1ck、5ex、sh1t。',
+          '在违禁词中间插入特殊 Unicode 字符或表情符号。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：中',
+        penalty: '正则与 AI 自动识别后立即拦截过滤，并在账号内记入 1 次违规记录。'
+      },
+      {
+        id: '1.3',
+        clauseNumber: '1.3',
+        title: '地域歧视、宗教仇恨与暴力煽动',
+        description: '严格遵守网络安全法规：严禁发表分裂地域文化、侮辱宗教信仰、民族或性别的言论及煽动暴力的内容。',
+        examples: [
+          '针对特定地区文化、口音或人群发表贬损性言论。',
+          '亵渎他人宗教信仰、信条或精神象征。',
+          '号召对任何群体实施排挤、霸凌或暴力行为。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '封禁账号 3 至 7 天；屡犯或严重煽动者永久封禁。'
+      },
+      {
+        id: '1.4',
+        clauseNumber: '1.4',
+        title: '性骚扰、不当搭讪与精神胁迫',
+        description: '严禁发送粗俗性挑逗、强迫他人提供私密媒体或在对方明确拒绝后仍持续骚扰。',
+        examples: [
+          '向其他用户索要私密照片或私人敏感视频。',
+          '对聊天室内任何成员的身体发表下流、淫秽评论。',
+          '威胁实施暴力、人肉搜索或连续发送骚扰信息。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '立即断开双方设备之间的 P2P 连接，并在 48 至 72 小时内禁止加入公共聊天室。'
+      },
+      {
+        id: '1.5',
+        clauseNumber: '1.5',
+        title: '消息刷屏、乱码轰炸与频道拥堵',
+        description: '严禁高频率发送海量消息或数千个无意义变形字符（如 Zalgo 文本、崩溃字体），意图导致他人客户端卡顿或崩溃。',
+        examples: [
+          '使用自动化脚本每秒发送数十条消息。',
+          '发送异常 Unicode 字符造成客户端缓冲区溢出。',
+          '持续发送垃圾广告、推销话术或推广返佣链接。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：中',
+        penalty: '触发频率限制（30 秒冷却）；暂时移出聊天室 1 小时。'
+      }
+    ]
+  },
+
+  // ==================== 第 2 条 ====================
+  {
+    id: 'dieu-2',
+    articleNumber: '第 2 条',
+    title: 'P2P 数据传输与文件共享规范',
+    category: 'file',
+    categoryLabel: '传输与文件',
+    summary: '规定 WebRTC P2P 直连传输流与 Cloud Relay 中转服务器的安全标准。',
+    subClauses: [
+      {
+        id: '2.1',
+        clauseNumber: '2.1',
+        title: '严禁成人内容、色情及儿童性剥削内容 (CSAM)',
+        description: '依据国际公约及相关法律：绝对禁止制作、传输、转发或存储色情、淫秽资料或儿童性剥削与虐待材料 (CSAM)。',
+        examples: [
+          '传播露骨图片、裸露视频或成人色情媒体。',
+          '分享色情资源库链接或成人内容压缩包。',
+          '任何描绘、暗示或涉及剥削未成年人的内容。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '立即永久封禁账号及关联邮箱/手机号；全系统拉黑并保全数字证据以移交执法机关。'
+      },
+      {
+        id: '2.2',
+        clauseNumber: '2.2',
+        title: '极端暴力、血腥恐怖与教唆自残',
+        description: '严禁分享非医学教育用途的残缺遗体图像、血腥事故现场、虐待暴行、自杀自残引导或恐怖主义宣传材料。',
+        examples: [
+          '虐待动物或对人类施以残酷暴行的影像。',
+          '自杀方法、武器制造、爆炸物或剧毒物质的制作教程。',
+          '宣传暴力极端组织或恐怖主义的材料。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '在传输层自动拦截文件；账号封禁 7 天至永久封禁。'
+      },
+      {
+        id: '2.3',
+        clauseNumber: '2.3',
+        title: '传播病毒、木马、勒索软件与压缩包炸弹',
+        description: '严禁传输包含间谍软件、键盘记录器、勒索病毒或旨在破坏接收方硬件与操作系统的恶意压缩炸弹 (Zip Bomb)。',
+        examples: [
+          '伪装成办公文档发送恶意可执行文件 (.exe, .scr, .bat, .vbs)。',
+          '发送 42.zip 或解压后膨胀至 PB 级的炸弹压缩包致使对方电脑崩溃。',
+          '在 HTML 或 SVG 文件中嵌入浏览器漏洞利用代码。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '永久封禁账号；将文件 SHA-256 哈希加入全网拦截销毁清单。'
+      },
+      {
+        id: '2.4',
+        clauseNumber: '2.4',
+        title: '侵犯商业版权与恶意破解软件',
+        description: '严禁在公共渠道分享破解软件、虚假注册机或盗窃受版权保护的商业资产用于非法分发。',
+        examples: [
+          '分享捆绑隐蔽挖矿木马的破解软件包。',
+          '泄露企业或机构内部数据库、商业机密或未授权专有文件。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '移除文件并发送 DMCA 版权警告；累计三次违规将封禁账号。'
+      },
+      {
+        id: '2.5',
+        clauseNumber: '2.5',
+        title: '滥用 P2P/Relay 通道发起拒绝服务 (DDoS) 攻击',
+        description: '严禁故意同时开启数千条虚假数据通道 (DataChannel Flood) 以耗尽中继带宽并破坏社区连接稳定性。',
+        examples: [
+          '运行脚本连续高频建立虚假 WebRTC 连接。',
+          '向对端发送超大垃圾数据包以耗尽接收缓冲区内存。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '在云基础设施层封锁相关访问来源；涉事账号永久封禁且不可申诉。'
+      }
+    ]
+  },
+
+  // ==================== 第 3 条 ====================
+  {
+    id: 'dieu-3',
+    articleNumber: '第 3 条',
+    title: '云端存储与 ClSend Cloud Drive 管理规范',
+    category: 'cloud',
+    categoryLabel: '云盘存储',
+    summary: '明确 ClSend Cloud Drive 生态内的存储配额、数据所有权与安全承诺。',
+    subClauses: [
+      {
+        id: '3.1',
+        clauseNumber: '3.1',
+        title: '存储数据的合法所有权与法律责任',
+        description: '用户对其上传的文件拥有 100% 的著作权与所有权。ClSend 绝不会擅自偷窥、篡改或商业化利用用户私人数据。',
+        examples: [
+          '用户对其存储文件的内容依法承担唯一法律责任。',
+          'ClSend 提供符合现代云计算安全标准的加密云存储基础设施。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：标准规范',
+        penalty: '若存储内容违反适用法律法规，由用户自行承担全部法律责任。'
+      },
+      {
+        id: '3.2',
+        clauseNumber: '3.2',
+        title: '存储限额、文件大小与资源合理使用',
+        description: '用户须合理使用云存储空间，不得利用漏洞突破配额限制或恶意上传数百万个 0KB 垃圾文件。',
+        examples: [
+          '不得使用刷单脚本上传垃圾记录以耗尽云端数据库资源。',
+          '遵守平台允许的文件格式及单文件大小限制。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：中',
+        penalty: '系统自动清理异常垃圾文件，并在检测到滥用行为时限制上传速率。'
+      },
+      {
+        id: '3.3',
+        clauseNumber: '3.3',
+        title: '端到端加密与密钥保管责任',
+        description: '数据在推送至云端前已在浏览器本地完成加密处理。用户须妥善保管个人密码与同步 PIN 码；若密钥遗失，ClSend 无法找回数据。',
+        examples: [
+          '妥善保管账号凭据，切勿向陌生人泄露 6 位同步 PIN 码。',
+          '定期将重要资料备份至个人本地存储设备。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：安全建议',
+        penalty: '因用户自行泄露密码或解密密钥导致的数据丢失，ClSend 不承担赔偿责任。'
+      },
+      {
+        id: '3.4',
+        clauseNumber: '3.4',
+        title: '危险文件的下架与销毁流程',
+        description: '若云盘文件经检测包含高危恶意程序或依法严禁传播的内容，ClSend 有权在不事先通知的情况下立即隔离并销毁。',
+        examples: [
+          '被病毒扫描系统标记为红色高危警报的文件。',
+          '收到网络安全监管部门依法下达的下架或查封指令的文件。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '立即销毁违规文件并撤销该账号的 Cloud Drive 使用权限。'
+      }
+    ]
+  },
+
+  // ==================== 第 4 条 ====================
+  {
+    id: 'dieu-4',
+    articleNumber: '第 4 条',
+    title: '隐私保护、个人数据安全与反人肉搜索',
+    category: 'privacy',
+    categoryLabel: '隐私保护',
+    summary: '保障平台所有参与者的私人生活、个人秘密与身份信息不可侵犯。',
+    subClauses: [
+      {
+        id: '4.1',
+        clauseNumber: '4.1',
+        title: '严禁未经授权泄露他人身份信息 (Doxxing)',
+        description: '严禁在未经书面许可的情况下，在公共聊天室发布或通过文件传播他人的个人身份识别信息 (PII)。',
+        examples: [
+          '公开他人的身份证、护照或驾驶证等证件照片。',
+          '泄露他人的私人手机号、家庭住址或工作学校地址。',
+          '曝光他人银行账号、资金余额或交易明细记录。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '立即移除违规信息；视对受害者造成的影响封禁账号 7 天至永久封禁。'
+      },
+      {
+        id: '4.2',
+        clauseNumber: '4.2',
+        title: '未经同意偷拍录屏与泄露私密对话',
+        description: '严禁私下截图或录制私密 P2P 对话及传输内容并向外部传播，用于羞辱或敲诈勒索。',
+        examples: [
+          '截取私密聊天记录并发布到社交平台对当事人进行公开羞辱。',
+          '利用私密对话内容威胁、勒索钱财或胁迫他人。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '撤销聊天室访问权限；如有法定机关调查需求，依法配合提供事件日志。'
+      },
+      {
+        id: '4.3',
+        clauseNumber: '4.3',
+        title: '网络间谍行为、追踪脚本与登录令牌窃取',
+        description: '严禁发送恶意脚本、旨在窃取登录会话令牌 (Auth Token) 的钓鱼链接或浏览器隐蔽追踪探针。',
+        examples: [
+          '伪造 Google 或平台登录界面欺骗用户输入账号密码。',
+          '发送用于暗中采集用户真实 IP 地址或地理位置的 IP 记录链接。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '永久封禁账号；将攻击者域名及来源纳入自动封锁名单。'
+      }
+    ]
+  },
+
+  // ==================== 第 5 条 ====================
+  {
+    id: 'dieu-5',
+    articleNumber: '第 5 条',
+    title: '账号管理、设备标识与 6 位 PIN 码同步规范',
+    category: 'account',
+    categoryLabel: '账号与身份',
+    summary: '明确用户账号保护义务、6 位快速同步机制及使用服务时的个人责任。',
+    subClauses: [
+      {
+        id: '5.1',
+        clauseNumber: '5.1',
+        title: '妥善保管密码、6 位同步 PIN 码与登录二维码的义务',
+        description: '每个账号均与身份凭据及同步机制关联，用户有义务严格保密，切勿向陌生人提供 6 位同步 PIN 码。',
+        examples: [
+          '登录二维码和 6 位同步 PIN 码代表直接访问账号资源的钥匙。',
+          'ClSend 管理员绝不会通过任何聊天消息向您索要同步 PIN 码或密码。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：安全提醒',
+        penalty: '因个人疏忽将 PIN 码透露给他人导致的数据损失，由用户自行承担责任。'
+      },
+      {
+        id: '5.2',
+        clauseNumber: '5.2',
+        title: '严禁冒充管理员、开发者或系统官方账号',
+        description: '严禁将昵称、头像或发送的消息伪装成 ClSend 管理员、开发人员或官方系统通知。',
+        examples: [
+          '使用“ClSend Admin”、“官方版主”、“Dev Support”等误导性名称。',
+          '冒充技术人员要求用户交出密码或缴纳所谓罚款。',
+          '伪造开发者认证标识威吓新用户。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：极其严重',
+        penalty: '立即永久封禁账号；收回昵称并将相关关键词列入永久黑名单。'
+      },
+      {
+        id: '5.3',
+        clauseNumber: '5.3',
+        title: '自动化脚本工具 (Bot) 与批量注册虚假账号',
+        description: '严禁使用自动化机器人、爬虫或垃圾软件批量注册虚假账号以扰乱或消耗平台资源。',
+        examples: [
+          '运行自动化脚本每分钟生成数百个虚假访客令牌。',
+          '使用爬虫工具未经授权扫描抓取云端存储文件。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：高',
+        penalty: '防火墙拦截异常来源并立即清除所有批量生成的虚假账号。'
+      },
+      {
+        id: '5.4',
+        clauseNumber: '5.4',
+        title: '访客模式 (Guest) 与正式账号规则',
+        description: '访客模式仅供快速临时体验，不作长期保存承诺；建议绑定邮箱、手机号或 Google 账号以保障完整权益。',
+        examples: [
+          '访客会话在长期无活动后可能会过期清理。',
+          '正式绑定账号享有持久云盘存储与完整跨端数据同步权限。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：说明信息',
+        penalty: '访客模式临时数据将在会话生命周期结束后自动清理。'
+      }
+    ]
+  },
+
+  // ==================== 第 6 条 ====================
+  {
+    id: 'dieu-6',
+    articleNumber: '第 6 条',
+    title: '违规分级、处罚执行与申诉机制',
+    category: 'sanctions',
+    categoryLabel: '处罚与制裁',
+    summary: '公开透明地说明违规分级、技术处置流程及公正的申诉复核途径。',
+    subClauses: [
+      {
+        id: '6.1',
+        clauseNumber: '6.1',
+        title: '全平台四级违规分类标准',
+        description: '所有违规行为科学划分为四级：一级（轻微-不当用语）、二级（中度-绕过过滤与刷屏）、三级（高危-骚扰歧视与泄露隐私）、四级（极其严重-涉黄赌毒/恶意软件/诈骗）。',
+        examples: [
+          '一级：系统自动警告并用星号 *** 遮蔽脏话。',
+          '二级：冻结消息发送、暂停 P2P 传输 1 至 24 小时。',
+          '三级：限制账号及云服务功能 3 至 14 天。',
+          '四级：永久封禁涉事账号及其绑定的同邮箱/同手机号账号，若涉及违法犯罪则移交证据。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：执行原则',
+        penalty: '采用累进处罚机制：重复犯同一错误将自动升级至更严厉的惩罚等级。'
+      },
+      {
+        id: '6.2',
+        clauseNumber: '6.2',
+        title: '安全取证与审计日志记录 (Audit Log)',
+        description: '系统自动对违规证据进行加密归档（时间、违规类型、可疑文件、SHA-256 哈希值），以便进行公正审核。',
+        examples: [
+          '审计日志仅用于核实违规事实并保护受害者安全。',
+          '绝不将安全日志用于任何第三方商业画像或盈利目的。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：技术规范',
+        penalty: '系统记录的安全审计日志将作为核实申诉请求的核心依据。'
+      },
+      {
+        id: '6.3',
+        clauseNumber: '6.3',
+        title: '公正申诉机制与处理时效',
+        description: '若用户认为账号遭到 AI 自动审核系统误判限制，完全有权提出正式申诉。',
+        examples: [
+          '向官方支持渠道提交申诉：support@clsend.app。',
+          '提供相关标识信息：账号 UID、被封禁时间及被误判的内容说明。',
+          '管理团队承诺人工核查日志并在 24 至 48 个工作小时内给予答复。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：用户权益',
+        penalty: '经核实确属误判的：立即解除封禁、恢复账号状态并清除误记违规记录。'
+      }
+    ]
+  },
+
+  // ==================== 第 7 条 ====================
+  {
+    id: 'dieu-7',
+    articleNumber: '第 7 条',
+    title: '免责声明与条款生效执行',
+    category: 'legal',
+    categoryLabel: '法律与生效',
+    summary: '界定平台与用户在点对点 (P2P) 数据传输过程中的权责边界。',
+    subClauses: [
+      {
+        id: '7.1',
+        clauseNumber: '7.1',
+        title: '去中心化 P2P 传输通道的责任限制',
+        description: 'P2P 数据通道通过 WebRTC 在设备间直接传输，数据不经过 ClSend 存储服务器。接收方在打开文件前须自行核实文件安全性。',
+        examples: [
+          '打开来自陌生人发送的可执行程序或压缩包前，请务必进行病毒查杀。',
+          '因用户自愿向第三方泄露私人凭据而导致的财产损失，ClSend 不承担责任。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：法律条款',
+        penalty: '用户同意接收未知来源文件时须自行承担相应风险。'
+      },
+      {
+        id: '7.2',
+        clauseNumber: '7.2',
+        title: '条款修订、更新权及变更通知',
+        description: 'ClSend 有权根据技术演进与最新法律法规对本条款进行修订与补充，重要变更将在应用内显著公布。',
+        examples: [
+          '条款版本更新通知将在应用首页及法律门户中显示。',
+          '在条款更新后继续使用本服务，即视为您完全接受修订后的新条款。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：效力说明',
+        penalty: '若不同意新修订的条款，用户可随时停止使用本服务。'
+      },
+      {
+        id: '7.3',
+        clauseNumber: '7.3',
+        title: '访问 ClSend 时的用户合规承诺',
+        description: '点击“同意”、登录或继续使用 ClSend 的文件传输、聊天与存储服务，即表示用户已阅读、理解并承诺严格遵守本使用条款。',
+        examples: [
+          '承诺共同建设文明、安全、健康的数字文件分享与即时通讯社区。',
+          '发现严重违规或安全威胁时及时向平台管理员举报。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：法律承诺',
+        penalty: '所有违规行为均将严格按照本承诺条款处理。'
+      }
+    ]
+  }
+];
+

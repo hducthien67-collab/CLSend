@@ -1,14 +1,19 @@
 import { UserProfileModal } from '../UserProfileModal';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { yieldToMain } from '../../utils/scheduler';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { ChatInlineVideoPlayer } from '../ChatInlineVideoPlayer';
+import { ChatMediaImage } from '../ChatMediaImage';
 import { db } from '../../firebase/config';
 import { 
   collection, 
   query, 
   orderBy, 
-  limit, 
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData,
   onSnapshot, 
   addDoc, 
   deleteDoc, 
@@ -21,6 +26,11 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { ChatMessage, ChatRoom, RoomMember } from '../../types';
+import {
+  getCachedRoomMessages,
+  setCachedRoomMessages,
+  removeCachedRoomMessage,
+} from '../../utils/chatMessageCache';
 import { 
   Send, 
   Image as ImageIcon, 
@@ -53,11 +63,12 @@ import {
   AlertTriangle,
   Copy,
   Video,
-  Cloud
+  Cloud,
+  ExternalLink
 } from 'lucide-react';
 import { CloudDrivePickerModal } from '../CloudDrivePickerModal';
 import { CloudDriveFile } from '../../types';
-import { uploadFileToServer, isImageFile, generateImageThumbnail, createClientFallbackFileInfo } from '../../utils/fileUpload';
+import { uploadFileToServer, isImageFile, isVideoFile, isGifFile, generateImageThumbnail, extractVideoModerationFrames, fileToBase64, createClientFallbackFileInfo } from '../../utils/fileUpload';
 import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { renderClickableText } from '../../utils/textFormat';
@@ -68,7 +79,7 @@ import { ZoomableImageViewerModal } from '../ZoomableImageViewerModal';
 import { ResetServerModal } from '../ResetServerModal';
 import { playSendSound, playReceiveSound, playShieldAlertSound } from '../../utils/sound';
 import { cleanFirestoreObject } from '../../utils/firestoreClean';
-import { censorProfanity, moderateUploadedImage } from '../../utils/moderation';
+import { censorProfanity, moderateUploadedImage, moderateUploadedVideo, deleteServerUploadedFile } from '../../utils/moderation';
 import { inspectFileSecurity } from '../../utils/fileSecurity';
 import { checkContentWithAI } from '../../utils/aiModeration';
 import { 
@@ -78,13 +89,16 @@ import {
   getYesterdayStartIso,
   autoPruneWeeklyMessages 
 } from '../../utils/devModeration';
+import { extractRoomMediaFromMessages, openMediaInLargeViewer } from '../../utils/mediaViewerSession';
 
 const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#6366f1'];
 
 export const MobileChatView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
   const { t, currentLang } = useLanguage();
-  const isEn = currentLang === 'en';
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const pick = <T,>(vi: T, en: T, zh: T): T => (isVi ? vi : isZh ? zh : en);
   
   // Room navigation state: 'rooms_list' | 'chat_feed'
   const [viewMode, setViewMode] = useState<'rooms_list' | 'chat_feed'>('chat_feed');
@@ -111,24 +125,50 @@ export const MobileChatView: React.FC = () => {
   const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [moderationWarning, setModerationWarning] = useState<string | null>(null);
   
+  const INITIAL_LIVE_PAGE_SIZE = 35;
+  const OLDER_PAGE_BATCH_SIZE = 25;
+
   // Modals & Viewers
   const [showRoomDetails, setShowRoomDetails] = useState(false);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
-  // Pagination: load latest 10 messages by default, scroll up to load +10 more
-  const [messageLimit, setMessageLimit] = useState(10);
+
+  // Discord / Zalo / Messenger cursor pagination & instant room cache
+  const [isInitialLoadingMessages, setIsInitialLoadingMessages] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const previousScrollHeightRef = useRef<number>(0);
-  const previousScrollTopRef = useRef<number>(0);
+  const [unreadNewCount, setUnreadNewCount] = useState(0);
+
+  const oldestCursorDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const hasLoadedOlderHistoryRef = useRef(false);
+  const isFetchingOlderRef = useRef(false);
+  const pendingScrollAnchorRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
+  const pendingInitialSnapRef = useRef(false);
+  const activeRoomIdRef = useRef(activeRoomId);
+  activeRoomIdRef.current = activeRoomId;
+  const soundEnabledRef = useRef(Boolean(settings?.soundEnabled));
+  soundEnabledRef.current = Boolean(settings?.soundEnabled);
+  const initialMessageIdsRef = useRef<Set<string>>(new Set());
 
   const [reportTarget, setReportTarget] = useState<ChatMessage | null>(null);
   const [selectedProfileUser, setSelectedProfileUser] = useState<any | null>(null);
   const [viewingZoomImage, setViewingZoomImage] = useState<{ url: string; name?: string; size?: number } | null>(null);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
   const showScrollBottomRef = useRef(false);
+  const isNearBottomRef = useRef(true);
   const scrollRafRef = useRef<number | null>(null);
   const lastLoadOlderRef = useRef(0);
   const [memberNamesMap, setMemberNamesMap] = useState<Record<string, string>>({});
+
+  const roomMediaGallery = React.useMemo(() => {
+    return extractRoomMediaFromMessages(messages, {
+      roomId: activeRoomId,
+      currentUserUid: currentUser?.uid,
+      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn',
+      currentUserAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || null,
+      memberNamesMap,
+      memberMetaMap,
+    });
+  }, [messages, activeRoomId, currentUser?.uid, currentUser?.photoURL, userProfile?.displayName, userProfile?.customAvatarUrl, settings?.customAvatarUrl, memberNamesMap, memberMetaMap]);
 
   // Room Create & Join state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -160,7 +200,18 @@ export const MobileChatView: React.FC = () => {
   };
 
   const scrollToBottom = (smooth = true) => {
-    messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    setUnreadNewCount(0);
+    showScrollBottomRef.current = false;
+    setShowScrollBottom(false);
+    isNearBottomRef.current = true;
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior: smooth ? 'smooth' : 'auto',
+      });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
   };
 
   // Real-time member display names & avatars synchronization from presence and users collection
@@ -268,99 +319,214 @@ export const MobileChatView: React.FC = () => {
     }
   }, [rooms, activeRoomId]);
 
-  // Tải thêm 10 đoạn chat cũ hơn khi cuộn lên trên
-  const handleLoadOlderMessages = () => {
-    if (isLoadingOlder || !hasMoreOlder || !activeRoomId) return;
+  // Zero-jump scroll restoration BEFORE paint when prepending older messages
+  useLayoutEffect(() => {
     const el = messagesContainerRef.current;
-    if (el) {
-      previousScrollHeightRef.current = el.scrollHeight;
-      previousScrollTopRef.current = el.scrollTop;
-    }
+    if (!el || !pendingScrollAnchorRef.current) return;
+    const heightDiff = el.scrollHeight - pendingScrollAnchorRef.current.prevScrollHeight;
+    el.scrollTop = pendingScrollAnchorRef.current.prevScrollTop + heightDiff;
+    pendingScrollAnchorRef.current = null;
+  }, [olderMessages]);
+
+  // Instant bottom snap before paint when hydrating cache or switching to chat feed
+  useLayoutEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el || !pendingInitialSnapRef.current || recentMessages.length === 0) return;
+    el.scrollTop = el.scrollHeight;
+    pendingInitialSnapRef.current = false;
+  }, [recentMessages, activeRoomId, viewMode]);
+
+  // Cursor-based one-shot getDocs pagination for older history (never tears down live listener)
+  const handleLoadOlderMessages = async () => {
+    if (isFetchingOlderRef.current || !hasMoreOlder || !activeRoomId) return;
+    const cursorDoc = oldestCursorDocRef.current;
+    if (!cursorDoc) return;
+
+    const targetRoomId = activeRoomId;
+    isFetchingOlderRef.current = true;
     setIsLoadingOlder(true);
-    setMessageLimit((prev) => prev + 10);
+
+    try {
+      const messagesRef = collection(db, 'rooms', targetRoomId, 'messages');
+      const olderQuery = query(
+        messagesRef,
+        orderBy('createdAt', 'desc'),
+        startAfter(cursorDoc),
+        limit(OLDER_PAGE_BATCH_SIZE)
+      );
+      const snap = await getDocs(olderQuery);
+
+      if (activeRoomIdRef.current !== targetRoomId) return;
+
+      const olderBatch: ChatMessage[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data({ serverTimestamps: 'estimate' });
+        olderBatch.push({ id: docSnap.id, ...data } as ChatMessage);
+        initialMessageIdsRef.current.add(docSnap.id);
+      });
+
+      if (snap.docs.length > 0) {
+        oldestCursorDocRef.current = snap.docs[snap.docs.length - 1];
+      }
+      hasLoadedOlderHistoryRef.current = true;
+      setHasMoreOlder(snap.docs.length >= OLDER_PAGE_BATCH_SIZE);
+
+      if (olderBatch.length > 0) {
+        const el = messagesContainerRef.current;
+        if (el) {
+          pendingScrollAnchorRef.current = {
+            prevScrollHeight: el.scrollHeight,
+            prevScrollTop: el.scrollTop,
+          };
+        }
+        setOlderMessages((prev) => {
+          const map = new Map<string, ChatMessage>();
+          for (const m of prev) map.set(m.id, m);
+          for (const m of olderBatch) map.set(m.id, m);
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.warn('Mobile load older messages error:', err);
+    } finally {
+      isFetchingOlderRef.current = false;
+      if (activeRoomIdRef.current === targetRoomId) {
+        setIsLoadingOlder(false);
+      }
+    }
   };
 
-  // Listen to messages in active room (Tải 10 tin nhắn mới nhất, cuộn lên để xem tiếp 10 tin nhắn cũ)
+  // Single stable live listener + instant cache hydration on room switch
   useEffect(() => {
     if (!currentUser || !activeRoomId) return;
 
+    const targetRoomId = activeRoomId;
     isFirstLoadRef.current = true;
-    setRecentMessages([]);
-    setOlderMessages([]);
+    initialMessageIdsRef.current.clear();
+    oldestCursorDocRef.current = null;
+    hasLoadedOlderHistoryRef.current = false;
+    isFetchingOlderRef.current = false;
+    pendingScrollAnchorRef.current = null;
     setIsLoadingOlder(false);
+    setUnreadNewCount(0);
+    setShowScrollBottom(false);
+    showScrollBottomRef.current = false;
+    isNearBottomRef.current = true;
+    setOlderMessages([]);
 
-    const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
-    
-    // Tải theo messageLimit (bắt đầu là 10, tăng dần +10 khi cuộn lên trên)
+    const cached = getCachedRoomMessages(targetRoomId);
+    if (cached && cached.messages.length > 0) {
+      cached.messages.forEach((m) => initialMessageIdsRef.current.add(m.id));
+      setRecentMessages(cached.messages);
+      setHasMoreOlder(cached.hasMore);
+      setIsInitialLoadingMessages(false);
+      pendingInitialSnapRef.current = true;
+    } else {
+      setRecentMessages([]);
+      setHasMoreOlder(false);
+      setIsInitialLoadingMessages(true);
+      pendingInitialSnapRef.current = false;
+    }
+
+    const messagesRef = collection(db, 'rooms', targetRoomId, 'messages');
     const q = query(
-      messagesRef, 
+      messagesRef,
       orderBy('createdAt', 'desc'),
-      limit(messageLimit)
+      limit(INITIAL_LIVE_PAGE_SIZE)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: ChatMessage[] = [];
-      let hasExternal = false;
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        if (activeRoomIdRef.current !== targetRoomId) return;
 
-      snapshot.docs.forEach((docSnap) => {
-        const data = docSnap.data();
-        const msg = { id: docSnap.id, ...data } as ChatMessage;
-        list.push(msg);
-        if (msg.senderId !== currentUser?.uid && !isFirstLoadRef.current) {
-          hasExternal = true;
-        }
-      });
+        const list: ChatMessage[] = [];
+        const confirmedTempIds = new Set<string>();
+        let externalCount = 0;
 
-      // Nếu số lượng trả về bằng messageLimit thì nghĩa là còn tin nhắn cũ hơn
-      setHasMoreOlder(snapshot.docs.length >= messageLimit);
-
-      // Sắp xếp thứ tự thời gian tăng dần để hiển thị từ trên xuống dưới
-      list.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
-
-      setRecentMessages(list);
-
-      if (hasExternal && settings?.soundEnabled) {
-        playReceiveSound();
-      }
-
-      // Giữ nguyên vị trí mắt nhìn khi nạp thêm 10 tin nhắn cũ
-      if (isLoadingOlder) {
-        requestAnimationFrame(() => {
-          const el = messagesContainerRef.current;
-          if (el) {
-            const heightDiff = el.scrollHeight - previousScrollHeightRef.current;
-            el.scrollTop = previousScrollTopRef.current + heightDiff;
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data({ serverTimestamps: 'estimate' });
+          const msg = { id: docSnap.id, ...data } as ChatMessage;
+          list.push(msg);
+          if (msg.clientTempId) {
+            confirmedTempIds.add(msg.clientTempId);
           }
-          setIsLoadingOlder(false);
+          if (isFirstLoadRef.current) {
+            initialMessageIdsRef.current.add(docSnap.id);
+          } else if (!initialMessageIdsRef.current.has(docSnap.id)) {
+            initialMessageIdsRef.current.add(docSnap.id);
+            if (msg.senderId !== currentUser?.uid) {
+              externalCount += 1;
+            }
+          }
         });
-        return;
-      }
 
-      if (isFirstLoadRef.current) {
+        if (!hasLoadedOlderHistoryRef.current) {
+          oldestCursorDocRef.current =
+            snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+          setHasMoreOlder(snapshot.docs.length >= INITIAL_LIVE_PAGE_SIZE);
+        }
+
+        list.sort(
+          (a, b) =>
+            new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+        );
+
+        setRecentMessages((prev) => {
+          const pendingOptimistic = prev.filter(
+            (m) => m.id.startsWith('temp-') && !confirmedTempIds.has(m.id)
+          );
+          if (pendingOptimistic.length === 0) return list;
+          const combined = [...list, ...pendingOptimistic];
+          combined.sort(
+            (a, b) =>
+              new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime()
+          );
+          return combined;
+        });
+
+        setCachedRoomMessages(
+          targetRoomId,
+          list,
+          snapshot.docs.length >= INITIAL_LIVE_PAGE_SIZE
+        );
+
+        if (externalCount > 0 && soundEnabledRef.current) {
+          playReceiveSound();
+        }
+
+        const wasFirst = isFirstLoadRef.current;
         isFirstLoadRef.current = false;
-        setTimeout(() => scrollToBottom(false), 50);
-      } else {
-        const el = messagesContainerRef.current;
-        if (el) {
-          const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 250;
-          if (isNearBottom) {
-            setTimeout(() => scrollToBottom(true), 80);
+        setIsInitialLoadingMessages(false);
+
+        if (wasFirst) {
+          pendingInitialSnapRef.current = true;
+        } else {
+          const latestMsg = list.length > 0 ? list[list.length - 1] : null;
+          if (latestMsg?.senderId === currentUser?.uid || isNearBottomRef.current) {
+            setUnreadNewCount(0);
+            requestAnimationFrame(() => scrollToBottom(true));
+          } else if (externalCount > 0) {
+            setUnreadNewCount((prev) => prev + externalCount);
+            showScrollBottomRef.current = true;
+            setShowScrollBottom(true);
           }
         }
+      },
+      (err) => {
+        console.warn('Mobile room messages listener notice:', err);
+        setIsInitialLoadingMessages(false);
       }
-    });
+    );
 
     return () => unsubscribe();
-  }, [activeRoomId, currentUser?.uid, messageLimit, settings?.soundEnabled]);
+  }, [activeRoomId, currentUser?.uid]);
 
-  // Auto-scroll and reset when entering room or switching mode
+  // Snap to bottom when returning to chat feed from rooms list
   useEffect(() => {
     if (viewMode === 'chat_feed') {
       setIsLoadingOlder(false);
-      const timer = setTimeout(() => {
-        scrollToBottom(false);
-      }, 80);
-      return () => clearTimeout(timer);
+      pendingInitialSnapRef.current = true;
     }
   }, [viewMode, activeRoomId]);
 
@@ -408,8 +574,11 @@ export const MobileChatView: React.FC = () => {
     setInputText('');
     await yieldToMain();
 
-    // Moderate text: filter profanity
-    const profanityResult = censorProfanity(rawTextOriginal);
+    // Moderate text: filter profanity ONLY in public rooms
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+    const profanityResult = isPublicRoom
+      ? censorProfanity(rawTextOriginal)
+      : { cleanText: rawTextOriginal, hasProfanity: false, matchCount: 0, detectedList: [] };
     const sanitizedText = profanityResult.cleanText;
     const hasProfanity = profanityResult.hasProfanity;
     const detectedList = profanityResult.detectedList || [];
@@ -422,8 +591,8 @@ export const MobileChatView: React.FC = () => {
       setTimeout(() => setModerationWarning(null), 5000);
     }
 
-    // Background AI safety audit (non-blocking)
-    if (sanitizedText && sanitizedText.length >= 2) {
+    // Background AI safety audit (non-blocking, only in public rooms to save tokens)
+    if (sanitizedText && sanitizedText.length >= 2 && isPublicRoom) {
       checkContentWithAI(sanitizedText, currentUser?.email || undefined, currentUser?.uid)
         .then(aiCheck => {
           if (aiCheck?.isFlagged && (aiCheck.severity === 'high' || aiCheck.severity === 'critical')) {
@@ -456,6 +625,7 @@ export const MobileChatView: React.FC = () => {
       detectedProfanity: detectedList,
       isDevMessage: isDev,
       createdAt: nowIso,
+      clientTempId: tempId,
     };
 
     // 2. Play sound immediately & optimistic render (0ms response)
@@ -500,37 +670,115 @@ export const MobileChatView: React.FC = () => {
 
       let fileUrl = '';
       let thumb: string | null = null;
+      const isGif = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+      const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+      const fileIsImage = isImageFile(file);
+      const fileIsVideo = isVideoFile(file);
+      let imageAlreadyVerified = !isPublicRoom || !fileIsImage;
+      let videoAlreadyVerified = !isPublicRoom || !fileIsVideo;
 
-      if (isImageFile(file)) {
-        try {
-          thumb = await generateImageThumbnail(file, 480, 0.75);
-          if (thumb) {
-            const imgMod = await moderateUploadedImage(thumb, file.name);
-            if (!imgMod.safe) {
-              playShieldAlertSound();
-              setModerationWarning(imgMod.reason || `🚫 Ảnh "${file.name}" đã bị hủy do vi phạm tiêu chuẩn.`);
-              setTimeout(() => setModerationWarning(null), 7000);
-              setIsUploading(false);
-              return;
+      const precheckPromise = (async () => {
+        let localThumb: string | null = null;
+        if (fileIsImage) {
+          try {
+            localThumb = await generateImageThumbnail(file, 480, 0.75);
+            if (localThumb && isPublicRoom) {
+              const imgMod = await moderateUploadedImage(localThumb, file.name);
+              if (!imgMod.safe) {
+                return { blocked: true, reason: imgMod.reason, localThumb, verified: false };
+              }
+              return { blocked: false, localThumb, verified: true };
             }
-          }
-        } catch {}
+          } catch {}
+        } else if (fileIsVideo && isPublicRoom) {
+          try {
+            const frames = await extractVideoModerationFrames(file, 4);
+            if (frames.length > 0) {
+              const vidMod = await moderateUploadedVideo(frames, file.name);
+              if (!vidMod.safe) {
+                return { blocked: true, reason: vidMod.reason, localThumb: null, verified: false };
+              }
+              return { blocked: false, localThumb: null, verified: true };
+            }
+          } catch {}
+        }
+        return { blocked: false, localThumb, verified: !isPublicRoom || (!fileIsImage && !fileIsVideo) };
+      })();
+
+      const uploadPromise = (async () => {
+        try {
+          const uploaded = await uploadFileToServer(file, (pct) => {
+            setUploadPercent(pct);
+          });
+          return {
+            url: (isGif || fileIsVideo) ? (uploaded.viewUrl || uploaded.url) : uploaded.url,
+            thumb: !isGif ? uploaded.thumbnail : undefined,
+            isFallback: false
+          };
+        } catch {
+          const fallback = await createClientFallbackFileInfo(file);
+          return {
+            url: fallback.viewUrl || fallback.url,
+            thumb: isGif ? (await fileToBase64(file).catch(() => fallback.thumbnail || null)) : (fallback.thumbnail || null),
+            isFallback: true
+          };
+        }
+      })();
+
+      const [precheck, uploadedRes] = await Promise.all([precheckPromise, uploadPromise]);
+      fileUrl = uploadedRes.url;
+      thumb = uploadedRes.thumb || precheck.localThumb || null;
+
+      if (precheck.blocked) {
+        if (!uploadedRes.isFallback && fileUrl) deleteServerUploadedFile(fileUrl);
+        playShieldAlertSound();
+        setModerationWarning(
+          precheck.reason ||
+          (fileIsVideo
+            ? `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`
+            : `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`)
+        );
+        setTimeout(() => setModerationWarning(null), 9000);
+        setIsUploading(false);
+        return;
       }
 
-      try {
-        const uploaded = await uploadFileToServer(file, (pct) => {
-          setUploadPercent(pct);
-        });
-        fileUrl = uploaded.url;
-        if (uploaded.thumbnail) thumb = uploaded.thumbnail;
-      } catch {
-        const fallback = await createClientFallbackFileInfo(file);
-        fileUrl = fallback.url;
-        thumb = fallback.thumbnail || null;
+      if (fileIsImage) imageAlreadyVerified = precheck.verified;
+      if (fileIsVideo) videoAlreadyVerified = precheck.verified;
+
+      if (isPublicRoom && fileIsImage && !imageAlreadyVerified) {
+        const imgMod = await moderateUploadedImage(thumb || fileUrl || '', file.name);
+        if (!imgMod.safe) {
+          deleteServerUploadedFile(fileUrl);
+          playShieldAlertSound();
+          setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setTimeout(() => setModerationWarning(null), 9000);
+          setIsUploading(false);
+          return;
+        }
+      } else if (isPublicRoom && fileIsVideo && !videoAlreadyVerified) {
+        const vidMod = await moderateUploadedVideo([], file.name, fileUrl);
+        if (!vidMod.safe) {
+          deleteServerUploadedFile(fileUrl);
+          playShieldAlertSound();
+          setModerationWarning(vidMod.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setTimeout(() => setModerationWarning(null), 9000);
+          setIsUploading(false);
+          return;
+        }
       }
 
+      // Never overwrite animated GIF URL with a static single-frame JPEG thumbnail
       const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
-      const safeThumb = (thumb && thumb.length < 700000) ? thumb : '';
+      let safeThumb = (thumb && thumb.length < 700000) ? thumb : '';
+      if (isGif) {
+        if (safeUrl) {
+          safeThumb = '';
+        } else if (file.size <= 600 * 1024) {
+          const rawGif = await fileToBase64(file).catch(() => '');
+          safeThumb = rawGif.length < 700000 ? rawGif : safeThumb;
+        }
+      }
       const isDev = isDevUser(currentUser.email);
 
       const payload = cleanFirestoreObject({
@@ -541,10 +789,10 @@ export const MobileChatView: React.FC = () => {
         senderDevice: settings?.deviceName || 'Điện thoại',
         senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
         senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
-        text: isImageFile(file) ? 'Đã gửi một hình ảnh' : `Đã gửi tệp: ${file.name}`,
+        text: fileIsImage ? (isGif ? 'Đã gửi một ảnh GIF' : 'Đã gửi một hình ảnh') : `Đã gửi tệp: ${file.name}`,
         fileName: file.name,
         fileSize: file.size,
-        fileType: file.type || 'application/octet-stream',
+        fileType: file.type || (isGif ? 'image/gif' : 'application/octet-stream'),
         fileUrl: safeUrl,
         fileData: safeThumb,
         isDevMessage: isDev,
@@ -571,8 +819,27 @@ export const MobileChatView: React.FC = () => {
     setIsCloudPickerOpen(false);
     if (!chosen.length || !currentUser) return;
 
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+    let sentAny = false;
+    const blockedNames: string[] = [];
+
     for (const cf of chosen) {
       const isImg = isImageFile(cf);
+      const isVid = isVideoFile(cf);
+      if (isPublicRoom && isImg) {
+        const imgMod = await moderateUploadedImage(cf.thumbnail || cf.viewUrl || cf.url || '', cf.name);
+        if (!imgMod.safe) {
+          blockedNames.push(cf.name);
+          continue;
+        }
+      } else if (isPublicRoom && isVid) {
+        const vidMod = await moderateUploadedVideo([], cf.name, cf.viewUrl || cf.url || '');
+        if (!vidMod.safe) {
+          blockedNames.push(cf.name);
+          continue;
+        }
+      }
+
       const isDev = isDevUser(currentUser.email);
 
       const payload = cleanFirestoreObject({
@@ -583,7 +850,7 @@ export const MobileChatView: React.FC = () => {
         senderDevice: settings?.deviceName || 'Điện thoại',
         senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
         senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
-        text: isImg ? (isEn ? 'Shared an image from Cloud Drive' : 'Đã chia sẻ một hình ảnh từ Kho Cloud') : (isEn ? `Shared file from Cloud: ${cf.name}` : `Đã chia sẻ tệp từ Kho Cloud: ${cf.name}`),
+        text: isImg ? pick('Đã chia sẻ một hình ảnh từ Kho Cloud', 'Shared an image from Cloud Drive', '从云盘分享了一张图片') : pick(`Đã chia sẻ tệp từ Kho Cloud: ${cf.name}`, `Shared file from Cloud: ${cf.name}`, `从云盘分享了文件：${cf.name}`),
         fileName: cf.name,
         fileSize: cf.size,
         fileType: cf.type || 'application/octet-stream',
@@ -595,10 +862,19 @@ export const MobileChatView: React.FC = () => {
       });
 
       await addDoc(collection(db, 'rooms', activeRoomId, 'messages'), payload);
+      sentAny = true;
     }
 
-    if (settings?.soundEnabled) playSendSound();
-    scrollToBottom(true);
+    if (blockedNames.length > 0) {
+      playShieldAlertSound();
+      setModerationWarning(`🚫 Cảnh báo: AI đã phát hiện và xóa ngay ${blockedNames.length} ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") khỏi Đại Sảnh Toàn Cầu!`);
+      setTimeout(() => setModerationWarning(null), 9000);
+    }
+
+    if (sentAny) {
+      if (settings?.soundEnabled) playSendSound();
+      scrollToBottom(true);
+    }
   };
 
   // Clipboard Paste Support on Mobile (Images and Text)
@@ -652,6 +928,7 @@ export const MobileChatView: React.FC = () => {
   const handleDeleteMessage = async (msgId: string) => {
     setRecentMessages(prev => prev.filter(m => m.id !== msgId));
     setOlderMessages(prev => prev.filter(m => m.id !== msgId));
+    removeCachedRoomMessage(activeRoomId, msgId);
 
     try {
       await deleteDoc(doc(db, 'rooms', activeRoomId, 'messages', msgId));
@@ -777,12 +1054,24 @@ export const MobileChatView: React.FC = () => {
       if (!el) return;
 
       const now = Date.now();
-      if (el.scrollTop <= 80 && hasMoreOlder && !isLoadingOlder && now - lastLoadOlderRef.current > 400) {
+      if (
+        el.scrollTop <= 160 &&
+        hasMoreOlder &&
+        !isFetchingOlderRef.current &&
+        now - lastLoadOlderRef.current > 350
+      ) {
         lastLoadOlderRef.current = now;
         handleLoadOlderMessages();
       }
 
-      const isFarFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight > 280;
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const nearBottom = distanceToBottom < 140;
+      isNearBottomRef.current = nearBottom;
+      if (nearBottom) {
+        setUnreadNewCount(0);
+      }
+
+      const isFarFromBottom = distanceToBottom > 280;
       if (showScrollBottomRef.current !== isFarFromBottom) {
         showScrollBottomRef.current = isFarFromBottom;
         setShowScrollBottom(isFarFromBottom);
@@ -820,19 +1109,19 @@ export const MobileChatView: React.FC = () => {
               type="button"
               onClick={() => setShowJoinModal(true)}
               className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center gap-1 border border-slate-700 active:scale-95 transition-all"
-              title={isEn ? "Enter Room Code" : "Nhập mã phòng"}
+              title={pick("Nhập mã phòng", "Enter Room Code", "输入房间代码")}
             >
               <Key className="w-3 h-3 text-amber-400" />
-              <span>{isEn ? "Join Code" : "Nhập mã"}</span>
+              <span>{pick("Nhập mã", "Join Code", "输入代码")}</span>
             </button>
             <button
               type="button"
               onClick={() => setShowCreateModal(true)}
               className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm active:scale-95 transition-all"
-              title={isEn ? "Create Room" : "Tạo phòng mới"}
+              title={pick("Tạo phòng mới", "Create Room", "创建房间")}
             >
               <Plus className="w-3 h-3" />
-              <span>{isEn ? "Create Room" : "Tạo phòng"}</span>
+              <span>{pick("Tạo phòng", "Create Room", "创建房间")}</span>
             </button>
           </div>
         </div>
@@ -845,7 +1134,7 @@ export const MobileChatView: React.FC = () => {
               type="text"
               value={roomSearchQuery}
               onChange={(e) => setRoomSearchQuery(e.target.value)}
-              placeholder={isEn ? "Search chat rooms by name or ID code..." : "Tìm kiếm phòng chat theo tên hoặc mã ID..."}
+              placeholder={pick("Tìm kiếm phòng chat theo tên hoặc mã ID...", "Search chat rooms by name or ID code...", "按名称或 ID 代码搜索聊天室...")}
               className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 text-[11px] text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -943,7 +1232,7 @@ export const MobileChatView: React.FC = () => {
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <MessagesSquare className="w-5 h-5 text-emerald-400" />
-                  {isEn ? 'Create new chat room' : 'Tạo phòng chat mới'}
+                  {pick('Tạo phòng chat mới', 'Create new chat room', '创建新聊天室')}
                 </h3>
                 <button
                   type="button"
@@ -971,7 +1260,7 @@ export const MobileChatView: React.FC = () => {
                   <div className="flex-1 space-y-2">
                     <label className="cursor-pointer px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white border border-slate-700 inline-flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5" />
-                      {isEn ? 'Upload photo' : 'Tải ảnh đại diện'}
+                      {pick('Tải ảnh đại diện', 'Upload photo', '上传头像')}
                       <input 
                         type="file" 
                         accept="image/*" 
@@ -990,7 +1279,7 @@ export const MobileChatView: React.FC = () => {
                     </label>
 
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-400">{isEn ? 'Background:' : 'Màu nền:'}</span>
+                      <span className="text-[10px] text-slate-400">{pick('Màu nền:', 'Background:', '背景色：')}</span>
                       {ROOM_PRESET_COLORS.map((col) => (
                         <button
                           key={col}
@@ -1008,14 +1297,14 @@ export const MobileChatView: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    {isEn ? 'ROW 1: ROOM NAME' : 'Tên phòng'}
+                    {pick('Tên phòng', 'ROW 1: ROOM NAME', '房间名称')}
                   </label>
                   <input
                     type="text"
                     required
                     value={newRoomName}
                     onChange={(e) => setNewRoomName(e.target.value)}
-                    placeholder={isEn ? 'e.g. Project Team, Best Friends...' : 'Nhập tên phòng...'}
+                    placeholder={pick('Nhập tên phòng...', 'e.g. Project Team, Best Friends...', '例如：项目组、好友群...')}
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1025,11 +1314,11 @@ export const MobileChatView: React.FC = () => {
                     <Lock className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                     <div>
                       <p className="font-bold text-white flex items-center gap-1.5">
-                        <span>{isEn ? 'Private Secure Room (Private Room)' : 'Phòng Riêng Tư Bảo Mật'}</span>
-                        <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">{isEn ? 'Default' : 'Mặc định'}</span>
+                        <span>{pick('Phòng Riêng Tư Bảo Mật', 'Private Secure Room (Private Room)', '私密安全房间')}</span>
+                        <span className="px-1.5 py-0.2 bg-purple-500/20 text-purple-300 text-[10px] rounded border border-purple-500/30">{pick('Mặc định', 'Default', '默认')}</span>
                       </p>
                       <p className="text-[11px] text-purple-300/80 mt-0.5 leading-snug">
-                        {isEn ? 'The system will generate a unique 6-digit access code. Others can only join when you share this code.' : 'Tự động tạo mã truy cập 6 ký tự. Chỉ thành viên có mã mới vào được phòng.'}
+                        {pick('Tự động tạo mã truy cập 6 ký tự. Chỉ thành viên có mã mới vào được phòng.', 'The system will generate a unique 6-digit access code. Others can only join when you share this code.', '系统将自动生成 6 位访问代码，仅持有该代码的成员方可加入。')}
                       </p>
                     </div>
                   </div>
@@ -1040,7 +1329,7 @@ export const MobileChatView: React.FC = () => {
                   disabled={!newRoomName.trim()}
                   className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-bold text-xs shadow-md"
                 >
-                  {isEn ? 'Create room now' : 'Tạo phòng ngay'}
+                  {pick('Tạo phòng ngay', 'Create room now', '立即创建房间')}
                 </button>
               </form>
             </div>
@@ -1054,7 +1343,7 @@ export const MobileChatView: React.FC = () => {
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Key className="w-5 h-5 text-amber-400" />
-                  {isEn ? 'Enter Room ID Code' : 'Nhập mã ID phòng'}
+                  {pick('Nhập mã ID phòng', 'Enter Room ID Code', '输入房间 ID 代码')}
                 </h3>
                 <button
                   type="button"
@@ -1072,7 +1361,7 @@ export const MobileChatView: React.FC = () => {
                     required
                     value={joinCodeInput}
                     onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
-                    placeholder={isEn ? 'Enter 6-character code (e.g. ABCD12)...' : 'Nhập mã 6 ký tự (VD: ABCD12)...'}
+                    placeholder={pick('Nhập mã 6 ký tự (VD: ABCD12)...', 'Enter 6-character code (e.g. ABCD12)...', '输入 6 位代码（如 ABCD12）...')}
                     className="w-full px-3.5 py-3 text-center font-mono uppercase tracking-widest text-base font-bold bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-amber-500"
                   />
                   {joinError && (
@@ -1085,7 +1374,7 @@ export const MobileChatView: React.FC = () => {
                   disabled={!joinCodeInput.trim()}
                   className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs shadow-md"
                 >
-                  {isEn ? 'Join Room' : 'Tham gia phòng'}
+                  {pick('Tham gia phòng', 'Join Room', '加入房间')}
                 </button>
               </form>
             </div>
@@ -1193,20 +1482,20 @@ export const MobileChatView: React.FC = () => {
 
           return (
             <>
-              {/* 10-message pagination controls at top */}
+              {/* Discord / Zalo / Messenger smooth history status bar */}
               {isLoadingOlder ? (
-                <div className="py-2.5 flex items-center justify-center text-xs text-slate-400 gap-2 select-none animate-pulse">
+                <div className="py-2 flex items-center justify-center text-xs text-slate-400 gap-2 select-none">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
                   <span>{t('chat.loading_older')}</span>
                 </div>
               ) : hasMoreOlder ? (
-                <div className="py-2 flex items-center justify-center select-none">
+                <div className="py-1.5 flex items-center justify-center select-none">
                   <button
                     type="button"
                     onClick={handleLoadOlderMessages}
-                    className="px-3 py-1 rounded-full bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/80 text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group cursor-pointer"
+                    className="px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700/70 text-[10px] font-medium text-slate-300 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <History className="w-3 h-3 text-emerald-400 group-hover:-rotate-45 transition-transform" />
+                    <History className="w-3 h-3 text-emerald-400" />
                     <span>{t('chat.load_older_10')}</span>
                   </button>
                 </div>
@@ -1217,8 +1506,17 @@ export const MobileChatView: React.FC = () => {
                 </div>
               ) : null}
 
-              {/* Empty State */}
-              {visibleMessages.length === 0 && (
+              {/* Shimmer Skeleton on Uncached Room Initial Fetch */}
+              {isInitialLoadingMessages && visibleMessages.length === 0 ? (
+                <div className="py-3 space-y-3 animate-pulse">
+                  {[0, 1, 2, 3].map((row) => (
+                    <div key={row} className={`flex flex-col ${row % 2 === 1 ? 'items-end' : 'items-start'} gap-1`}>
+                      <div className="h-2.5 w-20 rounded bg-slate-800" />
+                      <div className={`h-8 rounded-xl bg-slate-800/70 ${row % 2 === 0 ? 'w-52' : 'w-40'}`} />
+                    </div>
+                  ))}
+                </div>
+              ) : visibleMessages.length === 0 ? (
                 <div className="h-44 flex flex-col items-center justify-center text-center p-4 space-y-2 text-slate-500">
                   <div className="w-10 h-10 rounded-xl bg-slate-800 text-emerald-400 flex items-center justify-center shadow-inner">
                     <MessagesSquare className="w-5 h-5" />
@@ -1226,11 +1524,11 @@ export const MobileChatView: React.FC = () => {
                   <div>
                     <p className="text-xs font-semibold text-slate-300">{t('chat.empty')}</p>
                     <p className="text-[10px] text-slate-500 max-w-xs mt-0.5">
-                      {isEn ? 'Send a message or attach a file below!' : 'Gửi tin nhắn hoặc đính kèm ảnh bên dưới để bắt đầu!'}
+                      {pick('Gửi tin nhắn hoặc đính kèm ảnh bên dưới để bắt đầu!', 'Send a message or attach a file below!', '在下方发送消息或附加文件即可开始！')}
                     </p>
                   </div>
                 </div>
-              )}
+              ) : null}
 
               {/* Messages with Group Date Dividers */}
               {visibleMessages.map((msg, index) => {
@@ -1240,18 +1538,66 @@ export const MobileChatView: React.FC = () => {
                   ? (userProfile?.displayName || currentUser?.displayName || settings?.deviceName || 'Bạn')
                   : (memberNamesMap[msg.senderId] || memberNamesMap[msg.senderDevice] || msg.senderName);
 
-                const isImage = Boolean(
-                  (msg.fileData && msg.fileData.startsWith('data:image')) ||
-                  (msg.fileType && msg.fileType.startsWith('image/')) ||
-                  (msg.fileName && msg.fileName.match(/\.(jpg|jpeg|png|webp|gif|heic|heif)$/i))
-                );
-                const isVideo = Boolean(
-                  (msg.fileData && msg.fileData.startsWith('data:video')) ||
-                  (msg.fileType && msg.fileType.startsWith('video/')) ||
-                  (msg.fileName && msg.fileName.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)$/i))
-                );
-                const mediaSrc = msg.fileData || msg.fileUrl || '';
-                const imgSrc = isImage ? mediaSrc : '';
+                const rawAttachments: Array<{ name?: string; size?: number; type?: string; data?: string; url?: string }> =
+                  Array.isArray((msg as any).attachments) && (msg as any).attachments.length > 0
+                    ? (msg as any).attachments
+                    : (msg.fileUrl || msg.fileData || msg.fileName)
+                    ? [{ name: msg.fileName, size: msg.fileSize, type: msg.fileType, data: msg.fileData, url: msg.fileUrl }]
+                    : [];
+
+                const normalizedMedia = rawAttachments.map((att, attIdx) => {
+                  const attName = att.name || msg.fileName || 'file';
+                  const attType = att.type || msg.fileType || '';
+                  const attUrl = att.url || '';
+                  const attData = att.data || '';
+                  const attSize = att.size ?? msg.fileSize;
+                  const attIsGif = isGifFile(attName || attUrl, attType);
+                  const attIsVideo = Boolean(
+                    (attData && attData.startsWith('data:video')) ||
+                    (attType && attType.startsWith('video/')) ||
+                    (attName && attName.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)$/i))
+                  );
+                  const attIsImage = !attIsVideo && Boolean(
+                    attIsGif ||
+                    (attData && attData.startsWith('data:image')) ||
+                    (attType && attType.startsWith('image/')) ||
+                    (attName && attName.match(/\.(jpg|jpeg|png|webp|gif|heic|heif|avif)$/i))
+                  );
+                  const rawFileViewUrl = attUrl
+                    ? (attUrl.includes('/api/telegram/download')
+                        ? (attUrl.includes('inline=true') ? attUrl : `${attUrl}${attUrl.includes('?') ? '&' : '?'}inline=true`)
+                        : attUrl.replace('/api/files/download/', '/api/files/view/'))
+                    : '';
+                  const imgSrc = attIsImage
+                    ? (attIsGif
+                        ? (rawFileViewUrl || attUrl || (attData?.startsWith('data:image/gif') ? attData : '') || attData || '')
+                        : (attData || rawFileViewUrl || attUrl || ''))
+                    : '';
+                  const videoPoster = attData && attData.startsWith('data:image/') ? attData : undefined;
+                  const videoSrc = attIsVideo
+                    ? (rawFileViewUrl ||
+                       (attUrl && !attUrl.startsWith('data:image/') ? attUrl : '') ||
+                       (attData && attData.startsWith('data:video/') ? attData : ''))
+                    : '';
+                  const mediaDownloadUrl = attUrl
+                    ? attUrl.replace('/api/files/view/', '/api/files/download/').replace(/[?&]inline=true/g, '')
+                    : (videoSrc || imgSrc || '');
+                  return {
+                    key: `${msg.id || index}_att_${attIdx}`,
+                    name: attName,
+                    size: attSize,
+                    isGif: attIsGif,
+                    isImage: attIsImage,
+                    isVideo: attIsVideo,
+                    rawFileViewUrl,
+                    imgSrc,
+                    videoPoster,
+                    videoSrc,
+                    mediaDownloadUrl,
+                    rawUrl: attUrl || attData || ''
+                  };
+                });
+
                 const canDelete = isMe || activeRoom?.ownerId === currentUser?.uid || activeRoom?.createdBy === currentUser?.uid || isDevUser(currentUser?.email);
 
                 // Date separator logic
@@ -1260,7 +1606,7 @@ export const MobileChatView: React.FC = () => {
                 const showDateHeader = index === 0 || currentDateKey !== prevDateKey;
 
                 return (
-                  <React.Fragment key={msg.id ? `${msg.id}_${index}` : index}>
+                  <React.Fragment key={msg.id || `m_${index}`}>
                     {/* Group Date Timeline Divider */}
                     {showDateHeader && (
                       <div className="flex items-center justify-center my-2 select-none">
@@ -1360,72 +1706,122 @@ export const MobileChatView: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Image Preview with in-app zoom modal */}
-                        {isImage && imgSrc && (
-                          <div className="rounded-xl overflow-hidden mb-1.5 border border-black/20 relative group/img cursor-pointer">
-                            <img
-                              src={imgSrc}
-                              alt={msg.fileName || 'Attached photo'}
-                              className="w-full max-h-64 object-cover active:opacity-90"
-                              onClick={() => setViewingZoomImage({ url: imgSrc, name: msg.fileName || 'Hình ảnh', size: msg.fileSize })}
-                            />
-                            <div 
-                              className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity"
-                              onClick={() => setViewingZoomImage({ url: imgSrc, name: msg.fileName || 'Hình ảnh', size: msg.fileSize })}
-                            >
-                              <span className="px-2 py-1 rounded-lg bg-black/60 text-white text-[10px] font-semibold flex items-center gap-1">
-                                <Eye className="w-3 h-3" /> Phóng to
-                              </span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Video Player */}
-                        {isVideo && mediaSrc && (
-                          <div className="rounded-xl overflow-hidden mb-1.5 border border-black/20 bg-black">
-                            <video
-                              src={mediaSrc}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="w-full max-h-64 object-contain rounded-t-xl"
-                            />
-                            <div className="p-2 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between gap-2">
-                              <div className="min-w-0 flex items-center gap-1.5">
-                                <Video className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="text-[11px] font-semibold text-white truncate max-w-[170px]">{msg.fileName || 'Video'}</p>
-                                  <p className="text-[9px] text-slate-400 font-mono">{formatFileSize(msg.fileSize)} • Video</p>
+                        {/* Render all normalized attachments (Images, Videos, Documents) */}
+                        {normalizedMedia.map((media, mediaIdx) => {
+                          const senderMeta = memberMetaMap[msg.senderId] || memberMetaMap[msg.senderDevice];
+                          const effectiveSenderAvatar = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
+                          if (media.isImage && media.imgSrc) {
+                            const viewerImgUrl = media.rawFileViewUrl || media.imgSrc;
+                            return (
+                              <div
+                                key={media.key}
+                                onClick={() => {
+                                  if (!viewerImgUrl) return;
+                                  openMediaInLargeViewer({
+                                    source: 'chat',
+                                    roomId: activeRoomId,
+                                    roomMedia: roomMediaGallery.unifiedMedia,
+                                    activeItem: {
+                                      id: `${msg.id}_i_${mediaIdx}`,
+                                      name: media.name || 'Hình ảnh',
+                                      title: media.name || 'Hình ảnh',
+                                      src: viewerImgUrl,
+                                      downloadUrl: media.mediaDownloadUrl || media.rawUrl,
+                                      thumbnail: media.imgSrc || null,
+                                      size: media.size,
+                                      type: 'image',
+                                      mimeType: media.isGif ? 'image/gif' : 'image/jpeg',
+                                      isGif: media.isGif,
+                                      senderName: isMe ? 'Bạn' : senderLiveName,
+                                      senderAvatar: effectiveSenderAvatar || null,
+                                      createdAt: msg.createdAt,
+                                      roomId: activeRoomId,
+                                    },
+                                  });
+                                }}
+                                className="rounded-xl overflow-hidden mb-1.5 border border-black/20 relative group/img cursor-pointer"
+                              >
+                                <ChatMediaImage
+                                  src={media.imgSrc}
+                                  backupSrc={media.rawUrl && media.rawUrl !== media.imgSrc ? media.rawUrl : undefined}
+                                  alt={media.name || 'Attached photo'}
+                                  isGif={media.isGif}
+                                  minHeightClass="min-h-[120px] min-w-[160px]"
+                                  className="w-full max-h-64 object-cover active:opacity-90"
+                                  onDownload={(e) => {
+                                    e.stopPropagation();
+                                    downloadFileSafely(media.mediaDownloadUrl || media.rawUrl, media.name || 'image');
+                                  }}
+                                />
+                                {media.isGif && (
+                                  <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[9px] font-bold text-emerald-300 border border-emerald-500/40 pointer-events-none z-10">
+                                    GIF
+                                  </span>
+                                )}
+                                <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity pointer-events-none z-10">
+                                  <span className="px-2 py-1 rounded-lg bg-black/60 text-white text-[10px] font-semibold flex items-center gap-1">
+                                    <Eye className="w-3 h-3" /> Xem lớn
+                                  </span>
                                 </div>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => downloadFileSafely(mediaSrc, msg.fileName || 'video.mp4')}
-                                className="p-1 rounded-lg bg-white/20 hover:bg-emerald-600 text-white cursor-pointer"
-                                title="Tải video"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* File Download Action for other non-media files */}
-                        {msg.fileName && !isImage && !isVideo && (
-                          <div className="p-2.5 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="font-bold truncate">{msg.fileName}</p>
-                              <p className="text-[10px] opacity-75">{formatFileSize(msg.fileSize)}</p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => downloadFileSafely(msg.fileUrl || msg.fileData || '', msg.fileName || 'file')}
-                              className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white cursor-pointer"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        )}
+                            );
+                          }
+                          if (media.isVideo && media.videoSrc) {
+                            return (
+                              <div key={media.key} className="mb-1.5">
+                                <ChatInlineVideoPlayer
+                                  src={media.videoSrc}
+                                  downloadUrl={media.mediaDownloadUrl}
+                                  poster={media.videoPoster}
+                                  fileName={media.name || 'Video'}
+                                  fileSize={media.size}
+                                  messageId={`${msg.id}_${mediaIdx}`}
+                                  compact={true}
+                                  onOpenFullPlayer={() => {
+                                    openMediaInLargeViewer({
+                                      source: 'chat',
+                                      roomId: activeRoomId,
+                                      roomMedia: roomMediaGallery.unifiedMedia,
+                                      activeItem: {
+                                        id: `${msg.id}_v_${mediaIdx}`,
+                                        name: media.name || 'Video',
+                                        title: media.name || 'Video',
+                                        src: media.videoSrc,
+                                        downloadUrl: media.mediaDownloadUrl,
+                                        thumbnail: media.videoPoster || null,
+                                        size: media.size,
+                                        type: 'video',
+                                        mimeType: 'video/mp4',
+                                        senderName: isMe ? 'Bạn' : senderLiveName,
+                                        senderAvatar: effectiveSenderAvatar || null,
+                                        createdAt: msg.createdAt,
+                                        roomId: activeRoomId,
+                                      },
+                                    });
+                                  }}
+                                />
+                              </div>
+                            );
+                          }
+                          if (media.name && !media.isImage && !media.isVideo) {
+                            return (
+                              <div key={media.key} className="p-2.5 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between gap-2 mb-1">
+                                <div className="min-w-0">
+                                  <p className="font-bold truncate">{media.name}</p>
+                                  <p className="text-[10px] opacity-75">{formatFileSize(media.size)}</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadFileSafely(media.mediaDownloadUrl || media.rawUrl, media.name || 'file')}
+                                  className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white cursor-pointer"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })}
 
                         {/* Text Content with full highlight & bôi đen support */}
                         {msg.text && (
@@ -1433,7 +1829,11 @@ export const MobileChatView: React.FC = () => {
                             className="whitespace-pre-wrap leading-relaxed chat-message-text select-text cursor-text [user-select:text] selection:bg-emerald-500 selection:text-slate-950"
                             data-chat-message="true"
                           >
-                            {renderClickableText(unwrapSecureBase64Message(msg.text))}
+                            {renderClickableText(
+                              (activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true))
+                                ? censorProfanity(unwrapSecureBase64Message(msg.text)).cleanText
+                                : unwrapSecureBase64Message(msg.text)
+                            )}
                           </div>
                         )}
 
@@ -1500,14 +1900,15 @@ export const MobileChatView: React.FC = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Floating Scroll to Bottom Button */}
-      {showScrollBottom && (
+      {/* Floating Scroll to Bottom / New Message Pill */}
+      {(showScrollBottom || unreadNewCount > 0) && (
         <button
           type="button"
           onClick={() => scrollToBottom(true)}
-          className="absolute right-4 bottom-16 p-2 rounded-full bg-emerald-500 text-slate-950 shadow-xl active:scale-95 transition-all z-30"
+          className="absolute right-4 bottom-16 px-2.5 py-2 rounded-full bg-emerald-500 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-xl active:scale-95 transition-all z-30 cursor-pointer"
         >
           <ArrowDown className="w-4 h-4" />
+          {unreadNewCount > 0 && <span>{unreadNewCount}</span>}
         </button>
       )}
 
@@ -1549,22 +1950,35 @@ export const MobileChatView: React.FC = () => {
         </div>
       )}
 
-      {/* Moderation Warning Toast/Banner (Roblox-styled cyan italic message box identical to desktop) */}
-      {moderationWarning && (
-        <div className="mx-2 mb-1 p-2 rounded-xl bg-[#020712] border border-[#1e3a5f] text-cyan-300 italic text-[11px] flex items-center justify-between gap-2 shadow-xl animate-in fade-in duration-150 z-20">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <AlertTriangle className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
-            <span className="font-sans italic text-cyan-300 leading-snug break-words">{moderationWarning}</span>
+      {/* Moderation Warning Toast/Banner */}
+      {moderationWarning && (() => {
+        const isSevereBlock = moderationWarning.includes('🚫') || moderationWarning.includes('18+') || moderationWarning.includes('khiêu dâm');
+        return (
+          <div className={`mx-2 mb-1 p-2 rounded-xl text-[11px] flex items-center justify-between gap-2 shadow-xl animate-in fade-in duration-150 z-20 ${
+            isSevereBlock
+              ? 'bg-rose-950/95 border border-rose-500/80 text-rose-100'
+              : 'bg-[#020712] border border-[#1e3a5f] text-cyan-300 italic'
+          }`}>
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isSevereBlock ? (
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-300 shrink-0 animate-pulse" />
+              ) : (
+                <AlertTriangle className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+              )}
+              <span className={`font-sans leading-snug break-words ${isSevereBlock ? 'text-rose-100 font-medium' : 'italic text-cyan-300'}`}>
+                {moderationWarning}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setModerationWarning(null)}
+              className={`p-1 rounded shrink-0 ${isSevereBlock ? 'text-rose-300 hover:text-white' : 'text-slate-400 hover:text-white'}`}
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setModerationWarning(null)}
-            className="p-1 rounded text-slate-400 hover:text-white shrink-0"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Sticky Bottom Input Bar - Ultra-compact */}
       <div
@@ -1586,7 +2000,7 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0"
-          title={isEn ? "Attach file from device" : "Chọn tệp đính kèm từ thiết bị"}
+          title={pick("Chọn tệp đính kèm từ thiết bị", "Attach file from device", "从设备添加附件")}
         >
           <Paperclip className="w-3.5 h-3.5 text-sky-400" />
         </button>
@@ -1596,7 +2010,7 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={() => setIsCloudPickerOpen(true)}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0 cursor-pointer"
-          title={isEn ? "Select files from Cloud Drive" : "Chọn tệp từ Kho Cloud"}
+          title={pick("Chọn tệp từ Kho Cloud", "Select files from Cloud Drive", "从云盘选择文件")}
         >
           <Cloud className="w-3.5 h-3.5 text-indigo-400" />
         </button>
@@ -1606,7 +2020,7 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={handlePasteFromClipboard}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0"
-          title={isEn ? "Paste image or text from clipboard" : "Dán ảnh hoặc văn bản từ bộ nhớ tạm (Clipboard)"}
+          title={pick("Dán ảnh hoặc văn bản từ bộ nhớ tạm (Clipboard)", "Paste image or text from clipboard", "从剪贴板粘贴图片或文本")}
         >
           <Clipboard className="w-3.5 h-3.5 text-amber-400" />
         </button>

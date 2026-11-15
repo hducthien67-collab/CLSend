@@ -78,7 +78,7 @@ import { VideoPreviewPlayer } from './VideoPreviewPlayer';
 import { SmoothSpaceTextarea } from './SmoothSpaceTextarea';
 import { RichChatInput } from './RichChatInput';
 import { CloudDriveFile } from './types';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 export interface SendFileItem {
   id: string;
@@ -97,6 +97,7 @@ export interface SendFileItem {
 const SendViewComponent: React.FC = () => {
   const { currentUser, userProfile, settings, updatePresence } = useAuth();
   const { t, currentLang } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
   const activeAvatarUrl = settings.customAvatarUrl || userProfile?.customAvatarUrl || currentUser?.photoURL;
   const [onlineDevices, setOnlineDevices] = useState<PresenceDevice[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,6 +115,7 @@ const SendViewComponent: React.FC = () => {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const pendingAutoSendTargetRef = useRef<PresenceDevice | null>(null);
 
   // Quick choice modal when clicking a device without content
   const [showQuickChoiceModal, setShowQuickChoiceModal] = useState(false);
@@ -170,12 +172,14 @@ const SendViewComponent: React.FC = () => {
       setUrlCustomName('');
       setIsUrlModalOpen(false);
       setShowQuickChoiceModal(false);
-      setStatusMessage(currentLang === 'en' 
-        ? `🔗 Added ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'} file: ${fileName}` 
-        : `🔗 Đã thêm tệp ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'}: ${fileName}`);
+      setStatusMessage(pick(
+        `🔗 Đã thêm tệp ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'}: ${fileName}`,
+        `🔗 Added ${isTeraBox ? 'TeraBox 1TB' : 'Cloud'} file: ${fileName}`,
+        `🔗 已添加 ${isTeraBox ? 'TeraBox 1TB' : '云端'} 文件：${fileName}`
+      ));
       setTimeout(() => setStatusMessage(null), 3500);
     } catch {
-      setStatusMessage(currentLang === 'en' ? '⚠️ Invalid URL. Please check the format https://...' : '⚠️ URL không hợp lệ. Vui lòng kiểm tra lại định dạng https://...');
+      setStatusMessage(pick('⚠️ URL không hợp lệ. Vui lòng kiểm tra lại định dạng https://...', '⚠️ Invalid URL. Please check the format https://...', '⚠️ URL 无效，请检查格式 https://...'));
       setTimeout(() => setStatusMessage(null), 3500);
     }
   };
@@ -413,9 +417,11 @@ const SendViewComponent: React.FC = () => {
           e.preventDefault();
           handleFilesAdded(e.clipboardData.files);
           setMode('file');
-          setStatusMessage(currentLang === 'en'
-            ? `📋 Received ${e.clipboardData.files.length} file(s) from Ctrl+V.`
-            : `📋 Đã nhận ${e.clipboardData.files.length} tệp từ phím tắt Ctrl+V.`);
+          setStatusMessage(pick(
+            `📋 Đã nhận ${e.clipboardData.files.length} tệp từ phím tắt Ctrl+V.`,
+            `📋 Received ${e.clipboardData.files.length} file(s) from Ctrl+V.`,
+            `📋 已通过 Ctrl+V 接收 ${e.clipboardData.files.length} 个文件。`
+          ));
           setTimeout(() => setStatusMessage(null), 3500);
           return;
         }
@@ -426,9 +432,11 @@ const SendViewComponent: React.FC = () => {
           e.preventDefault();
           setTextContent(text);
           setMode('text');
-          setStatusMessage(currentLang === 'en'
-            ? '📋 Received text from Ctrl+V.'
-            : '📋 Đã nhận văn bản từ phím tắt Ctrl+V.');
+          setStatusMessage(pick(
+            '📋 Đã nhận văn bản từ phím tắt Ctrl+V.',
+            '📋 Received text from Ctrl+V.',
+            '📋 已通过 Ctrl+V 接收文本内容。'
+          ));
           setTimeout(() => setStatusMessage(null), 3500);
         }
       }
@@ -453,9 +461,11 @@ const SendViewComponent: React.FC = () => {
       if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
         handleFilesAdded(e.dataTransfer.files);
         setMode('file');
-        setStatusMessage(currentLang === 'en'
-          ? `📂 Received ${e.dataTransfer.files.length} dropped file(s) in send area.`
-          : `📂 Đã nhận ${e.dataTransfer.files.length} tệp kéo thả vào vùng gửi.`);
+        setStatusMessage(pick(
+          `📂 Đã nhận ${e.dataTransfer.files.length} tệp kéo thả vào vùng gửi.`,
+          `📂 Received ${e.dataTransfer.files.length} dropped file(s) in send area.`,
+          `📂 已接收拖放到发送区的 ${e.dataTransfer.files.length} 个文件。`
+        ));
         setTimeout(() => setStatusMessage(null), 3500);
       }
     };
@@ -484,18 +494,22 @@ const SendViewComponent: React.FC = () => {
         continue;
       }
       if (f.size > MAX_FILE_SIZE) {
-        setStatusMessage(currentLang === 'en'
-          ? `File "${f.name}" (${formatFileSize(f.size)}) exceeds maximum limit of ${MAX_FILE_SIZE_LABEL}.`
-          : `Tệp "${f.name}" (${formatFileSize(f.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
+        setStatusMessage(pick(
+          `Tệp "${f.name}" (${formatFileSize(f.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`,
+          `File "${f.name}" (${formatFileSize(f.size)}) exceeds maximum limit of ${MAX_FILE_SIZE_LABEL}.`,
+          `文件 “${f.name}” (${formatFileSize(f.size)}) 超过了最大限制 ${MAX_FILE_SIZE_LABEL}。`
+        ));
       } else {
         validFiles.push(f);
       }
     }
 
     if (blockedFiles.length > 0) {
-      setStatusMessage(currentLang === 'en'
-        ? `🚫 Rejected ${blockedFiles.length} file(s) [${blockedFiles.slice(0, 2).join(', ')}] due to unsafe file format.`
-        : `🚫 Đã từ chối ${blockedFiles.length} tệp [${blockedFiles.slice(0, 2).join(', ')}] vì chứa định dạng nguy hiểm.`);
+      setStatusMessage(pick(
+        `🚫 Đã từ chối ${blockedFiles.length} tệp [${blockedFiles.slice(0, 2).join(', ')}] vì chứa định dạng nguy hiểm.`,
+        `🚫 Rejected ${blockedFiles.length} file(s) [${blockedFiles.slice(0, 2).join(', ')}] due to unsafe file format.`,
+        `🚫 因包含不安全格式，已拒绝 ${blockedFiles.length} 个文件 [${blockedFiles.slice(0, 2).join(', ')}]。`
+      ));
     }
 
     if (validFiles.length === 0) return;
@@ -541,6 +555,15 @@ const SendViewComponent: React.FC = () => {
         }
       }
     }
+
+    // Tự động gửi ngay lập tức tới thiết bị đã chọn nếu được kích hoạt qua 1-click
+    if (pendingAutoSendTargetRef.current) {
+      const autoTarget = pendingAutoSendTargetRef.current;
+      pendingAutoSendTargetRef.current = null;
+      setTimeout(() => {
+        sendToPeer(autoTarget, newItems);
+      }, 120);
+    }
   };
 
   // Handle files selected from Cloud Drive
@@ -573,9 +596,11 @@ const SendViewComponent: React.FC = () => {
       }
     }
     setFileThumbnails(prev => ({ ...prev, ...newThumbs }));
-    setStatusMessage(currentLang === 'en'
-      ? `Added ${newItems.length} file(s) from Cloud Drive to send list.`
-      : `Đã thêm ${newItems.length} tệp từ Kho Cloud vào danh sách gửi.`);
+    setStatusMessage(pick(
+      `Đã thêm ${newItems.length} tệp từ Kho Cloud vào danh sách gửi.`,
+      `Added ${newItems.length} file(s) from Cloud Drive to send list.`,
+      `已从云盘添加 ${newItems.length} 个文件到发送列表。`
+    ));
   };
 
   const handleRemoveFile = (index: number) => {
@@ -618,9 +643,11 @@ const SendViewComponent: React.FC = () => {
   const handlePasteAction = async () => {
     // Check if Clipboard API is supported
     if (!navigator.clipboard) {
-      setStatusMessage(currentLang === 'en'
-        ? 'ℹ️ Browser does not support direct clipboard reading. Press Ctrl + V to paste.'
-        : 'ℹ️ Trình duyệt chưa hỗ trợ đọc trực tiếp. Bạn hãy nhấn phím Ctrl + V để dán ngay.');
+      setStatusMessage(pick(
+        'ℹ️ Trình duyệt chưa hỗ trợ đọc trực tiếp. Bạn hãy nhấn phím Ctrl + V để dán ngay.',
+        'ℹ️ Browser does not support direct clipboard reading. Press Ctrl + V to paste.',
+        'ℹ️ 浏览器不支持直接读取剪贴板，请按 Ctrl + V 粘贴。'
+      ));
       setTimeout(() => setStatusMessage(null), 4500);
       return;
     }
@@ -644,9 +671,11 @@ const SendViewComponent: React.FC = () => {
           if (files.length > 0) {
             handleFilesAdded(files);
             setMode('file');
-            setStatusMessage(currentLang === 'en'
-              ? `📋 Successfully pasted ${files.length} image(s)/file(s) from clipboard!`
-              : `📋 Đã dán thành công ${files.length} ảnh/tệp từ bộ nhớ tạm!`);
+            setStatusMessage(pick(
+              `📋 Đã dán thành công ${files.length} ảnh/tệp từ bộ nhớ tạm!`,
+              `📋 Successfully pasted ${files.length} image(s)/file(s) from clipboard!`,
+              `📋 已成功从剪贴板粘贴 ${files.length} 个图片/文件！`
+            ));
             setTimeout(() => setStatusMessage(null), 3500);
             return;
           }
@@ -671,30 +700,38 @@ const SendViewComponent: React.FC = () => {
 
           setTextContent(text);
           setMode('text');
-          setStatusMessage(currentLang === 'en'
-            ? '📋 Successfully pasted text content from clipboard!'
-            : '📋 Đã dán thành công nội dung văn bản từ bộ nhớ tạm!');
+          setStatusMessage(pick(
+            '📋 Đã dán thành công nội dung văn bản từ bộ nhớ tạm!',
+            '📋 Successfully pasted text content from clipboard!',
+            '📋 已成功从剪贴板粘贴文本内容！'
+          ));
           setTimeout(() => setStatusMessage(null), 3500);
           return;
         }
       }
 
-      setStatusMessage(currentLang === 'en' 
-        ? '⚠️ Clipboard is currently empty. Copy some content then click Paste or press Ctrl+V.' 
-        : '⚠️ Bộ nhớ tạm hiện đang trống. Hãy sao chép nội dung rồi nhấn Dán hoặc Ctrl+V.');
+      setStatusMessage(pick(
+        '⚠️ Bộ nhớ tạm hiện đang trống. Hãy sao chép nội dung rồi nhấn Dán hoặc Ctrl+V.',
+        '⚠️ Clipboard is currently empty. Copy some content then click Paste or press Ctrl+V.',
+        '⚠️ 剪贴板当前为空，请先复制内容后再点击粘贴或按 Ctrl+V。'
+      ));
       setTimeout(() => setStatusMessage(null), 4000);
     } catch (err: any) {
       console.warn('Clipboard read permission error:', err);
       // Detailed explanation for why the browser prevented reading
       const isDenied = err?.name === 'NotAllowedError' || err?.name === 'SecurityError' || String(err?.message || '').toLowerCase().includes('denied') || String(err?.message || '').toLowerCase().includes('permission');
       if (isDenied) {
-        setStatusMessage(currentLang === 'en'
-          ? '🔒 Browser has blocked clipboard access. Please select "Allow" in the address bar, or press Ctrl+V to paste directly.'
-          : '🔒 Trình duyệt đã chặn quyền đọc bộ nhớ tạm. Hãy chọn "Cho phép" (Allow) trên thanh địa chỉ, hoặc bấm Ctrl+V để dán trực tiếp.');
+        setStatusMessage(pick(
+          '🔒 Trình duyệt đã chặn quyền đọc bộ nhớ tạm. Hãy chọn "Cho phép" (Allow) trên thanh địa chỉ, hoặc bấm Ctrl+V để dán trực tiếp.',
+          '🔒 Browser has blocked clipboard access. Please select "Allow" in the address bar, or press Ctrl+V to paste directly.',
+          '🔒 浏览器拦截了剪贴板权限。请在地址栏选择“允许”，或直接按 Ctrl+V 粘贴。'
+        ));
       } else {
-        setStatusMessage(currentLang === 'en'
-          ? '💡 Press Ctrl + V (or Cmd + V) on your keyboard to paste content immediately.'
-          : '💡 Nhấn phím Ctrl + V (hoặc Cmd + V) trên bàn phím để dán nội dung ngay lập tức.');
+        setStatusMessage(pick(
+          '💡 Nhấn phím Ctrl + V (hoặc Cmd + V) trên bàn phím để dán nội dung ngay lập tức.',
+          '💡 Press Ctrl + V (or Cmd + V) on your keyboard to paste content immediately.',
+          '💡 按键盘上的 Ctrl + V（或 Cmd + V）即可立即粘贴内容。'
+        ));
       }
       setTimeout(() => setStatusMessage(null), 5000);
     }
@@ -718,9 +755,11 @@ const SendViewComponent: React.FC = () => {
       sendDirectTextToPeer(targetDeviceForQuickChoice, modalTextValue);
       setTargetDeviceForQuickChoice(null);
     } else if (clean) {
-      setStatusMessage(currentLang === 'en'
-        ? '✓ Text message ready. Select a device below to send!'
-        : '✓ Đã chuẩn bị tin nhắn văn bản. Chọn thiết bị bên dưới để gửi!');
+      setStatusMessage(pick(
+        '✓ Đã chuẩn bị tin nhắn văn bản. Chọn thiết bị bên dưới để gửi!',
+        '✓ Text message ready. Select a device below to send!',
+        '✓ 文本消息已就绪，请在下方选择设备发送！'
+      ));
       setTimeout(() => setStatusMessage(null), 3500);
     }
   };
@@ -737,7 +776,7 @@ const SendViewComponent: React.FC = () => {
     try {
       const payload: any = {
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
+        senderName: userProfile?.displayName || currentUser.displayName || pick('Người dùng', 'User', '用户'),
         senderDevice: settings.deviceName,
         receiverId: target.uid,
         receiverName: target.displayName || target.deviceName,
@@ -752,16 +791,20 @@ const SendViewComponent: React.FC = () => {
       }
 
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'success' }));
-      setStatusMessage(currentLang === 'en'
-        ? `Message sent successfully to ${target.deviceName}!`
-        : `Đã gửi tin nhắn thành công đến ${target.deviceName}!`);
+      setStatusMessage(pick(
+        `Đã gửi tin nhắn thành công đến ${target.deviceName}!`,
+        `Message sent successfully to ${target.deviceName}!`,
+        `已成功向 ${target.deviceName} 发送消息！`
+      ));
       setTimeout(() => setStatusMessage(null), 3500);
     } catch (err: any) {
       console.error('Send text error:', err);
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'error' }));
-      setStatusMessage(currentLang === 'en'
-        ? 'Error sending message. Please try again.'
-        : 'Lỗi khi gửi tin nhắn. Vui lòng thử lại.');
+      setStatusMessage(pick(
+        'Lỗi khi gửi tin nhắn. Vui lòng thử lại.',
+        'Error sending message. Please try again.',
+        '发送消息失败，请重试。'
+      ));
       setTimeout(() => setStatusMessage(null), 4000);
     } finally {
       setSendingTargetId(null);
@@ -771,14 +814,19 @@ const SendViewComponent: React.FC = () => {
     }
   };
 
-  // Check if content is ready or open quick choice modal
+  // Check if content is ready or open direct file picker for instant 1-click send
   const handleDeviceClick = (target: PresenceDevice) => {
     const hasFiles = selectedFiles.length > 0;
     const hasText = textContent.trim().length > 0;
 
     if (!hasFiles && !hasText) {
-      setTargetDeviceForQuickChoice(target);
-      setShowQuickChoiceModal(true);
+      pendingAutoSendTargetRef.current = target;
+      setStatusMessage(pick(
+        `📁 Hãy chọn tệp để gửi trực tiếp tới ${target.deviceName}...`,
+        `📁 Select file to send directly to ${target.deviceName}...`,
+        `📁 请选择要直接发送到 ${target.deviceName} 的文件...`
+      ));
+      fileInputRef.current?.click();
       return;
     }
 
@@ -786,15 +834,18 @@ const SendViewComponent: React.FC = () => {
   };
 
   // Perform send to target device (files, text, or both)
-  const sendToPeer = async (target: PresenceDevice) => {
+  const sendToPeer = async (target: PresenceDevice, overrideFiles?: SendFileItem[]) => {
     if (!currentUser) return;
-    const hasFiles = selectedFiles.length > 0;
+    const targetFiles = (overrideFiles && overrideFiles.length > 0) ? overrideFiles : selectedFiles;
+    const hasFiles = targetFiles.length > 0;
     const hasText = textContent.trim().length > 0;
 
     if (!hasFiles && !hasText) {
-      setStatusMessage(currentLang === 'en'
-        ? 'Please select files or enter text to send.'
-        : 'Vui lòng chọn tệp tin hoặc nhập văn bản cần gửi.');
+      setStatusMessage(pick(
+        'Vui lòng chọn tệp tin hoặc nhập văn bản cần gửi.',
+        'Please select files or enter text to send.',
+        '请选择文件或输入要发送的文本。'
+      ));
       return;
     }
 
@@ -805,9 +856,9 @@ const SendViewComponent: React.FC = () => {
 
     try {
       if (hasFiles) {
-        const totalFiles = selectedFiles.length;
+        const totalFiles = targetFiles.length;
         for (let i = 0; i < totalFiles; i++) {
-          const item = selectedFiles[i];
+          const item = targetFiles[i];
           const currentNumber = i + 1;
           
           let currentDisplayPct = Math.min(92, Math.round((i / totalFiles) * 100) + 5);
@@ -818,9 +869,11 @@ const SendViewComponent: React.FC = () => {
             setUploadProgress(currentDisplayPct);
           }, 150);
 
-          setUploadProgressText(currentLang === 'en'
-            ? `Processing file ${currentNumber}/${totalFiles}: "${item.name}"...`
-            : `Đang xử lý tệp ${currentNumber}/${totalFiles}: "${item.name}"...`);
+          setUploadProgressText(pick(
+            `Đang xử lý tệp ${currentNumber}/${totalFiles}: "${item.name}"...`,
+            `Processing file ${currentNumber}/${totalFiles}: "${item.name}"...`,
+            `正在处理文件 ${currentNumber}/${totalFiles}：“${item.name}”...`
+          ));
 
           let fileUrl = '';
           let serverThumbnail = fileThumbnails[item.name] || item.thumbnail || '';
@@ -832,9 +885,11 @@ const SendViewComponent: React.FC = () => {
             const fileShare = 100 / totalFiles;
             const overall = Math.min(99, Math.round((i + 1) * fileShare));
             setUploadProgress(overall);
-            setUploadProgressText(currentLang === 'en'
-              ? `Prepared ${item.isTeraBox ? 'TeraBox' : 'cloud'} file ${currentNumber}/${totalFiles}: "${item.name}"...`
-              : `Đã chuẩn bị tệp ${item.isTeraBox ? 'TeraBox' : 'Cloud'} ${currentNumber}/${totalFiles}: "${item.name}"...`);
+            setUploadProgressText(pick(
+              `Đã chuẩn bị tệp ${item.isTeraBox ? 'TeraBox' : 'Cloud'} ${currentNumber}/${totalFiles}: "${item.name}"...`,
+              `Prepared ${item.isTeraBox ? 'TeraBox' : 'cloud'} file ${currentNumber}/${totalFiles}: "${item.name}"...`,
+              `已准备好 ${item.isTeraBox ? 'TeraBox' : '云端'} 文件 ${currentNumber}/${totalFiles}：“${item.name}”...`
+            ));
           } else if (item.file) {
             // Local file: upload to server
             try {
@@ -842,9 +897,11 @@ const SendViewComponent: React.FC = () => {
                 const fileShare = 100 / totalFiles;
                 const overall = Math.min(99, Math.round(i * fileShare + (pct / 100) * fileShare));
                 setUploadProgress(overall);
-                setUploadProgressText(currentLang === 'en'
-                  ? `Sending file ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`
-                  : `Đang gửi tệp ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`);
+                setUploadProgressText(pick(
+                  `Đang gửi tệp ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`,
+                  `Sending file ${currentNumber}/${totalFiles}: "${item.name}" (${pct}%)...`,
+                  `正在发送文件 ${currentNumber}/${totalFiles}：“${item.name}” (${pct}%)...`
+                ));
               });
               clearInterval(progressInterval);
               fileUrl = uploaded.url;
@@ -866,15 +923,17 @@ const SendViewComponent: React.FC = () => {
 
           if (!safeUrl || !safeUrl.trim()) {
             console.error(`Không thể gửi tệp "${item.name}" do lỗi kết nối lưu trữ.`);
-            alert(currentLang === 'en'
-              ? `Unable to send "${item.name}" due to storage upload failure. Please try again.`
-              : `Không thể gửi tệp "${item.name}" do không thể kết nối lưu trữ lên máy chủ. Vui lòng thử lại.`);
+            alert(pick(
+              `Không thể gửi tệp "${item.name}" do không thể kết nối lưu trữ lên máy chủ. Vui lòng thử lại.`,
+              `Unable to send "${item.name}" due to storage upload failure. Please try again.`,
+              `由于存储上传失败，无法发送 “${item.name}”，请重试。`
+            ));
             continue;
           }
 
           const payload: any = {
             senderId: currentUser.uid,
-            senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
+            senderName: userProfile?.displayName || currentUser.displayName || pick('Người dùng', 'User', '用户'),
             senderDevice: settings.deviceName,
             receiverId: target.uid,
             receiverName: target.displayName || target.deviceName,
@@ -893,15 +952,17 @@ const SendViewComponent: React.FC = () => {
         }
 
         setUploadProgress(100);
-        setUploadProgressText(currentLang === 'en'
-          ? `Completed sending ${totalFiles} file(s)!`
-          : `Hoàn tất gửi ${totalFiles} tệp!`);
+        setUploadProgressText(pick(
+          `Hoàn tất gửi ${totalFiles} tệp!`,
+          `Completed sending ${totalFiles} file(s)!`,
+          `已完成发送 ${totalFiles} 个文件！`
+        ));
       }
 
       if (hasText) {
         const payload: any = {
           senderId: currentUser.uid,
-          senderName: userProfile?.displayName || currentUser.displayName || (currentLang === 'en' ? 'User' : 'Người dùng'),
+          senderName: userProfile?.displayName || currentUser.displayName || pick('Người dùng', 'User', '用户'),
           senderDevice: settings.deviceName,
           receiverId: target.uid,
           receiverName: target.displayName || target.deviceName,
@@ -918,16 +979,22 @@ const SendViewComponent: React.FC = () => {
 
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'success' }));
       const msgDesc = hasFiles && hasText
-        ? (currentLang === 'en'
-            ? `Transferred ${selectedFiles.length} file(s) & message to ${target.deviceName} successfully!`
-            : `Đã chuyển thành công ${selectedFiles.length} tệp & tin nhắn đến ${target.deviceName}!`)
+        ? pick(
+            `Đã chuyển thành công ${targetFiles.length} tệp & tin nhắn đến ${target.deviceName}!`,
+            `Transferred ${targetFiles.length} file(s) & message to ${target.deviceName} successfully!`,
+            `已成功向 ${target.deviceName} 传输 ${targetFiles.length} 个文件及消息！`
+          )
         : hasFiles
-        ? (currentLang === 'en'
-            ? `Transferred ${selectedFiles.length} file(s) to ${target.deviceName} successfully!`
-            : `Đã chuyển thành công ${selectedFiles.length} tệp đến ${target.deviceName}!`)
-        : (currentLang === 'en'
-            ? `Message sent to ${target.deviceName} successfully!`
-            : `Đã gửi tin nhắn thành công đến ${target.deviceName}!`);
+        ? pick(
+            `Đã chuyển thành công ${targetFiles.length} tệp đến ${target.deviceName}!`,
+            `Transferred ${targetFiles.length} file(s) to ${target.deviceName} successfully!`,
+            `已成功向 ${target.deviceName} 传输 ${targetFiles.length} 个文件！`
+          )
+        : pick(
+            `Đã gửi tin nhắn thành công đến ${target.deviceName}!`,
+            `Message sent to ${target.deviceName} successfully!`,
+            `已成功向 ${target.deviceName} 发送消息！`
+          );
       setStatusMessage(msgDesc);
 
       // Clear/Reset selection when sent successfully
@@ -947,9 +1014,11 @@ const SendViewComponent: React.FC = () => {
     } catch (error: any) {
       console.error('Send error:', error);
       setTransferStatus(prev => ({ ...prev, [target.uid]: 'error' }));
-      setStatusMessage(error?.message || (currentLang === 'en'
-        ? 'Error uploading or sending data. Please try again.'
-        : 'Lỗi khi tải hoặc gửi dữ liệu. Vui lòng thử lại.'));
+      setStatusMessage(error?.message || pick(
+        'Lỗi khi tải hoặc gửi dữ liệu. Vui lòng thử lại.',
+        'Error uploading or sending data. Please try again.',
+        '上传或发送数据时出错，请重试。'
+      ));
       setSendingTargetId(null);
     }
   };
@@ -998,12 +1067,16 @@ const SendViewComponent: React.FC = () => {
       setOnlineDevices(liveDevices);
       setStatusMessage(
         liveDevices.length > 0 
-          ? (currentLang === 'en'
-              ? `Updated: Detected ${liveDevices.length} device(s) online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`
-              : `Đã cập nhật: Phát hiện ${liveDevices.length} thiết bị đang trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn ${toPurgeDocIds.length} thiết bị cũ)` : ''}.`)
-          : (currentLang === 'en'
-              ? `Updated: No other devices currently online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`
-              : `Đã cập nhật: Hiện không có thiết bị nào khác trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn dẹp ${toPurgeDocIds.length} thiết bị cũ đã tắt)` : ''}.`)
+          ? pick(
+              `Đã cập nhật: Phát hiện ${liveDevices.length} thiết bị đang trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn ${toPurgeDocIds.length} thiết bị cũ)` : ''}.`,
+              `Updated: Detected ${liveDevices.length} device(s) online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`,
+              `已更新：检测到 ${liveDevices.length} 台设备在线${toPurgeDocIds.length > 0 ? `（已清理 ${toPurgeDocIds.length} 台离线设备）` : ''}。`
+            )
+          : pick(
+              `Đã cập nhật: Hiện không có thiết bị nào khác trực tuyến${toPurgeDocIds.length > 0 ? ` (đã dọn dẹp ${toPurgeDocIds.length} thiết bị cũ đã tắt)` : ''}.`,
+              `Updated: No other devices currently online${toPurgeDocIds.length > 0 ? ` (cleaned ${toPurgeDocIds.length} offline devices)` : ''}.`,
+              `已更新：当前没有其他在线设备${toPurgeDocIds.length > 0 ? `（已清理 ${toPurgeDocIds.length} 台离线设备）` : ''}。`
+            )
       );
       setTimeout(() => setStatusMessage(null), 5000);
     } catch (err) {
@@ -1052,9 +1125,11 @@ const SendViewComponent: React.FC = () => {
         if (prev.some(d => d.connectCode === 'CLSEND')) return prev;
         return [CLSEND_DEMO_DEVICE, ...prev];
       });
-      setStatusMessage(currentLang === 'en'
-        ? 'Connected successfully to "CloudSend Official Relay" (Code #CLSEND)! Click "Send to this device" below to transfer.'
-        : 'Đã kết nối thành công với "CloudSend Official Relay" (Mã #CLSEND)! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.');
+      setStatusMessage(pick(
+        'Đã kết nối thành công với "CloudSend Official Relay" (Mã #CLSEND)! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.',
+        'Connected successfully to "CloudSend Official Relay" (Code #CLSEND)! Click "Send to this device" below to transfer.',
+        '已成功连接 “CloudSend Official Relay”（代码 #CLSEND）！点击下方“发送到此设备”即可传输。'
+      ));
       setTimeout(() => setStatusMessage(null), 6000);
       setIsSearchingCode(false);
       return;
@@ -1072,17 +1147,21 @@ const SendViewComponent: React.FC = () => {
       }
 
       if (snap.empty) {
-        setStatusMessage(currentLang === 'en'
-          ? `No device found with code #${rawCode}. Please check code on receiver's screen.`
-          : `Không tìm thấy thiết bị nào với mã #${rawCode}. Vui lòng kiểm tra lại mã trên máy người nhận.`);
+        setStatusMessage(pick(
+          `Không tìm thấy thiết bị nào với mã #${rawCode}. Vui lòng kiểm tra lại mã trên máy người nhận.`,
+          `No device found with code #${rawCode}. Please check code on receiver's screen.`,
+          `未找到代码为 #${rawCode} 的设备，请核对接收方屏幕上的代码。`
+        ));
         setTimeout(() => setStatusMessage(null), 5000);
       } else {
         const foundDoc = snap.docs[0];
         const data = { id: foundDoc.id, ...foundDoc.data({ serverTimestamps: 'estimate' }) } as unknown as PresenceDevice;
         if (data.deviceId === getClientDeviceId()) {
-          setStatusMessage(currentLang === 'en'
-            ? 'This is the pair code of your own current device!'
-            : 'Đây là mã ghép của chính thiết bị hiện tại của bạn!');
+          setStatusMessage(pick(
+            'Đây là mã ghép của chính thiết bị hiện tại của bạn!',
+            'This is the pair code of your own current device!',
+            '这是您当前设备自身的配对代码！'
+          ));
           setTimeout(() => setStatusMessage(null), 4000);
         } else {
           setOnlineDevices((prev) => {
@@ -1091,9 +1170,11 @@ const SendViewComponent: React.FC = () => {
             }
             return [data, ...prev];
           });
-          setStatusMessage(currentLang === 'en'
-            ? `Connected successfully to "${data.deviceName}" (${data.displayName})! Click "Send to this device" below to transfer.`
-            : `Đã kết nối thành công với "${data.deviceName}" (${data.displayName})! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`);
+          setStatusMessage(pick(
+            `Đã kết nối thành công với "${data.deviceName}" (${data.displayName})! Nhấn nút "Gửi đến thiết bị này" bên dưới để chuyển tệp.`,
+            `Connected successfully to "${data.deviceName}" (${data.displayName})! Click "Send to this device" below to transfer.`,
+            `已成功连接到 “${data.deviceName}” (${data.displayName})！点击下方“发送到此设备”即可传输。`
+          ));
           setTimeout(() => setStatusMessage(null), 6000);
         }
       }
@@ -1158,7 +1239,11 @@ const SendViewComponent: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-slate-400 truncate mt-0.5">
-              {currentLang === 'en' ? `Broadcasting on Cloud Relay • Others can find your name or enter code ${myConnectCode} to send files` : `Đang phát sóng trên Cloud Relay • Người khác có thể tìm thấy tên hoặc nhập mã ${myConnectCode} để gửi tệp`}
+              {pick(
+                `Đang phát sóng trên Cloud Relay • Người khác có thể tìm thấy tên hoặc nhập mã ${myConnectCode} để gửi tệp`,
+                `Broadcasting on Cloud Relay • Others can find your name or enter code ${myConnectCode} to send files`,
+                `正在 Cloud Relay 上广播 • 其他人可搜索您的名称或输入代码 ${myConnectCode} 向您发送文件`
+              )}
             </p>
           </div>
         </div>
@@ -1270,13 +1355,13 @@ const SendViewComponent: React.FC = () => {
                     </div>
                     <div className="text-left">
                       <span className="text-xs sm:text-sm font-bold text-white block">
-                        {currentLang === 'en' ? 'Selected ' : 'Đã chọn '}
-                        {selectedFiles.length > 0 ? `${selectedFiles.length} ${currentLang === 'en' ? 'file(s)' : 'tệp tin'}` : ''}
+                        {pick('Đã chọn ', 'Selected ', '已选择 ')}
+                        {selectedFiles.length > 0 ? `${selectedFiles.length} ${pick('tệp tin', 'file(s)', '个文件')}` : ''}
                         {selectedFiles.length > 0 && textContent.trim() ? ' & ' : ''}
-                        {textContent.trim() ? (currentLang === 'en' ? '1 text message' : '1 tin nhắn văn bản') : ''}
+                        {textContent.trim() ? pick('1 tin nhắn văn bản', '1 text message', '1 条文本消息') : ''}
                       </span>
                       <span className="text-[11px] text-slate-400">
-                        {selectedFiles.length > 0 && `${currentLang === 'en' ? 'Total' : 'Tổng'}: ${formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))} • `}{currentLang === 'en' ? 'Ready to send' : 'Sẵn sàng gửi'}
+                        {selectedFiles.length > 0 && `${pick('Tổng', 'Total', '总计')}: ${formatFileSize(selectedFiles.reduce((acc, f) => acc + f.size, 0))} • `}{pick('Sẵn sàng gửi', 'Ready to send', '准备发送')}
                       </span>
                     </div>
                   </div>
@@ -1291,7 +1376,7 @@ const SendViewComponent: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <AlignLeft className="w-3 h-3 text-emerald-400" />
-                      <span>{textContent.trim() ? (currentLang === 'en' ? 'Edit text' : 'Sửa văn bản') : (currentLang === 'en' ? 'Add text' : 'Thêm văn bản')}</span>
+                      <span>{textContent.trim() ? pick('Sửa văn bản', 'Edit text', '编辑文本') : pick('Thêm văn bản', 'Add text', '添加文本')}</span>
                     </button>
                     <button
                       type="button"
@@ -1302,7 +1387,7 @@ const SendViewComponent: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <Plus className="w-3 h-3 text-emerald-400" />
-                      <span>{currentLang === 'en' ? 'Add file' : 'Thêm tệp'}</span>
+                      <span>{pick('Thêm tệp', 'Add file', '添加文件')}</span>
                     </button>
                     <button
                       type="button"
@@ -1313,7 +1398,7 @@ const SendViewComponent: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-1 transition-all shadow-sm"
                     >
                       <Trash2 className="w-3 h-3 text-rose-400" />
-                      <span>{currentLang === 'en' ? 'Clear all' : 'Xóa hết'}</span>
+                      <span>{pick('Xóa hết', 'Clear all', '全部清除')}</span>
                     </button>
                   </div>
                 </div>
@@ -1327,9 +1412,9 @@ const SendViewComponent: React.FC = () => {
                           <AlignLeft className="w-3.5 h-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <span className="text-xs font-bold text-white block">{currentLang === 'en' ? 'Text message' : 'Tin nhắn văn bản'}</span>
+                          <span className="text-xs font-bold text-white block">{pick('Tin nhắn văn bản', 'Text message', '文本消息')}</span>
                           <span className="text-[10px] text-slate-400 block">
-                            {textContent.split(/\s+/).filter(Boolean).length} {currentLang === 'en' ? 'words' : 'từ'} • {textContent.length} {currentLang === 'en' ? 'chars' : 'ký tự'}
+                            {textContent.split(/\s+/).filter(Boolean).length} {pick('từ', 'words', '词')} • {textContent.length} {pick('ký tự', 'chars', '字符')}
                           </span>
                         </div>
                       </div>
@@ -1337,7 +1422,7 @@ const SendViewComponent: React.FC = () => {
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          title={currentLang === 'en' ? 'Edit this message' : 'Chỉnh sửa tin nhắn này'}
+                          title={pick('Chỉnh sửa tin nhắn này', 'Edit this message', '编辑此消息')}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleOpenTextModal(textContent);
@@ -1345,11 +1430,11 @@ const SendViewComponent: React.FC = () => {
                           className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-[11px] font-semibold flex items-center gap-1 transition-colors"
                         >
                           <Edit3 className="w-3 h-3 text-sky-400" />
-                          <span>{currentLang === 'en' ? 'Edit' : 'Sửa'}</span>
+                          <span>{pick('Sửa', 'Edit', '编辑')}</span>
                         </button>
                         <button
                           type="button"
-                          title={currentLang === 'en' ? 'Delete this message' : 'Xóa tin nhắn này'}
+                          title={pick('Xóa tin nhắn này', 'Delete this message', '删除此消息')}
                           onClick={(e) => {
                             e.stopPropagation();
                             setTextContent('');
@@ -1401,16 +1486,24 @@ const SendViewComponent: React.FC = () => {
                           key={`${file.name}_${file.size}_${idx}`}
                           className="flex items-center justify-between gap-2.5 p-2 rounded-xl bg-slate-900/90 border border-slate-800 text-left hover:border-slate-700 transition-all"
                         >
-                          <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            onClick={(e) => {
+                              if (!isImg && !isVid) return;
+                              e.stopPropagation();
+                              if (isImg) {
+                                const imgTarget = thumb || file.viewUrl || file.cloudUrl || '';
+                                if (imgTarget) setViewingImage(imgTarget);
+                              } else if (isVid) {
+                                setViewingVideo(file);
+                              }
+                            }}
+                            className={`flex items-center gap-2.5 min-w-0 flex-1 ${
+                              (isImg && (thumb || file.viewUrl || file.cloudUrl)) || isVid ? 'cursor-pointer' : ''
+                            }`}
+                          >
                             {isImg ? (
                               <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (thumb) setViewingImage(thumb);
-                                }}
-                                className={`relative group w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0 ${
-                                  thumb ? 'cursor-pointer' : ''
-                                }`}
+                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0"
                               >
                                 {thumb ? (
                                   <img src={thumb} alt={file.name} className="w-full h-full object-cover" />
@@ -1427,12 +1520,8 @@ const SendViewComponent: React.FC = () => {
                               </div>
                             ) : isVid ? (
                               <div
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setViewingVideo(file);
-                                }}
-                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-emerald-500/50 bg-black shrink-0 cursor-pointer shadow-xs flex items-center justify-center active:scale-95 transition-transform"
-                                title={currentLang === 'en' ? 'Click to preview video' : 'Bấm để xem video'}
+                                className="relative group w-10 h-10 rounded-lg overflow-hidden border border-emerald-500/50 bg-black shrink-0 shadow-xs flex items-center justify-center active:scale-95 transition-transform"
+                                title={pick('Bấm để xem video', 'Click to preview video', '点击预览视频')}
                               >
                                 {thumb ? (
                                   <img src={thumb} alt={file.name} className="w-full h-full object-cover" />
@@ -1478,7 +1567,7 @@ const SendViewComponent: React.FC = () => {
 
                           <button
                             type="button"
-                            title={currentLang === 'en' ? 'Remove this file' : 'Xóa tệp này'}
+                            title={pick('Xóa tệp này', 'Remove this file', '移除此文件')}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleRemoveFile(idx);
@@ -1494,7 +1583,7 @@ const SendViewComponent: React.FC = () => {
                 )}
 
                 <p className="text-[11px] text-emerald-400 font-medium text-center pt-0.5">
-                  ✓ {currentLang === 'en' ? 'Select a device from the list below to send now' : 'Chọn thiết bị ở danh sách bên dưới để truyền ngay'}
+                  ✓ {pick('Chọn thiết bị ở danh sách bên dưới để truyền ngay', 'Select a device from the list below to send now', '从下方列表选择设备即可立即发送')}
                 </p>
               </div>
             ) : (
@@ -1763,7 +1852,7 @@ const SendViewComponent: React.FC = () => {
                       <div className="flex items-center gap-2 mt-2">
                         <span className="inline-flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          Internet Relay
+                          Mạng Cục Bộ (LAN) & Relay
                         </span>
                       </div>
                     </div>
@@ -1816,9 +1905,9 @@ const SendViewComponent: React.FC = () => {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <UploadCloud className="w-4 h-4 text-emerald-400" />
-              {currentLang === 'en' ? `Sent files history (${sentTransfers.length})` : `Lịch sử tệp bạn đã gửi (${sentTransfers.length})`}
+              {pick(`Lịch sử tệp bạn đã gửi (${sentTransfers.length})`, `Sent files history (${sentTransfers.length})`, `已发送文件记录 (${sentTransfers.length})`)}
             </h3>
-            <span className="text-[11px] text-slate-400">{currentLang === 'en' ? 'Recent photos and files' : 'Ảnh và tệp gần đây'}</span>
+            <span className="text-[11px] text-slate-400">{pick('Ảnh và tệp gần đây', 'Recent photos and files', '最近的照片和文件')}</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1836,7 +1925,7 @@ const SendViewComponent: React.FC = () => {
                       <div 
                         onClick={() => setViewingImage(item.fileData)}
                         className="relative group cursor-pointer w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 shrink-0"
-                        title={currentLang === 'en' ? 'Click to view full image' : 'Bấm để xem ảnh lớn'}
+                        title={pick('Bấm để xem ảnh lớn', 'Click to view full image', '点击查看大图')}
                       >
                         <img src={item.fileData} alt={item.fileName} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                         <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -1855,15 +1944,15 @@ const SendViewComponent: React.FC = () => {
                           <span>{item.fileName}</span>
                         ) : item.textContent ? (
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-slate-400 font-normal">{currentLang === 'en' ? 'Sent:' : 'Gửi:'}</span>
+                            <span className="text-slate-400 font-normal">{pick('Gửi:', 'Sent:', '发送：')}</span>
                             {renderClickableText(item.textContent, true, 'text-emerald-300 underline font-semibold hover:text-white inline-flex items-center gap-1')}
                           </div>
                         ) : (
-                          currentLang === 'en' ? 'File' : 'Tệp tin'
+                          pick('Tệp tin', 'File', '文件')
                         )}
                       </div>
                       <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                        {currentLang === 'en' ? 'To:' : 'Tới:'} <strong className="text-slate-300">{item.receiverName}</strong> • {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {pick('Tới:', 'To:', '发送给：')} <strong className="text-slate-300">{item.receiverName}</strong> • {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                   </div>
@@ -1871,23 +1960,23 @@ const SendViewComponent: React.FC = () => {
                   <div className="flex items-center gap-2 shrink-0">
                     {item.status === 'completed' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> {currentLang === 'en' ? 'Received' : 'Đã nhận'}
+                        <CheckCircle2 className="w-3 h-3" /> {pick('Đã nhận', 'Received', '已接收')}
                       </span>
                     )}
                     {item.status === 'pending' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold">
-                        {currentLang === 'en' ? 'Pending' : 'Đang chờ'}
+                        {pick('Đang chờ', 'Pending', '等待中')}
                       </span>
                     )}
                     {item.status === 'declined' && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20 font-semibold">
-                        {currentLang === 'en' ? 'Declined' : 'Từ chối'}
+                        {pick('Từ chối', 'Declined', '已拒绝')}
                       </span>
                     )}
 
                     <button
                       type="button"
-                      title={currentLang === 'en' ? 'Delete this record' : 'Xóa bản ghi này'}
+                      title={pick('Xóa bản ghi này', 'Delete this record', '删除此记录')}
                       onClick={() => handleDeleteSentItem(item.id)}
                       className="p-1 rounded text-slate-500 hover:text-rose-400 transition-colors"
                     >
@@ -1922,7 +2011,7 @@ const SendViewComponent: React.FC = () => {
             >
               <X className="w-5 h-5" />
             </button>
-            <img src={viewingImage} alt={currentLang === 'en' ? 'Preview' : 'Xem trước'} className="max-w-full max-h-[80vh] rounded-xl object-contain mx-auto shadow-2xl" />
+            <img src={viewingImage} alt={pick('Xem trước', 'Preview', '预览')} className="max-w-full max-h-[80vh] rounded-xl object-contain mx-auto shadow-2xl" />
           </div>
         </div>
       )}
@@ -1948,7 +2037,7 @@ const SendViewComponent: React.FC = () => {
                     {viewingVideo.name}
                   </h4>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    {formatFileSize(viewingVideo.size)} • {currentLang === 'en' ? 'Previewing before send' : 'Xem thử video trước khi gửi'}
+                    {formatFileSize(viewingVideo.size)} • {pick('Xem thử video trước khi gửi', 'Previewing before send', '发送前预览视频')}
                   </p>
                 </div>
               </div>
@@ -1957,7 +2046,7 @@ const SendViewComponent: React.FC = () => {
                 type="button"
                 onClick={() => setViewingVideo(null)}
                 className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                title={currentLang === 'en' ? 'Close' : 'Đóng'}
+                title={pick('Đóng', 'Close', '关闭')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1998,10 +2087,10 @@ const SendViewComponent: React.FC = () => {
                 </div>
                 <div className="min-w-0">
                   <h3 className="text-sm sm:text-base font-bold text-white truncate">
-                    {currentLang === 'en' ? `Send to ${targetDeviceForQuickChoice.deviceName}` : `Gửi tới ${targetDeviceForQuickChoice.deviceName}`}
+                    {pick(`Gửi tới ${targetDeviceForQuickChoice.deviceName}`, `Send to ${targetDeviceForQuickChoice.deviceName}`, `发送到 ${targetDeviceForQuickChoice.deviceName}`)}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    {currentLang === 'en' ? 'Select content type to send:' : 'Chọn loại nội dung muốn gửi:'}
+                    {pick('Chọn loại nội dung muốn gửi:', 'Select content type to send:', '选择要发送的内容类型：')}
                   </p>
                 </div>
               </div>
@@ -2032,7 +2121,7 @@ const SendViewComponent: React.FC = () => {
                   <FileText className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  {currentLang === 'en' ? 'File' : 'Tập tin'}
+                  {pick('Tập tin', 'File', '文件')}
                 </span>
               </button>
 
@@ -2049,7 +2138,7 @@ const SendViewComponent: React.FC = () => {
                   <Folder className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  {currentLang === 'en' ? 'Folder' : 'Thư mục'}
+                  {pick('Thư mục', 'Folder', '文件夹')}
                 </span>
               </button>
 
@@ -2067,7 +2156,7 @@ const SendViewComponent: React.FC = () => {
                   <AlignLeft className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  {currentLang === 'en' ? 'Text' : 'Văn bản'}
+                  {pick('Văn bản', 'Text', '文本')}
                 </span>
               </button>
 
@@ -2084,7 +2173,7 @@ const SendViewComponent: React.FC = () => {
                   <Clipboard className="w-4 h-4" />
                 </div>
                 <span className="text-xs font-semibold text-slate-200 group-hover:text-white">
-                  {currentLang === 'en' ? 'Paste' : 'Dán'}
+                  {pick('Dán', 'Paste', '粘贴')}
                 </span>
               </button>
               
@@ -2099,7 +2188,7 @@ const SendViewComponent: React.FC = () => {
                 className="w-full py-2 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
               >
                 <Cloud className="w-3.5 h-3.5 text-sky-400" />
-                <span>{currentLang === 'en' ? 'Select from Cloud Drive' : 'Chọn từ Kho Cloud Drive'}</span>
+                <span>{pick('Chọn từ Kho Cloud Drive', 'Select from Cloud Drive', '从云盘选择')}</span>
               </button>
             </div>
           </div>
@@ -2123,7 +2212,7 @@ const SendViewComponent: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm sm:text-base font-bold text-white tracking-wide">
-                    {currentLang === 'en' ? 'Add TeraBox / Cloud File' : 'Thêm tệp TeraBox / Cloud'}
+                    {pick('Thêm tệp TeraBox / Cloud', 'Add TeraBox / Cloud File', '添加 TeraBox / 云端文件')}
                   </h3>
                   <span className="text-[10px] text-blue-300 font-medium">Hỗ trợ kho miễn phí 1024 GB (1TB)</span>
                 </div>
@@ -2206,7 +2295,7 @@ const SendViewComponent: React.FC = () => {
                 onClick={() => setIsUrlModalOpen(false)}
                 className="px-3.5 py-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-slate-800"
               >
-                {currentLang === 'en' ? 'Exit' : 'Thoát'}
+                {pick('Thoát', 'Exit', '退出')}
               </button>
               <button
                 type="button"
@@ -2215,7 +2304,7 @@ const SendViewComponent: React.FC = () => {
                 className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:pointer-events-none active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <HardDrive className="w-4 h-4" />
-                <span>{currentLang === 'en' ? 'Add TeraBox File' : 'Xác nhận thêm tệp'}</span>
+                <span>{pick('Xác nhận thêm tệp', 'Add TeraBox File', '确认添加文件')}</span>
               </button>
             </div>
           </div>
@@ -2238,7 +2327,7 @@ const SendViewComponent: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm sm:text-base font-bold text-white tracking-wide flex items-center gap-2">
                 <AlignLeft className="w-4 h-4 text-sky-400" />
-                <span>{currentLang === 'en' ? 'Enter Message' : 'Nhập tin nhắn'}</span>
+                <span>{pick('Nhập tin nhắn', 'Enter Message', '输入消息')}</span>
               </h3>
               <button
                 type="button"
@@ -2260,7 +2349,7 @@ const SendViewComponent: React.FC = () => {
                 onChange={(md) => setModalTextValue(md)}
                 onSend={handleConfirmTextModal}
                 enterKeyMode="newline"
-                placeholder={currentLang === 'en' ? 'Enter message text to send...' : 'Nhập nội dung văn bản cần gửi...'}
+                placeholder={pick('Nhập nội dung văn bản cần gửi...', 'Enter message text to send...', '输入要发送的文本内容...')}
                 className="bg-transparent border-0 min-h-[100px] max-h-[220px]"
               />
             </div>
@@ -2275,14 +2364,14 @@ const SendViewComponent: React.FC = () => {
                 }}
                 className="px-3.5 py-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-slate-800"
               >
-                {currentLang === 'en' ? 'Exit' : 'Thoát'}
+                {pick('Thoát', 'Exit', '退出')}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmTextModal}
                 className="px-5 py-1.5 rounded-full bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-slate-950 text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5"
               >
-                <span>{currentLang === 'en' ? 'Confirm' : 'Xác nhận'}</span>
+                <span>{pick('Xác nhận', 'Confirm', '确认')}</span>
               </button>
             </div>
           </div>

@@ -18,12 +18,13 @@ import {
 import { 
   OFFICIAL_TERMS_OF_SERVICE, 
   OFFICIAL_TERMS_OF_SERVICE_EN, 
+  OFFICIAL_TERMS_OF_SERVICE_ZH,
   MainArticle, 
   SubClause 
 } from '../data/officialTerms';
 import { CloudSendLogo } from './CloudSendLogo';
 import { SilkFabricBackground } from './SilkFabricBackground';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface TermsOfServicePageProps {
   onBack: () => void;
@@ -31,7 +32,10 @@ interface TermsOfServicePageProps {
 
 export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }) => {
   const { currentLang, setLanguage } = useLanguage();
-  const isEn = currentLang === 'en';
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const isEn = !isVi && !isZh;
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -39,8 +43,10 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
 
   // Active localized terms dataset
   const activeTermsData = useMemo(() => {
-    return isEn ? OFFICIAL_TERMS_OF_SERVICE_EN : OFFICIAL_TERMS_OF_SERVICE;
-  }, [isEn]);
+    if (isEn) return OFFICIAL_TERMS_OF_SERVICE_EN;
+    if (isZh) return OFFICIAL_TERMS_OF_SERVICE_ZH;
+    return OFFICIAL_TERMS_OF_SERVICE;
+  }, [isEn, isZh]);
 
   // Filter clauses based on category & search query
   const filteredArticles = useMemo(() => {
@@ -85,6 +91,8 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
   const handleCopyCitation = (clause: SubClause, article: MainArticle) => {
     const citation = isEn
       ? `[ClSend Citation: ${article.articleNumber} - Clause ${clause.clauseNumber}: ${clause.title}]\nContent: ${clause.description}\nPenalty: ${clause.penalty}\nOfficial Source: ${window.location.origin}/?page=rules#clause-${clause.id}`
+      : isZh
+      ? `[ClSend 条款引用: ${article.articleNumber} - 第 ${clause.clauseNumber} 款: ${clause.title}]\n内容：${clause.description}\n处罚：${clause.penalty}\n官方来源：${window.location.origin}/?page=rules#clause-${clause.id}`
       : `[Trích dẫn ClSend: ${article.articleNumber} - Khoản ${clause.clauseNumber}: ${clause.title}]\nNội dung: ${clause.description}\nChế tài: ${clause.penalty}\nNguồn chính thức: ${window.location.origin}/?page=rules#clause-${clause.id}`;
     
     navigator.clipboard.writeText(citation);
@@ -120,7 +128,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
               className="inline-flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-emerald-500/40 text-xs sm:text-sm font-semibold transition-all shadow-md active:scale-95 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4 text-emerald-400" />
-              <span>{isEn ? 'Back to App' : 'Quay lại ứng dụng'}</span>
+              <span>{pick('Quay lại ứng dụng', 'Back to App', '返回应用')}</span>
             </button>
 
             <div className="hidden sm:flex items-center gap-2 pl-3 border-l border-slate-800">
@@ -130,7 +138,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="flex items-center rounded-xl bg-slate-900 border border-slate-700/80 p-0.5">
+            <div translate="no" className="notranslate flex items-center rounded-xl bg-slate-900 border border-slate-700/80 p-0.5">
               <button
                 type="button"
                 onClick={() => setLanguage('vi')}
@@ -157,10 +165,23 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                 <span>🇬🇧</span>
                 <span className="hidden sm:inline">English</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setLanguage('zh-CN')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                  isZh
+                    ? 'bg-emerald-500 text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="中文 (简体 / 繁體)"
+              >
+                <span>🇨🇳</span>
+                <span className="hidden sm:inline">中文</span>
+              </button>
             </div>
 
             <span className="text-[11px] font-mono px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold hidden sm:inline-block">
-              {isEn ? 'v2.5 Issued 2026' : 'v2.5 Ban hành 2026'}
+              {pick('v2.5 Ban hành 2026', 'v2.5 Issued 2026', 'v2.5 2026 年发布')}
             </span>
           </div>
         </div>
@@ -174,32 +195,34 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
           <div className="max-w-3xl space-y-3 relative z-10">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
               <Scale className="w-3.5 h-3.5 text-emerald-400" />
-              <span>{isEn ? 'Official Legal & Community Standards' : 'Văn Bản Pháp Lý & Quy Chuẩn Cộng Đồng Chính Thức'}</span>
+              <span>{pick('Văn Bản Pháp Lý & Quy Chuẩn Cộng Đồng Chính Thức', 'Official Legal & Community Standards', '官方法律与社区安全标准')}</span>
             </div>
 
             <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-              {isEn ? 'ClSend Terms of Service & Data Safety Regulations' : 'Bộ Luật Điều Khoản Sử Dụng & An Toàn Dữ Liệu ClSend'}
+              {pick('Bộ Luật Điều Khoản Sử Dụng & An Toàn Dữ Liệu ClSend', 'ClSend Terms of Service & Data Safety Regulations', 'ClSend 服务条款与数据安全规范')}
             </h1>
 
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              {isEn 
-                ? 'In accordance with Cybersecurity Laws and international P2P data protection standards: These regulations are legally binding on all file transfers, downloads, messaging, and cloud storage across the ClSend ecosystem.'
-                : 'Căn cứ theo Luật An ninh mạng và các tiêu chuẩn bảo mật dữ liệu P2P quốc tế: Đây là bộ quy định có hiệu lực thi hành bắt buộc đối với mọi hoạt động truyền tệp, tải xuống, nhắn tin và lưu trữ đám mây trên hệ sinh thái ClSend.'}
+              {pick(
+                'Căn cứ theo Luật An ninh mạng và các tiêu chuẩn bảo mật dữ liệu P2P quốc tế: Đây là bộ quy định có hiệu lực thi hành bắt buộc đối với mọi hoạt động truyền tệp, tải xuống, nhắn tin và lưu trữ đám mây trên hệ sinh thái ClSend.',
+                'In accordance with Cybersecurity Laws and international P2P data protection standards: These regulations are legally binding on all file transfers, downloads, messaging, and cloud storage across the ClSend ecosystem.',
+                '依据网络安全法规及国际 P2P 数据安全保护标准：本规范对 ClSend 生态内的所有文件传输、下载、消息交流及云端存储均具有强制约束力。'
+              )}
             </p>
 
             {/* Quick Metrics */}
             <div className="pt-2 flex flex-wrap items-center gap-3 sm:gap-6 text-xs text-slate-400">
               <div className="flex items-center gap-1.5 font-semibold text-slate-200">
                 <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span>{activeTermsData.length} {isEn ? 'Main Articles' : 'Điều khoản chính'}</span>
+                <span>{activeTermsData.length} {pick('Điều khoản chính', 'Main Articles', '条核心条款')}</span>
               </div>
               <div className="flex items-center gap-1.5 font-semibold text-slate-200">
                 <span className="w-2 h-2 rounded-full bg-teal-400" />
-                <span>{totalClauses} {isEn ? 'Sub-clauses (1.1, 1.2...)' : 'Khoản luật phân cấp (1.1, 1.2...)'}</span>
+                <span>{totalClauses} {pick('Khoản luật phân cấp (1.1, 1.2...)', 'Sub-clauses (1.1, 1.2...)', '项分级细则 (1.1, 1.2...)')}</span>
               </div>
               <div className="flex items-center gap-1.5 font-semibold text-slate-200">
                 <span className="w-2 h-2 rounded-full bg-cyan-400" />
-                <span>{isEn ? 'Fair 48h Appeal Mechanism' : 'Cơ chế kháng cáo công bằng 48h'}</span>
+                <span>{pick('Cơ chế kháng cáo công bằng 48h', 'Fair 48h Appeal Mechanism', '48 小时公正申诉机制')}</span>
               </div>
             </div>
           </div>
@@ -217,7 +240,11 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={isEn ? "Search by keyword: 1.1, abuse, malware, cloud, P2P, appeal..." : "Tìm kiếm theo từ khóa: 1.1, xúc phạm, mã độc, lừa đảo, cloud, P2P, khiếu nại..."}
+              placeholder={pick(
+                'Tìm kiếm theo từ khóa: 1.1, xúc phạm, mã độc, lừa đảo, cloud, P2P, khiếu nại...',
+                'Search by keyword: 1.1, abuse, malware, cloud, P2P, appeal...',
+                '按关键词搜索：1.1、侮辱、病毒、云盘、P2P、申诉...'
+              )}
               className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs sm:text-sm focus:outline-hidden focus:border-emerald-500/60 transition-colors shadow-inner"
             />
             {searchQuery && (
@@ -226,7 +253,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800 cursor-pointer"
               >
-                {isEn ? 'Clear' : 'Xóa'}
+                {pick('Xóa', 'Clear', '清除')}
               </button>
             )}
           </div>
@@ -242,7 +269,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                   : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
               }`}
             >
-              {isEn ? 'All Articles' : 'Tất cả điều khoản'}
+              {pick('Tất cả điều khoản', 'All Articles', '全部条款')}
             </button>
             {activeTermsData.map((art) => (
               <button
@@ -267,19 +294,21 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
             <div className="p-12 text-center bg-slate-900/60 border border-slate-800 rounded-3xl space-y-3">
               <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
               <h3 className="text-base font-bold text-white">
-                {isEn ? 'No matching terms found' : 'Không tìm thấy điều khoản phù hợp'}
+                {pick('Không tìm thấy điều khoản phù hợp', 'No matching terms found', '未找到匹配的条款')}
               </h3>
               <p className="text-xs text-slate-400">
-                {isEn 
-                  ? 'Try searching with different keywords like "abuse", "malware", "cloud", "1.1" or select "All Articles".'
-                  : 'Thử tìm với từ khóa khác như "xúc phạm", "mã độc", "cloud", "1.1" hoặc chọn tab "Tất cả điều khoản".'}
+                {pick(
+                  'Thử tìm với từ khóa khác như "xúc phạm", "mã độc", "cloud", "1.1" hoặc chọn tab "Tất cả điều khoản".',
+                  'Try searching with different keywords like "abuse", "malware", "cloud", "1.1" or select "All Articles".',
+                  '请尝试搜索“侮辱”、“病毒”、“云盘”、“1.1”等其他关键词，或点击“全部条款”。'
+                )}
               </p>
               <button
                 type="button"
                 onClick={() => { setSearchQuery(''); setSelectedCategory('all'); }}
                 className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
               >
-                {isEn ? 'View all terms' : 'Xem lại toàn bộ điều khoản'}
+                {pick('Xem lại toàn bộ điều khoản', 'View all terms', '查看全部条款')}
               </button>
             </div>
           ) : (
@@ -309,7 +338,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                   </div>
                   
                   <span className="text-xs font-mono text-slate-500 self-start sm:self-center shrink-0">
-                    {article.subClauses.length} {isEn ? 'Clauses' : 'Khoản luật'}
+                    {article.subClauses.length} {pick('Khoản luật', 'Clauses', '项细则')}
                   </span>
                 </div>
 
@@ -325,7 +354,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-900">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
-                            {isEn ? `Clause ${clause.clauseNumber}` : `Khoản ${clause.clauseNumber}`}
+                            {pick(`Khoản ${clause.clauseNumber}`, `Clause ${clause.clauseNumber}`, `第 ${clause.clauseNumber} 款`)}
                           </span>
                           <h3 className="font-bold text-white text-sm sm:text-base">
                             {clause.title}
@@ -340,18 +369,18 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                           <button
                             type="button"
                             onClick={() => handleCopyCitation(clause, article)}
-                            title={isEn ? "Copy this clause citation" : "Sao chép trích dẫn điều khoản này"}
+                            title={pick('Sao chép trích dẫn điều khoản này', 'Copy this clause citation', '复制此条款引用')}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-emerald-300 text-[11px] font-medium transition-colors border border-slate-800 cursor-pointer"
                           >
                             {copiedClauseId === clause.id ? (
                               <>
                                 <Check className="w-3 h-3 text-emerald-400" />
-                                <span className="text-emerald-400">{isEn ? 'Copied' : 'Đã chép'}</span>
+                                <span className="text-emerald-400">{pick('Đã chép', 'Copied', '已复制')}</span>
                               </>
                             ) : (
                               <>
                                 <Copy className="w-3 h-3" />
-                                <span>{isEn ? 'Cite' : 'Trích dẫn'}</span>
+                                <span>{pick('Trích dẫn', 'Cite', '引用')}</span>
                               </>
                             )}
                           </button>
@@ -367,7 +396,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                       {clause.examples && clause.examples.length > 0 && (
                         <div className="space-y-1.5 pt-1">
                           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            {isEn ? 'Specifically prohibited actions:' : 'Hành vi bị nghiêm cấm cụ thể:'}
+                            {pick('Hành vi bị nghiêm cấm cụ thể:', 'Specifically prohibited actions:', '具体禁止行为：')}
                           </p>
                           <ul className="space-y-1 text-xs text-slate-300 pl-1">
                             {clause.examples.map((ex, idx) => (
@@ -384,7 +413,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                       <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex items-start gap-2 text-xs">
                         <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                         <div className="leading-relaxed">
-                          <strong className="text-amber-300">{isEn ? 'Technical sanction: ' : 'Biện pháp chế tài kỹ thuật: '}</strong>
+                          <strong className="text-amber-300">{pick('Biện pháp chế tài kỹ thuật: ', 'Technical sanction: ', '技术处罚措施：')}</strong>
                           <span className="text-slate-300">{clause.penalty}</span>
                         </div>
                       </div>
@@ -400,21 +429,25 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
         <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-xl text-center space-y-4">
           <h3 className="text-lg font-bold text-white flex items-center justify-center gap-2">
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            <span>{isEn ? 'Official Legal Support & Appeal Channel' : 'Kênh Hỗ Trợ Pháp Lý & Tiếp Nhận Kháng Cáo Chính Thức'}</span>
+            <span>{pick('Kênh Hỗ Trợ Pháp Lý & Tiếp Nhận Kháng Cáo Chính Thức', 'Official Legal Support & Appeal Channel', '官方法律支持与申诉受理通道')}</span>
           </h3>
           <p className="text-xs text-slate-400 max-w-xl mx-auto leading-relaxed">
-            {isEn
-              ? 'If you detect harmful or prohibited content in chat rooms or your account was mistakenly restricted by automated AI moderation, please contact our administration team directly via our official channel.'
-              : 'Nếu bạn phát hiện nội dung độc hại trên phòng chat hoặc tài khoản của bạn bị hệ thống AI kiểm duyệt nhầm lẫn, vui lòng liên hệ trực tiếp Ban Quản Trị qua kênh chính thức.'}
+            {pick(
+              'Nếu bạn phát hiện nội dung độc hại trên phòng chat hoặc tài khoản của bạn bị hệ thống AI kiểm duyệt nhầm lẫn, vui lòng liên hệ trực tiếp Ban Quản Trị qua kênh chính thức.',
+              'If you detect harmful or prohibited content in chat rooms or your account was mistakenly restricted by automated AI moderation, please contact our administration team directly via our official channel.',
+              '如您在聊天室中发现违规有害内容，或您的账号被 AI 自动审核系统误判限制，请通过官方渠道直接联系管理团队。'
+            )}
           </p>
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400">
-            <span>{isEn ? 'Support & Appeals: ' : 'Kênh Hỗ Trợ & Khiếu Nại: '}</span>
+            <span>{pick('Kênh Hỗ Trợ & Khiếu Nại: ', 'Support & Appeals: ', '支持与申诉邮箱：')}</span>
             <strong className="text-white">support@clsend.app</strong>
           </div>
           <p className="text-[11px] text-slate-500">
-            {isEn
-              ? 'Resolution and review response timeframe: Within 24 - 48 business hours from receipt.'
-              : 'Thời hạn xử lý và phản hồi kết quả xem xét: Trong vòng 24 - 48 giờ làm việc kể từ thời điểm tiếp nhận.'}
+            {pick(
+              'Thời hạn xử lý và phản hồi kết quả xem xét: Trong vòng 24 - 48 giờ làm việc kể từ thời điểm tiếp nhận.',
+              'Resolution and review response timeframe: Within 24 - 48 business hours from receipt.',
+              '审核处理与反馈时效：收到申诉后 24 - 48 个工作小时内回复。'
+            )}
           </p>
         </div>
       </main>
@@ -422,9 +455,11 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
       {/* Footer */}
       <footer className="w-full py-6 text-center text-xs text-slate-500 border-t border-slate-900 bg-slate-950/80">
         <p>
-          {isEn
-            ? '© 2012 - 2026 ClSend P2P Cloud Suite • Terms of Service & Safety Regulations effective from January 1, 2026.'
-            : '© 2012 - 2026 ClSend P2P Cloud Suite • Văn bản Điều khoản & Quy tắc An toàn có hiệu lực từ ngày 01/01/2026.'}
+          {pick(
+            '© 2012 - 2026 ClSend P2P Cloud Suite • Văn bản Điều khoản & Quy tắc An toàn có hiệu lực từ ngày 01/01/2026.',
+            '© 2012 - 2026 ClSend P2P Cloud Suite • Terms of Service & Safety Regulations effective from January 1, 2026.',
+            '© 2012 - 2026 ClSend P2P Cloud Suite • 服务条款与安全规范自 2026 年 1 月 1 日起生效。'
+          )}
         </p>
       </footer>
     </div>

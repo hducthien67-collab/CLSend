@@ -17,10 +17,14 @@ import {
   X,
   AlertCircle,
   Film,
-  Download
+  Download,
+  RefreshCw
 } from 'lucide-react';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { getFileBlobLocally, storeFileBlobLocally } from '../utils/idbStorage';
+import { useOptionalAuth } from '../context/AuthContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
+import { subscribeUserCloudFiles, syncVideoFileToCloud } from '../utils/cloudSync';
 
 /* 1. TYPES NỘI BỘ (Không cần file types riêng) */
 export interface VideoItem {
@@ -38,6 +42,8 @@ export interface AllInOneVideoPlayerProps {
   isOpen?: boolean;
   onClose?: () => void;
   isEmbedded?: boolean;
+  framelessStage?: boolean;
+  disableCloudPlaylist?: boolean;
   initialSrc?: string;
   initialTitle?: string;
   initialFile?: File | Blob;
@@ -94,37 +100,6 @@ async function deleteVideoFromIndexedDB(id: string): Promise<void> {
   });
 }
 
-/* 3. VIDEO MẪU SẴN (CORS 100% không bị chặn, CDN phân giải cao mượt mà) */
-const DEFAULT_SAMPLES: VideoItem[] = [
-  {
-    id: 'sample-1',
-    title: 'Phim Hoạt Họa W3C (Big Buck Bunny)',
-    src: 'https://www.w3schools.com/html/mov_bbb.mp4',
-    type: 'video/mp4',
-    size: '0.6 MB',
-    resolution: '320 × 240',
-    isLocal: false,
-  },
-  {
-    id: 'sample-2',
-    title: 'Đóa Hoa Nở (Mozilla MDN CC0)',
-    src: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4',
-    type: 'video/mp4',
-    size: '2.5 MB',
-    resolution: '640 × 360',
-    isLocal: false,
-  },
-  {
-    id: 'sample-3',
-    title: 'Đại Dương Xanh (Video.js CDN 100% Mượt)',
-    src: 'https://vjs.zencdn.net/v/oceans.mp4',
-    type: 'video/mp4',
-    size: '46 MB',
-    resolution: '1280 × 720 (HD)',
-    isLocal: false,
-  },
-];
-
 function formatBytes(bytes?: number): string {
   if (!bytes || isNaN(bytes)) return '';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -137,6 +112,8 @@ export default function AllInOneVideoPlayer({
   isOpen = true,
   onClose,
   isEmbedded = false,
+  framelessStage = false,
+  disableCloudPlaylist = false,
   initialSrc = '',
   initialTitle = '',
   initialFile,
@@ -149,8 +126,8 @@ export default function AllInOneVideoPlayer({
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const activeBlobUrlRef = useRef<string | null>(null);
 
-  const [playlist, setPlaylist] = useState<VideoItem[]>(DEFAULT_SAMPLES);
-  const [currentVideo, setCurrentVideo] = useState<VideoItem>(DEFAULT_SAMPLES[0]);
+  const [playlist, setPlaylist] = useState<VideoItem[]>([]);
+  const [currentVideo, setCurrentVideo] = useState<VideoItem | null>(null);
   const [pendingSaveFile, setPendingSaveFile] = useState<File | Blob | null>(null);
   const [savedDbIds, setSavedDbIds] = useState<Set<string>>(new Set());
 
@@ -177,8 +154,17 @@ export default function AllInOneVideoPlayer({
     setTimeout(() => setNotification(null), 3000);
   }, []);
 
-  // Đọc danh sách video đã lưu trong IndexedDB khi khởi tạo
+  const auth = useOptionalAuth();
+  const { t, currentLang } = useLanguage();
+  const syncedCloudKeyRef = useRef<Set<string>>(new Set());
+  const tRef = useRef(t);
+  tRef.current = t;
+  const prevVideoSrcRef = useRef<string>('');
+  const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Đọc danh sách video đã lưu trong IndexedDB khi khởi tạo (chỉ dùng cho chế độ standalone playlist)
   useEffect(() => {
+    if (disableCloudPlaylist) return;
     let isMounted = true;
     getAllSavedVideosFromDB()
       .then((savedItems) => {
@@ -191,7 +177,7 @@ export default function AllInOneVideoPlayer({
               id: item.id,
               title: item.title,
               src: URL.createObjectURL(item.blob),
-              type: 'video/mp4',
+              type: item.blob?.type || 'video/mp4',
               size: item.size,
               isLocal: true,
               blob: item.blob,
@@ -209,9 +195,70 @@ export default function AllInOneVideoPlayer({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [disableCloudPlaylist]);
 
-  // Nạp video ban đầu nếu được truyền qua props (initialFile hoặc initialSrc)
+  // Đồng bộ thời gian thực video đã lưu trên Tài khoản ClSend (tắt khi được nhúng trong VideoPlayerPage đã có bộ sync riêng)
+  useEffect(() => {
+    if (disableCloudPlaylist) return;
+    const activeUser = auth?.currentUser;
+    if (!activeUser?.uid) return;
+
+    const unsubscribe = subscribeUserCloudFiles(
+      activeUser,
+      auth?.userProfile,
+      (cloudFiles) => {
+        const cloudVideos: VideoItem[] = cloudFiles
+          .filter((f) => f.category === 'video' || (f.type && f.type.startsWith('video/')) || /\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i.test(f.name || ''))
+          .map((f) => ({
+            id: `cloud_${f.id}`,
+            title: f.name,
+            src: f.viewUrl || f.url,
+            type: f.type || 'video/mp4',
+            size: typeof f.size === 'number' && f.size > 0 ? formatBytes(f.size) : 'Cloud',
+            isLocal: false,
+          }));
+
+        setPlaylist((prev) => {
+          const nonCloud = prev.filter((v) => !v.id.startsWith('cloud_'));
+          const localTitles = new Set(nonCloud.map((v) => v.title));
+          const uniqueCloud = cloudVideos.filter((cv) => !localTitles.has(cv.title));
+          return [...uniqueCloud, ...nonCloud];
+        });
+
+        setCurrentVideo((prev) => {
+          if (prev || initialSrc || initialFile || cloudVideos.length === 0) return prev;
+          return cloudVideos[0];
+        });
+
+        // Auto-sync any previously local-only saved IndexedDB videos that aren't in Firestore yet
+        getAllSavedVideosFromDB()
+          .then(async (localSaved) => {
+            const existingCloudNames = new Set(cloudFiles.map((f) => f.name));
+            for (const item of localSaved) {
+              if (!item?.blob || !item?.title) continue;
+              const syncKey = `${activeUser.uid}:${item.id}`;
+              if (existingCloudNames.has(item.title) || syncedCloudKeyRef.current.has(syncKey)) continue;
+              syncedCloudKeyRef.current.add(syncKey);
+              try {
+                await syncVideoFileToCloud({
+                  file: item.blob,
+                  name: item.title,
+                  size: item.blob.size,
+                  mimeType: item.blob.type || 'video/mp4',
+                  user: activeUser,
+                  deviceName: auth?.settings?.deviceName,
+                });
+              } catch {}
+            }
+          })
+          .catch(() => {});
+      }
+    );
+
+    return () => unsubscribe();
+  }, [disableCloudPlaylist, initialSrc, initialFile, auth?.currentUser?.uid, auth?.currentUser?.email, auth?.currentUser?.linkedEmail, (auth?.currentUser?.linkedUids || []).join(','), auth?.userProfile?.linkedEmail]);
+
+  // Nạp video ban đầu nếu được truyền qua props (initialFile hoặc initialSrc) — kiểm tra nhanh IDB trước để không bị nháy / remount giữa chừng
   useEffect(() => {
     let isCancelled = false;
 
@@ -227,83 +274,97 @@ export default function AllInOneVideoPlayer({
           ? formatBytes(initialSize)
           : (initialSize || (initialFile.size ? formatBytes(initialFile.size) : ''));
 
-        const titleStr = initialTitle || (initialFile instanceof File ? initialFile.name : 'Video của bạn');
-        const videoId = 'file-' + Date.now();
+        const titleStr = initialTitle || (initialFile instanceof File ? initialFile.name : tRef.current('player.video_label', 'Video'));
+        const videoId = 'file-' + titleStr;
 
         const initialItem: VideoItem = {
           id: videoId,
           title: titleStr,
           src: objectUrl,
           type: (initialFile as any).type || 'video/mp4',
-          size: sizeStr || 'Tệp trên máy',
+          size: sizeStr || tRef.current('player.local_file_badge', 'Tệp trên máy'),
           isLocal: true,
           blob: initialFile,
         };
 
-        // Tự động lưu vào IndexedDB để lần sau mở lại xem ngay lập tức
-        saveVideoToIndexedDB({ id: videoId, title: titleStr, blob: initialFile, size: sizeStr || 'Tệp trên máy' }).catch(() => {});
+        saveVideoToIndexedDB({ id: videoId, title: titleStr, blob: initialFile, size: sizeStr || 'Local' }).catch(() => {});
         storeFileBlobLocally(titleStr, initialFile).catch(() => {});
 
         setPendingSaveFile(initialFile);
         setCurrentVideo(initialItem);
         setPlaylist((prev) => [initialItem, ...prev.filter((v) => v.id !== initialItem.id)]);
         setPlaybackError(null);
-        showToast(`Đã mở "${titleStr}" trực tiếp từ máy của bạn!`);
       } catch (err: any) {
-        console.error('Lỗi khi nạp initialFile:', err);
+        console.error('Error loading initialFile:', err);
       }
     } else if (initialSrc) {
-      const sizeStr = typeof initialSize === 'number' ? formatBytes(initialSize) : (initialSize || 'Trực tuyến');
-      const titleStr = initialTitle || initialSrc.split('/').pop()?.split('?')[0] || 'Video trực tuyến';
+      const sizeStr = typeof initialSize === 'number' ? formatBytes(initialSize) : (initialSize || tRef.current('player.online_badge', 'Trực tuyến'));
+      const titleStr = initialTitle || initialSrc.split('/').pop()?.split('?')[0] || tRef.current('player.video_label', 'Video');
+      const stableId = initialSrc;
 
-      // Kiểm tra xem tệp video đã có sẵn trong bộ nhớ IndexedDB chưa (đã tải lên trước đó)
+      let urlFileId: string | undefined;
+      try {
+        urlFileId = new URL(initialSrc, 'http://localhost').searchParams.get('fileId') || undefined;
+      } catch {}
+
       const lookupKeys = [
-        titleStr,
+        urlFileId,
         initialSrc.split('/api/files/view/')[1]?.split('?')[0],
         initialSrc.split('/api/files/download/')[1]?.split('?')[0],
+        titleStr,
       ].filter(Boolean) as string[];
 
-      (async () => {
-        let foundBlob: Blob | null = null;
+      const tryQuickIdbLookup = async (): Promise<Blob | null> => {
+        if (initialSrc.startsWith('blob:') || initialSrc.startsWith('data:')) return null;
         for (const k of lookupKeys) {
           try {
             const b = await getFileBlobLocally(k);
-            if (b) {
-              foundBlob = b;
-              break;
-            }
+            if (b && b.size > 0) return b;
           } catch {}
         }
+        return null;
+      };
+
+      (async () => {
+        // Race IDB vs 60ms so cached blobs mount ONCE directly without ever swapping <video key> mid-playback
+        const foundBlob = await Promise.race([
+          tryQuickIdbLookup(),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 60)),
+        ]);
 
         if (isCancelled) return;
 
-        const isLocalFound = Boolean(foundBlob);
-        let resolvedSrc = initialSrc;
         if (foundBlob) {
           if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
-          resolvedSrc = URL.createObjectURL(foundBlob);
+          const resolvedSrc = URL.createObjectURL(foundBlob);
           activeBlobUrlRef.current = resolvedSrc;
-        }
 
-        const initialItem: VideoItem = {
-          id: 'initial-' + Date.now(),
-          title: titleStr,
-          src: resolvedSrc,
-          type: foundBlob?.type || 'video/mp4',
-          size: sizeStr,
-          isLocal: isLocalFound || initialSrc.startsWith('blob:'),
-          blob: foundBlob || undefined
-        };
-
-        if (foundBlob) {
+          const cachedItem: VideoItem = {
+            id: stableId,
+            title: titleStr,
+            src: resolvedSrc,
+            type: foundBlob?.type || 'video/mp4',
+            size: sizeStr,
+            isLocal: true,
+            blob: foundBlob
+          };
           setPendingSaveFile(foundBlob);
-          showToast(`Đã mở "${titleStr}" từ bộ nhớ lưu trữ!`);
-        } else {
-          showToast(`Đang phát "${titleStr}" từ Kho Cloud...`);
+          setCurrentVideo(cachedItem);
+          setPlaylist((prev) => [cachedItem, ...prev.filter((v) => v.id !== stableId)]);
+          setPlaybackError(null);
+          return;
         }
 
-        setCurrentVideo(initialItem);
-        setPlaylist((prev) => [initialItem, ...prev.filter((v) => v.id !== initialItem.id)]);
+        const networkItem: VideoItem = {
+          id: stableId,
+          title: titleStr,
+          src: initialSrc,
+          type: 'video/mp4',
+          size: sizeStr,
+          isLocal: initialSrc.startsWith('blob:'),
+        };
+        setCurrentVideo(networkItem);
+        setPlaylist((prev) => [networkItem, ...prev.filter((v) => v.id !== stableId)]);
         setPlaybackError(null);
       })();
     }
@@ -315,9 +376,9 @@ export default function AllInOneVideoPlayer({
         activeBlobUrlRef.current = null;
       }
     };
-  }, [initialFile, initialSrc, initialTitle, initialSize, showToast]);
+  }, [initialFile, initialSrc, initialTitle, initialSize]);
 
-  const handleMouseMove = () => {
+  const wakeControls = () => {
     setShowControls(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (isPlaying) {
@@ -325,33 +386,34 @@ export default function AllInOneVideoPlayer({
     }
   };
 
-  // Tải lại video an toàn khi đổi nguồn
+  // Đặt lại trạng thái UI khi đổi sang video khác (không gọi video.load() lại lúc vừa mount để tránh giật/ẩn khung hình)
   useEffect(() => {
-    const video = videoRef.current;
-    if (video && currentVideo.src) {
-      video.pause();
-      setIsPlaying(false);
-      setCurrentTime(0);
-      setPlaybackError(null);
-      setIsBuffering(false);
-      try {
-        video.load();
-      } catch (e) {
-        console.warn('Lỗi load video:', e);
-      }
-    }
-  }, [currentVideo.src]);
+    const nextSrc = currentVideo?.src || '';
+    if (prevVideoSrcRef.current === nextSrc) return;
+    prevVideoSrcRef.current = nextSrc;
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setPlaybackError(null);
+    setIsBuffering(false);
+  }, [currentVideo?.src]);
 
-  const togglePlay = () => {
+  const togglePlay = (e?: React.SyntheticEvent) => {
+    e?.stopPropagation?.();
+    wakeControls();
     const video = videoRef.current;
     if (!video) return;
 
     if (video.paused || video.ended) {
-      if (!currentVideo.src) {
-        setPlaybackError('Chưa có nguồn video. Vui lòng chọn tệp từ máy tính.');
+      if (!currentVideo?.src) {
+        setPlaybackError(t('player.cannot_play_default'));
         return;
       }
       setPlaybackError(null);
+      if (video.readyState === 0) {
+        try {
+          video.load();
+        } catch {}
+      }
       const playPromise = video.play();
       if (playPromise !== undefined) {
         playPromise
@@ -360,13 +422,30 @@ export default function AllInOneVideoPlayer({
             setPlaybackError(null);
           })
           .catch((err: any) => {
-            console.warn('Lỗi phát:', err);
-            if (err.name === 'NotAllowedError') {
-              setPlaybackError('Trình duyệt chặn tự động phát. Hãy bấm nút Play ở giữa để xem.');
-            } else if (err.name === 'NotSupportedError' || err.message?.toLowerCase().includes('no supported sources')) {
-              setPlaybackError('Nguồn video này đang được chuẩn bị hoặc bị chặn mạng. Hãy thử chọn tệp MP4 trực tiếp từ máy của bạn.');
-            } else if (err.name !== 'AbortError') {
-              setPlaybackError('Không thể phát video: ' + (err.message || 'Lỗi không xác định'));
+            console.warn('Playback warning:', err);
+            if (err?.name === 'NotAllowedError') {
+              try {
+                video.muted = true;
+                setIsMuted(true);
+                const retryPromise = video.play();
+                if (retryPromise !== undefined) {
+                  retryPromise
+                    .then(() => {
+                      setIsPlaying(true);
+                      setPlaybackError(null);
+                    })
+                    .catch(() => {
+                      setPlaybackError(t('player.click_to_play'));
+                      setIsPlaying(false);
+                    });
+                  return;
+                }
+              } catch {}
+              setPlaybackError(t('player.click_to_play'));
+            } else if (err?.name === 'NotSupportedError' || err?.message?.toLowerCase().includes('no supported sources')) {
+              setPlaybackError(t('player.cannot_play_default'));
+            } else if (err?.name !== 'AbortError') {
+              setPlaybackError(t('player.cannot_play_title') + ': ' + (err?.message || 'Unknown error'));
             }
             setIsPlaying(false);
           });
@@ -398,14 +477,17 @@ export default function AllInOneVideoPlayer({
       setCurrentVideo(newVideo);
       setPlaybackError(null);
       setIsPlaying(false);
-      showToast(`Đã mở "${file.name}" từ máy tính của bạn!`);
+      showToast(t('player.opened_local_toast', 'Đã mở "{name}"').replace('{name}', file.name));
     } catch (err: any) {
-      setPlaybackError('Lỗi khi nạp tệp: ' + err.message);
+      setPlaybackError(err?.message || t('player.cannot_play_title'));
     }
   };
 
   const handleSaveToDB = async () => {
+    if (!currentVideo) return;
     try {
+      const activeUser = auth?.currentUser;
+
       // 1. Nếu đã có blob trong RAM / máy tính
       const blobToSave = currentVideo.blob || pendingSaveFile;
       if (blobToSave) {
@@ -416,15 +498,49 @@ export default function AllInOneVideoPlayer({
         setSavedDbIds((prev) => new Set(prev).add(id));
         setSavedDbIds((prev) => new Set(prev).add(currentVideo.id));
         setPendingSaveFile(null);
-        showToast('✓ Đã lưu video vĩnh viễn vào bộ nhớ (F5 không mất)!');
+
+        if (activeUser?.uid) {
+          showToast(pickLang(currentLang, 'Đã lưu cục bộ! Đang đồng bộ lên tài khoản ClSend...', 'Saved locally! Syncing to your ClSend account...', '已本地保存！正在同步至 ClSend 账户...'));
+          try {
+            const synced = await syncVideoFileToCloud({
+              file: blobToSave,
+              url: currentVideo.src && !currentVideo.src.startsWith('blob:') ? currentVideo.src : undefined,
+              name: currentVideo.title,
+              size: blobToSave.size,
+              mimeType: blobToSave.type || 'video/mp4',
+              user: activeUser,
+              deviceName: auth?.settings?.deviceName,
+            });
+            if (synced) {
+              showToast(pickLang(currentLang, '✓ Đã lưu và đồng bộ video lên Tài khoản ClSend (Mọi thiết bị/Google đều thấy)!', '✓ Saved & synced video to ClSend Account (accessible across devices)!', '✓ 已保存并同步视频至 ClSend 账户（跨设备可见）！'));
+              return;
+            }
+          } catch (cloudErr) {
+            console.warn('Cloud sync video error:', cloudErr);
+          }
+        }
+
+        showToast(pickLang(currentLang, '✓ Đã lưu video vào bộ nhớ trình duyệt!', '✓ Saved video to browser storage!', '✓ 视频已保存至浏览器缓存！'));
         return;
       }
 
-      // 2. Nếu là video từ Cloud Drive / đường dẫn mạng
+      // 2. Nếu là video từ Cloud Drive / phòng chat / đường dẫn mạng
       if (currentVideo.src && !currentVideo.src.startsWith('blob:')) {
-        showToast('Đang tải dữ liệu để lưu vĩnh viễn vào máy...');
+        if (activeUser?.uid) {
+          try {
+            await syncVideoFileToCloud({
+              url: currentVideo.src,
+              name: currentVideo.title,
+              mimeType: currentVideo.type || 'video/mp4',
+              user: activeUser,
+              deviceName: auth?.settings?.deviceName,
+            });
+          } catch {}
+        }
+
+        showToast(pickLang(currentLang, 'Đang tải dữ liệu để lưu ngoại tuyến & đồng bộ...', 'Downloading data for offline save & sync...', '正在下载数据以离线保存并同步...'));
         const res = await fetch(currentVideo.src);
-        if (!res.ok) throw new Error('Không thể tải tệp từ máy chủ');
+        if (!res.ok) throw new Error(pickLang(currentLang, 'Không thể tải tệp từ máy chủ', 'Unable to fetch file from server', '无法从服务器加载文件'));
         const downloadedBlob = await res.blob();
         const sizeMB = formatBytes(downloadedBlob.size);
         const id = 'saved-' + Date.now();
@@ -432,20 +548,24 @@ export default function AllInOneVideoPlayer({
         await storeFileBlobLocally(currentVideo.title, downloadedBlob);
         setSavedDbIds((prev) => new Set(prev).add(id));
         setSavedDbIds((prev) => new Set(prev).add(currentVideo.id));
-        setCurrentVideo((prev) => ({
+        setCurrentVideo((prev) => (prev ? {
           ...prev,
           isLocal: true,
           blob: downloadedBlob,
           src: URL.createObjectURL(downloadedBlob)
-        }));
-        showToast('✓ Đã lưu video vĩnh viễn vào bộ nhớ (F5 không mất)!');
+        } : prev));
+        showToast(
+          activeUser?.uid
+            ? pickLang(currentLang, '✓ Đã lưu & đồng bộ video vào Tài khoản ClSend!', '✓ Saved & synced video to ClSend Account!', '✓ 已保存并同步视频至 ClSend 账户！')
+            : pickLang(currentLang, '✓ Đã lưu video vĩnh viễn vào bộ nhớ (F5 không mất)!', '✓ Video saved offline (persists across reloads)!', '✓ 视频已持久保存至本地（刷新不丢失）！')
+        );
         return;
       }
 
-      showToast('Video này đã được lưu trong bộ nhớ');
+      showToast(pickLang(currentLang, 'Video này đã được lưu trong bộ nhớ', 'This video is already saved in storage', '此视频已保存在本地存储中'));
     } catch (err: any) {
       console.error('Lỗi khi lưu video vào IndexedDB:', err);
-      showToast('Lỗi lưu: ' + (err.message || 'Không thể lưu video'));
+      showToast(pickLang(currentLang, 'Lỗi lưu: ', 'Save error: ', '保存出错：') + (err.message || pickLang(currentLang, 'Không thể lưu video', 'Unable to save video', '无法保存视频')));
     }
   };
 
@@ -458,25 +578,26 @@ export default function AllInOneVideoPlayer({
         next.delete(id);
         return next;
       });
-      setPlaylist((prev) => prev.filter((v) => v.id !== id));
-      if (currentVideo.id === id) setCurrentVideo(DEFAULT_SAMPLES[0]);
-      showToast('Đã xóa video khỏi bộ nhớ');
+      const nextList = playlist.filter((v) => v.id !== id);
+      setPlaylist(nextList);
+      if (currentVideo?.id === id) setCurrentVideo(nextList[0] || null);
+      showToast(pickLang(currentLang, 'Đã xóa video khỏi bộ nhớ', 'Removed video from storage', '已从存储中移除视频'));
     } catch (err: any) {
-      showToast('Không thể xóa: ' + err.message);
+      showToast(pickLang(currentLang, 'Không thể xóa: ', 'Unable to delete: ', '无法删除：') + err.message);
     }
   };
 
   // TÍNH NĂNG TẢI VIDEO VỀ MÁY TÍNH ("và có thể tải về")
   const handleDownload = () => {
+    if (!currentVideo) return;
     if (onDownload && currentVideo.id.startsWith('initial-')) {
       onDownload();
-      showToast('Đang bắt đầu tải video...');
+      showToast(t('player.downloading_toast', 'Đang tải "{name}"...').replace('{name}', currentVideo.title));
       return;
     }
 
     try {
       if (currentVideo.blob) {
-        // Tải trực tiếp từ blob trong RAM / máy tính
         const blobUrl = URL.createObjectURL(currentVideo.blob);
         const a = document.createElement('a');
         a.href = blobUrl;
@@ -487,23 +608,22 @@ export default function AllInOneVideoPlayer({
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-        showToast(`Đang tải "${currentVideo.title}" về máy tính...`);
+        showToast(t('player.downloading_toast', 'Đang tải "{name}"...').replace('{name}', currentVideo.title));
         return;
       }
 
       if (currentVideo.src) {
         let downloadUrl = currentVideo.src;
-        // Chuyển đổi link view sang download an toàn của backend ClSend nếu có
         if (downloadUrl.includes('/api/files/view/')) {
           downloadUrl = downloadUrl.replace('/api/files/view/', '/api/files/download/');
         }
 
         downloadFileSafely(downloadUrl, currentVideo.title);
-        showToast(`Đang tải "${currentVideo.title}"...`);
+        showToast(t('player.downloading_toast', 'Đang tải "{name}"...').replace('{name}', currentVideo.title));
       }
     } catch (err: any) {
-      console.error('Lỗi khi tải video:', err);
-      showToast('Không thể tải video: ' + (err.message || 'Lỗi kết nối'));
+      console.error('Download error:', err);
+      showToast(err?.message || t('player.stream_failed'));
     }
   };
 
@@ -523,7 +643,7 @@ export default function AllInOneVideoPlayer({
     setPlaybackError(null);
     setCustomUrlInput('');
     setActiveBottomTab(null);
-    showToast('Đã nạp video từ đường dẫn mạng!');
+    showToast(pickLang(currentLang, 'Đã nạp video từ đường dẫn mạng!', 'Loaded video from stream URL!', '已加载网络视频链接！'));
   };
 
   const formatTime = (secs: number) => {
@@ -596,65 +716,77 @@ export default function AllInOneVideoPlayer({
   const videoCardContent = (
     <div
       ref={containerRef}
-      onMouseMove={handleMouseMove}
-      className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col w-full max-w-5xl mx-auto transition-all select-none relative"
+      onMouseMove={wakeControls}
+      onTouchStart={wakeControls}
+      className={
+        framelessStage
+          ? 'w-full h-full flex flex-col justify-center overflow-hidden select-none relative bg-transparent'
+          : 'bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col w-full max-w-5xl mx-auto transition-all select-none relative'
+      }
     >
       <input ref={fileInputRef} type="file" accept="video/*,.mp4,.webm,.mov,.ogg,.mkv" onChange={handleFileUpload} className="hidden" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 sm:px-5 py-3 bg-slate-950/95 border-b border-slate-800 text-white">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
-            <Film className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold truncate max-w-xs sm:max-w-md">{currentVideo.title}</h2>
-              {currentVideo.isLocal ? (
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
-                  Tệp trên máy
-                </span>
-              ) : (
-                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
-                  Trực tuyến
-                </span>
-              )}
+      {/* Header (omitted in framelessStage mode since parent viewer supplies slim unified chrome) */}
+      {!framelessStage && (
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3 bg-slate-950/95 border-b border-slate-800 text-white">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+              <Film className="w-4 h-4 text-emerald-400" />
             </div>
-            <p className="text-[11px] text-slate-400 truncate">
-              {currentVideo.resolution || 'Tự động thích ứng'} • {currentVideo.size || 'Stream'} • GPU Decode Không Giật Lag
-            </p>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold truncate max-w-xs sm:max-w-md">
+                  {currentVideo?.title || t('player.empty_stage_title')}
+                </h2>
+                {currentVideo && (
+                  currentVideo.isLocal ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                      {t('player.local_file_badge')}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 shrink-0">
+                      {t('player.online_badge')}
+                    </span>
+                  )
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 truncate">
+                {currentVideo
+                  ? `${currentVideo.resolution || t('player.adaptive_stream')} • ${currentVideo.size || 'Stream'} • ${t('player.gpu_sub')}`
+                  : t('player.empty_stage_desc')}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {currentVideo?.src && (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-colors shadow-sm cursor-pointer"
+                title={t('player.download_tooltip')}
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline-block">{t('player.download')}</span>
+              </button>
+            )}
+
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer group"
+                title={t('player.exit')}
+              >
+                <span className="hidden sm:inline-block">{t('player.exit')}</span>
+                <X className="w-4 h-4 transition-transform group-hover:rotate-90 duration-200" />
+              </button>
+            )}
           </div>
         </div>
+      )}
 
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Nút Tải Về Trực Tiếp */}
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-colors shadow-sm cursor-pointer"
-            title="Tải video này về máy tính"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline-block">Tải về</span>
-          </button>
-
-
-
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer group"
-              title="Thoát xem video"
-            >
-              <span className="hidden sm:inline-block">Thoát</span>
-              <X className="w-4 h-4 transition-transform group-hover:rotate-90 duration-200" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Banner thông báo trạng thái màu xanh ngọc đồng bộ với ảnh mẫu */}
+      {/* Notification Banner */}
       {notification && (
         <div className="w-full px-4 py-2 bg-emerald-950/80 text-emerald-300 border-b border-emerald-500/30 text-xs font-medium flex items-center gap-2 animate-in fade-in duration-150">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -662,16 +794,52 @@ export default function AllInOneVideoPlayer({
         </div>
       )}
 
-      {/* Màn hình video tỉ lệ 16:9 ở chính giữa */}
-      <div className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden group select-none">
-        {playbackError && (
+      {/* Stage */}
+      <div
+        className={
+          framelessStage
+            ? 'relative w-full h-full flex items-center justify-center overflow-hidden group select-none bg-transparent'
+            : 'relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden group select-none'
+        }
+      >
+        {!currentVideo?.src && (
+          <div className="absolute inset-0 z-20 bg-slate-950/95 flex flex-col items-center justify-center p-6 text-center space-y-3">
+            <Film className="w-10 h-10 text-slate-600" />
+            <h3 className="text-sm font-bold text-white">{t('player.empty_stage_title')}</h3>
+            <p className="text-xs text-slate-400 max-w-md">{t('player.empty_stage_desc')}</p>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium cursor-pointer flex items-center gap-1.5"
+            >
+              <FolderOpen className="w-4 h-4" />
+              <span>{t('player.empty_stage_btn')}</span>
+            </button>
+          </div>
+        )}
+
+        {currentVideo?.src && playbackError && (
           <div className="absolute inset-0 z-20 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
             <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mb-3 border border-rose-500/30">
               <AlertCircle className="w-6 h-6" />
             </div>
-            <h3 className="text-sm font-bold text-white mb-1">Không thể phát tệp video này</h3>
+            <h3 className="text-sm font-bold text-white mb-1">{t('player.cannot_play_title')}</h3>
             <p className="text-xs text-slate-300 max-w-md leading-relaxed mb-4">{playbackError}</p>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setPlaybackError(null);
+                  setIsBuffering(true);
+                  try {
+                    videoRef.current?.load();
+                  } catch {}
+                }}
+                className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>{t('player.retry')}</span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -680,93 +848,150 @@ export default function AllInOneVideoPlayer({
                 className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium cursor-pointer flex items-center gap-1.5"
               >
                 <FolderOpen className="w-4 h-4" />
-                <span>Chọn lại tệp từ máy</span>
+                <span>{t('player.pick_another')}</span>
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setCurrentVideo(DEFAULT_SAMPLES[0]);
-                  setPlaybackError(null);
-                }}
-                className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium cursor-pointer"
+                onClick={handleDownload}
+                className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium cursor-pointer flex items-center gap-1.5"
               >
-                Xem video mẫu
+                <Download className="w-3.5 h-3.5" />
+                <span>{t('player.download')}</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Vòng xoay đệm: Chỉ hiện khi thực sự đang phát mà mạng bị khựng, KHÔNG BAO GIỜ hiện khi đang tạm dừng hoặc chưa bấm phát */}
+        {/* Buffering Spinner */}
         {isBuffering && isPlaying && !playbackError && (
           <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none bg-black/40 backdrop-blur-xs">
             <div className="flex flex-col items-center gap-2">
               <div className="w-12 h-12 border-3 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
-              <span className="text-xs text-indigo-300 font-medium bg-slate-900/80 px-2.5 py-1 rounded-full border border-slate-700">Đang đồng bộ luồng...</span>
+              <span className="text-xs text-indigo-300 font-medium bg-slate-900/80 px-2.5 py-1 rounded-full border border-slate-700">{t('player.syncing_stream')}</span>
             </div>
           </div>
         )}
 
-        <video
-          key={currentVideo.src}
-          ref={videoRef}
-          src={currentVideo.src}
-          preload="auto"
-          playsInline
-          crossOrigin="anonymous"
-          onClick={togglePlay}
-          onTimeUpdate={() => {
-            if (videoRef.current) {
-              setCurrentTime(videoRef.current.currentTime);
-              setIsBuffering(false);
-            }
-          }}
-          onLoadedMetadata={() => {
-            if (videoRef.current) {
-              setDuration(videoRef.current.duration);
-              setPlaybackError(null);
-              setIsBuffering(false);
-              if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
-                const res = `${videoRef.current.videoWidth} × ${videoRef.current.videoHeight}`;
-                setCurrentVideo((prev) => ({ ...prev, resolution: res }));
+        {currentVideo?.src && (
+          <video
+            key={currentVideo.src}
+            ref={videoRef}
+            src={currentVideo.src}
+            preload="metadata"
+            playsInline
+            {...({ 'webkit-playsinline': 'true', 'x-webkit-playsinline': 'true', 'x-webkit-airplay': 'allow' } as any)}
+            onClick={togglePlay}
+            onTimeUpdate={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
               }
-            }
-          }}
-          onLoadedData={() => {
-            setIsBuffering(false);
-          }}
-          onCanPlay={() => {
-            setIsBuffering(false);
-          }}
-          onCanPlayThrough={() => {
-            setIsBuffering(false);
-          }}
-          onSeeked={() => {
-            setIsBuffering(false);
-            if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
-          }}
-          onWaiting={() => {
-            if (videoRef.current && !videoRef.current.paused) {
-              setIsBuffering(true);
-            }
-          }}
-          onPlaying={() => {
-            setIsBuffering(false);
-            setIsPlaying(true);
-            setPlaybackError(null);
-          }}
-          onPause={() => {
-            setIsPlaying(false);
-            setIsBuffering(false);
-          }}
-          onError={() => {
-            setPlaybackError('Trình duyệt không hỗ trợ giải mã trực tiếp codec này hoặc đường truyền bị gián đoạn. Bạn có thể bấm nút "Tải về" để xem trên máy bằng VLC/Media Player hoặc chọn tệp MP4 chuẩn.');
-            setIsBuffering(false);
-            setIsPlaying(false);
-          }}
-          className="w-full h-full object-contain cursor-pointer"
-        />
+              if (videoRef.current) {
+                setCurrentTime(videoRef.current.currentTime);
+                setIsBuffering(false);
+              }
+            }}
+            onLoadedMetadata={() => {
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                setPlaybackError(null);
+                setIsBuffering(false);
+                if (videoRef.current.videoWidth && videoRef.current.videoHeight) {
+                  const res = `${videoRef.current.videoWidth} × ${videoRef.current.videoHeight}`;
+                  setCurrentVideo((prev) => (prev && prev.resolution !== res ? { ...prev, resolution: res } : prev));
+                }
+              }
+            }}
+            onLoadedData={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsBuffering(false);
+            }}
+            onCanPlay={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsBuffering(false);
+            }}
+            onCanPlayThrough={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsBuffering(false);
+            }}
+            onSeeked={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsBuffering(false);
+              if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+            }}
+            onWaiting={() => {
+              if (videoRef.current && !videoRef.current.paused) {
+                if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = setTimeout(() => {
+                  if (videoRef.current && !videoRef.current.paused && videoRef.current.readyState < 3) {
+                    setIsBuffering(true);
+                  }
+                }, 250);
+              }
+            }}
+            onPlaying={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsBuffering(false);
+              setIsPlaying(true);
+              setPlaybackError(null);
+            }}
+            onPause={() => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              setIsPlaying(false);
+              setIsBuffering(false);
+            }}
+            onError={async () => {
+              if (waitingTimerRef.current) {
+                clearTimeout(waitingTimerRef.current);
+                waitingTimerRef.current = null;
+              }
+              // Fallback check IDB cache before displaying playback error
+              if (currentVideo?.src && !currentVideo.src.startsWith('blob:')) {
+                try {
+                  let fid: string | undefined;
+                  try { fid = new URL(currentVideo.src, 'http://localhost').searchParams.get('fileId') || undefined; } catch {}
+                  const candidates = [fid, currentVideo.title].filter(Boolean) as string[];
+                  for (const k of candidates) {
+                    const blob = await getFileBlobLocally(k);
+                    if (blob && blob.size > 0) {
+                      if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+                      const blobUrl = URL.createObjectURL(blob);
+                      activeBlobUrlRef.current = blobUrl;
+                      setCurrentVideo((prev) => prev ? { ...prev, src: blobUrl, isLocal: true, blob } : prev);
+                      setPlaybackError(null);
+                      setIsBuffering(false);
+                      return;
+                    }
+                  }
+                } catch {}
+              }
+              setPlaybackError(tRef.current('player.cannot_play_default'));
+              setIsBuffering(false);
+              setIsPlaying(false);
+            }}
+            className="w-full h-full object-contain cursor-pointer"
+          />
+        )}
 
-        {!isPlaying && !playbackError && (
+        {currentVideo?.src && !isPlaying && !playbackError && (
           <button
             type="button"
             onClick={togglePlay}
@@ -788,7 +1013,12 @@ export default function AllInOneVideoPlayer({
 
         {/* Thanh điều khiển video */}
         <div
-          className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-4 pt-10 transition-opacity duration-300 flex flex-col gap-2 ${
+          onClick={(e) => e.stopPropagation()}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            wakeControls();
+          }}
+          className={`absolute bottom-0 inset-x-0 z-20 bg-gradient-to-t from-black/95 via-black/60 to-transparent px-3 pb-3 pt-10 sm:p-4 sm:pt-10 transition-opacity duration-300 flex flex-col gap-1.5 sm:gap-2 ${
             showControls || !isPlaying ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
         >
@@ -798,7 +1028,7 @@ export default function AllInOneVideoPlayer({
             onClick={handleProgressBarClick}
             onMouseMove={handleProgressBarMouseMove}
             onMouseLeave={handleProgressBarMouseLeave}
-            className="relative group/bar py-2 flex items-center cursor-pointer select-none"
+            className="relative group/bar py-2.5 sm:py-2 flex items-center cursor-pointer select-none"
           >
             {/* Tooltip thời gian khi di chuột xem trước */}
             {hoverSeekTime !== null && (
@@ -841,40 +1071,43 @@ export default function AllInOneVideoPlayer({
             />
           </div>
 
-          <div className="flex items-center justify-between text-white text-xs pt-1">
-            <div className="flex items-center gap-2">
-              <button onClick={togglePlay} className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer" title="Phát / Tạm dừng (Space)">
+          <div className="flex items-center justify-between text-white text-xs pt-0.5 gap-1">
+            <div className="flex items-center gap-0.5 sm:gap-2 min-w-0">
+              <button type="button" onClick={togglePlay} className="min-w-[38px] min-h-[38px] sm:min-w-0 sm:min-h-0 p-2 sm:p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 flex items-center justify-center cursor-pointer" title={t('player.shortcut_space')}>
                 {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (videoRef.current) videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
                 }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 cursor-pointer"
-                title="Lùi 10s (Phím mũi tên trái)"
+                className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 text-slate-300 flex items-center justify-center cursor-pointer"
+                title="-10s"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (videoRef.current) videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 10);
                 }}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 cursor-pointer"
-                title="Tua 10s (Phím mũi tên phải)"
+                className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 text-slate-300 flex items-center justify-center cursor-pointer"
+                title="+10s"
               >
                 <RotateCw className="w-3.5 h-3.5" />
               </button>
 
-              <div className="flex items-center gap-1.5 group/vol ml-1">
+              <div className="flex items-center gap-1.5 group/vol sm:ml-1">
                 <button
+                  type="button"
                   onClick={() => {
                     if (videoRef.current) {
                       videoRef.current.muted = !isMuted;
                       setIsMuted(!isMuted);
                     }
                   }}
-                  className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
-                  title="Bật/Tắt âm thanh (Phím M)"
+                  className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 flex items-center justify-center cursor-pointer"
+                  title="Mute / Unmute (M)"
                 >
                   {isMuted || volume === 0 ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4" />}
                 </button>
@@ -890,26 +1123,27 @@ export default function AllInOneVideoPlayer({
                     setIsMuted(val === 0);
                     if (videoRef.current) videoRef.current.volume = val;
                   }}
-                  className="w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  className="hidden sm:block w-16 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
                 />
               </div>
 
-              <span className="font-mono text-[11px] text-slate-300 ml-2">
+              <span className="font-mono text-[11px] text-slate-300 ml-1 sm:ml-2 tabular-nums whitespace-nowrap">
                 {formatTime(currentTime)} / {formatTime(duration)}
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              {/* Nút tải về nhanh trên thanh điều khiển */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
               <button
+                type="button"
                 onClick={handleDownload}
-                className="p-1.5 rounded-lg hover:bg-white/10 text-emerald-400 hover:text-emerald-300 cursor-pointer flex items-center gap-1 text-[11px]"
-                title="Tải video này"
+                className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 text-emerald-400 hover:text-emerald-300 cursor-pointer flex items-center justify-center gap-1 text-[11px]"
+                title={t('player.download_tooltip')}
               >
                 <Download className="w-3.5 h-3.5" />
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   const rates = [1, 1.25, 1.5, 2];
                   const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
@@ -917,21 +1151,27 @@ export default function AllInOneVideoPlayer({
                   setPlaybackRate(nextRate);
                   if (videoRef.current) videoRef.current.playbackRate = nextRate;
                 }}
-                className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] font-semibold cursor-pointer"
-                title="Tốc độ phát"
+                className="px-2 py-1.5 sm:py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] font-semibold cursor-pointer tabular-nums"
+                title={t('player.speed')}
               >
                 {playbackRate}x
               </button>
               <button
+                type="button"
                 onClick={() => {
                   if (!document.fullscreenElement) {
-                    containerRef.current?.requestFullscreen?.();
+                    const el = containerRef.current as any;
+                    if (el?.requestFullscreen) {
+                      el.requestFullscreen().catch(() => {});
+                    } else if ((videoRef.current as any)?.webkitEnterFullscreen) {
+                      (videoRef.current as any).webkitEnterFullscreen();
+                    }
                   } else {
-                    document.exitFullscreen?.();
+                    document.exitFullscreen?.().catch(() => {});
                   }
                 }}
-                className="p-1.5 rounded-lg hover:bg-white/10 cursor-pointer"
-                title="Toàn màn hình (Phím F)"
+                className="min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 p-1.5 rounded-lg hover:bg-white/10 active:bg-white/20 flex items-center justify-center cursor-pointer"
+                title={t('player.shortcut_fullscreen')}
               >
                 <Maximize className="w-4 h-4" />
               </button>

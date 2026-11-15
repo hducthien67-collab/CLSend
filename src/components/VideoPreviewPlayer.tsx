@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import AllInOneVideoPlayer from './AllInOneVideoPlayer';
 import { getFileBlobLocally } from '../utils/idbStorage';
 import { ExternalLink } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
+import { openMediaInLargeViewer } from '../utils/mediaViewerSession';
 
 export interface VideoPreviewPlayerProps {
   src?: string;
@@ -27,10 +29,10 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
   className = '',
   onDownload
 }) => {
+  const { t } = useLanguage();
   const [resolvedFile, setResolvedFile] = useState<File | Blob | undefined>(file);
   const [resolvedSrc, setResolvedSrc] = useState<string>(src || fallbackUrl || '');
 
-  // Cập nhật khi props file hoặc src thay đổi
   useEffect(() => {
     if (file) {
       setResolvedFile(file);
@@ -47,7 +49,6 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
       return;
     }
 
-    // Nếu chưa có file hay src, thử tìm trong local IndexedDB
     if (fileId || fileName) {
       const candidates = [fileId, fileName].filter(Boolean) as string[];
       (async () => {
@@ -67,27 +68,17 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
   }, [file, src, fallbackUrl, fileId, fileName]);
 
   const handleOpenDedicatedPage = () => {
-    try {
-      sessionStorage.setItem('clsend_player_video', JSON.stringify({
-        id: fileId,
+    openMediaInLargeViewer({
+      source: 'cloud',
+      activeItem: {
+        id: fileId || resolvedSrc || fileName,
         name: fileName,
         title: fileName,
         src: resolvedSrc,
-        size: fileSize
-      }));
-    } catch (e) {
-      console.warn(e);
-    }
-
-    const query = new URLSearchParams();
-    query.set('page', 'player');
-    if (fileId) query.set('id', fileId);
-    if (fileName) query.set('name', fileName);
-    if (resolvedSrc) query.set('src', resolvedSrc);
-    if (fileSize) query.set('size', String(fileSize));
-
-    window.history.pushState(null, '', `/?${query.toString()}`);
-    window.dispatchEvent(new PopStateEvent('popstate'));
+        size: fileSize,
+        type: 'video',
+      },
+    });
   };
 
   return (
@@ -100,10 +91,10 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
           type="button"
           onClick={handleOpenDedicatedPage}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 text-[11px] font-semibold transition-all active:scale-95 cursor-pointer shadow-xs shrink-0"
-          title="Chuyển sang trang xem video độc lập để xem mượt mà nhất không giật lag"
+          title={t('player.open_dedicated')}
         >
           <ExternalLink className="w-3 h-3 stroke-[2.5]" />
-          <span>Mở Trang Riêng (0% Lag)</span>
+          <span>{t('player.open_dedicated')}</span>
         </button>
       </div>
 

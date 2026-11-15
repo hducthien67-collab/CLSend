@@ -15,6 +15,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { CloudDriveFile } from './../types';
+import { openMediaInLargeViewer } from '../utils/mediaViewerSession';
 import {
   Cloud,
   Upload,
@@ -56,15 +57,16 @@ import { getVideoWebWatchUrl, openVideoInWebTab } from '../utils/videoWatch';
 import { PersistentVideoPlayerModal } from './PersistentVideoPlayerModal';
 import { saveVideoToIndexedDB } from './AllInOneVideoPlayer';
 import { storeFileBlobLocally } from '../utils/idbStorage';
+import { subscribeUserCloudFiles } from '../utils/cloudSync';
 
 const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB personal storage quota
 
 const CloudDriveViewComponent: React.FC = () => {
-  const { currentUser, settings } = useAuth();
+  const { currentUser, userProfile, settings } = useAuth();
   const { t } = useLanguage();
   const [files, setFiles] = useState<CloudDriveFile[]>(() => {
     try {
-      const userRaw = localStorage.getItem('cloudsend_current_user');
+      const userRaw = localStorage.getItem('cloudsend_custom_session');
       const uid = (userRaw ? JSON.parse(userRaw)?.uid : '') || '';
       if (uid) {
         const cached = localStorage.getItem(`cloudsend_cache_files_${uid}`);
@@ -75,7 +77,7 @@ const CloudDriveViewComponent: React.FC = () => {
   });
   const [loading, setLoading] = useState(() => {
     try {
-      const userRaw = localStorage.getItem('cloudsend_current_user');
+      const userRaw = localStorage.getItem('cloudsend_custom_session');
       const uid = (userRaw ? JSON.parse(userRaw)?.uid : '') || '';
       if (uid && localStorage.getItem(`cloudsend_cache_files_${uid}`)) {
         return false;
@@ -115,17 +117,21 @@ const CloudDriveViewComponent: React.FC = () => {
       const decodedName = decodeURIComponent(rawName);
       const fileName = decodedName.includes('.') ? decodedName : `${urlObj.hostname}_link`;
       const isImage = /\.(jpg|jpeg|png|gif|webp|svg|bmp)(\?.*)?$/i.test(validUrl);
+      const isVideo = /\.(mp4|webm|mov|mkv|avi|m4v|3gp)(\?.*)?$/i.test(validUrl);
 
       setUploading(true);
       const newFileDoc = {
         userId: currentUser?.uid,
+        userEmail: (currentUser?.email || '').trim().toLowerCase(),
+        userName: currentUser?.displayName || settings.deviceName || 'Người dùng',
         name: fileName,
         size: 0,
-        type: isImage ? 'image/jpeg' : 'text/uri-list',
+        type: isImage ? 'image/jpeg' : isVideo ? 'video/mp4' : 'text/uri-list',
         url: validUrl,
         viewUrl: validUrl,
         thumbnail: isImage ? validUrl : null,
-        createdAt: serverTimestamp(),
+        category: isImage ? 'image' : isVideo ? 'video' : 'other',
+        createdAt: new Date().toISOString(),
       };
       await addDoc(collection(db, 'cloud_files'), newFileDoc);
       setCloudUrlModalValue('');
@@ -170,43 +176,18 @@ const CloudDriveViewComponent: React.FC = () => {
     }
   }, [previewFile, filePendingDelete, bulkPendingDelete, isCloudUrlModalOpen]);
 
-  // Real-time synchronization of personal Cloud files via Firestore
+  // Real-time synchronization of personal Cloud files via Firestore (supports linked UIDs & email across Chrome profiles)
   useEffect(() => {
     if (!currentUser?.uid) {
+      setFiles([]);
       setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(db, 'cloud_files'),
-      where('userId', '==', currentUser.uid)
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const loaded: CloudDriveFile[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          loaded.push({
-            id: docSnap.id,
-            userId: data.userId || currentUser.uid,
-            userEmail: data.userEmail,
-            userName: data.userName,
-            name: data.name || 'Không tên',
-            size: Number(data.size) || 0,
-            type: data.type || 'application/octet-stream',
-            url: data.url,
-            viewUrl: data.viewUrl || data.url,
-            thumbnail: data.thumbnail,
-            category: data.category || 'other',
-            isFavorite: Boolean(data.isFavorite),
-            createdAt: data.createdAt || new Date().toISOString()
-          });
-        });
-
-        // Sort descending by creation date
-        loaded.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const unsubscribe = subscribeUserCloudFiles(
+      currentUser,
+      userProfile,
+      (loaded) => {
         setFiles(loaded);
         try {
           if (currentUser?.uid) {
@@ -222,7 +203,7 @@ const CloudDriveViewComponent: React.FC = () => {
     );
 
     return () => unsubscribe();
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, currentUser?.email, currentUser?.linkedEmail, (currentUser?.linkedUids || []).join(','), userProfile?.linkedEmail, (userProfile?.linkedUids || []).join(',')]);
 
   // Compute storage quota
   const totalSizeBytes = files.reduce((acc, f) => acc + (f.size || 0), 0);
@@ -299,17 +280,17 @@ const CloudDriveViewComponent: React.FC = () => {
           return;
         }
 
-        // Generate client thumbnail in parallel without blocking
+        // Generate client thumbnail in parallel without blocking upload, then merge if available
         let clientThumb: string | undefined = undefined;
-        if (isImageFile(file)) {
-          generateImageThumbnail(file, 480, 0.8).then(t => { if (t) clientThumb = t; }).catch(() => {});
-        } else if (isVideoFile(file)) {
-          generateVideoThumbnail(file).then(t => { if (t) clientThumb = t; }).catch(() => {});
-        }
+        const thumbPromise = isImageFile(file)
+          ? generateImageThumbnail(file, 480, 0.8).then(t => { if (t) clientThumb = t; return t; }).catch(() => '')
+          : isVideoFile(file)
+          ? generateVideoThumbnail(file).then(t => { if (t) clientThumb = t; return t; }).catch(() => '')
+          : Promise.resolve('');
 
         let fileUrl = '';
         let fileViewUrl = '';
-        let fileThumbnail: string | null = clientThumb || null;
+        let fileThumbnail: string | null = null;
 
         try {
           const uploadedFile = await uploadFileToServer(file, (pct) => {
@@ -320,6 +301,12 @@ const CloudDriveViewComponent: React.FC = () => {
           fileViewUrl = uploadedFile.viewUrl || uploadedFile.url;
           if (uploadedFile.thumbnail) {
             fileThumbnail = uploadedFile.thumbnail;
+          } else {
+            const awaitedThumb = await Promise.race([
+              thumbPromise,
+              new Promise<string>((res) => setTimeout(() => res(clientThumb || ''), 800)),
+            ]);
+            if (awaitedThumb) fileThumbnail = awaitedThumb;
           }
         } catch (uploadErr: any) {
           console.warn(`Server upload fallback notice for "${file.name}":`, uploadErr);
@@ -587,34 +574,27 @@ const CloudDriveViewComponent: React.FC = () => {
   };
 
   // Xử lý khi nhấn vào thẻ tệp trên Cloud Drive:
-  // Nếu là Video hoặc Hình ảnh, chuyển sang trang riêng biệt (0% Lag) theo đúng yêu cầu
+  // Nếu là Video hoặc Hình ảnh, chuyển sang trang xem lớn độc lập (nguồn Kho Cloud)
   const handleFileCardClick = (file: CloudDriveFile) => {
     const isVideo = file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i);
     const isImage = file.category === 'image' || (file.type && file.type.startsWith('image/')) || file.name.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i);
+    const mediaSrc = file.viewUrl || file.url;
 
-    if (isVideo || isImage) {
-      try {
-        sessionStorage.setItem('clsend_player_video', JSON.stringify({
+    if ((isVideo || isImage) && mediaSrc) {
+      openMediaInLargeViewer({
+        source: 'cloud',
+        activeItem: {
           id: file.id,
           name: file.name,
           title: file.name,
-          src: file.viewUrl || file.url,
+          src: mediaSrc,
           thumbnail: file.thumbnail || null,
           size: file.size,
-          type: isVideo ? 'video' : 'image'
-        }));
-      } catch (e) {
-        console.warn(e);
-      }
-      const q = new URLSearchParams();
-      q.set('page', 'player');
-      q.set('id', file.id);
-      q.set('name', file.name);
-      q.set('src', file.viewUrl || file.url);
-      if (file.size) q.set('size', String(file.size));
-      q.set('type', isVideo ? 'video' : 'image');
-      window.history.pushState(null, '', `/?${q.toString()}`);
-      window.dispatchEvent(new PopStateEvent('popstate'));
+          type: isVideo ? 'video' : 'image',
+          mimeType: file.type,
+          createdAt: file.createdAt,
+        },
+      });
       return;
     }
 

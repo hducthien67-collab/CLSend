@@ -11,6 +11,8 @@ export interface UserDevice {
   deviceType: DeviceType;
   avatarColor: string;
   customAvatarUrl?: string;
+  avatarUrl?: string | null;
+  photoURL?: string | null;
   bannerUrl?: string;
   customBio?: string;
   customBadgeText?: string;
@@ -22,6 +24,12 @@ export interface UserDevice {
   currentRoomId?: string;
   isEmailVerified?: boolean;
   linkedEmail?: string;
+  phone?: string;
+  phoneNumber?: string;
+  linkedPhone?: string;
+  isPhoneVerified?: boolean;
+  linkedUids?: string[];
+  googleUid?: string;
   emailVerifiedAt?: string;
   acceptedRules?: boolean;
   hasSetName?: boolean;
@@ -97,6 +105,7 @@ export interface ChatAttachment {
   type: string;
   data: string; // base64 thumbnail or data
   url?: string; // direct download/stream URL for heavy files
+  aiVerifiedSafe?: boolean; // client-side transient flag indicating AI image check passed
 }
 
 export interface ChatMessage {
@@ -125,6 +134,7 @@ export interface ChatMessage {
   createdAt: string;
   timestamp?: number;
   serverTimestamp?: any;
+  clientTempId?: string;
   isSelfDestruct?: boolean;
   selfDestructDuration?: number; // 0 for view-once, > 0 for seconds (e.g. 10, 30)
   viewedBy?: string[];
@@ -200,6 +210,11 @@ export interface AppUser {
   email: string | null;
   displayName: string | null;
   photoURL?: string | null;
+  authProvider?: 'account' | 'google' | 'guest' | 'sync';
+  linkedEmail?: string | null;
+  phone?: string | null;
+  linkedPhone?: string | null;
+  linkedUids?: string[];
 }
 
 export interface LoginSession {
@@ -220,6 +235,10 @@ export type SanctionLevel = 'warn' | 'chat_lock_15m' | 'chat_lock_1h' | 'ban_1d'
 export interface UserSanction {
   uid: string;
   email: string;
+  phone?: string;
+  linkedEmails?: string[];
+  linkedPhones?: string[];
+  linkedUids?: string[];
   displayName: string;
   senderName?: string; // Tên người gửi / người vi phạm
   senderEmail?: string;

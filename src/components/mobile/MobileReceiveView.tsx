@@ -33,6 +33,7 @@ import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { renderClickableText } from '../../utils/textFormat';
 import { useLanguage } from '../../context/LanguageContext';
+import { openMediaInLargeViewer } from '../../utils/mediaViewerSession';
 
 export const MobileReceiveView: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
@@ -226,65 +227,98 @@ export const MobileReceiveView: React.FC = () => {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2.5">
-                    {/* Thumbnail / Icon */}
-                    {item.fileData && item.fileData.startsWith('data:image') ? (
-                      <img
-                        src={item.fileData}
-                        alt={item.fileName}
-                        onClick={() => setPreviewImage(item.fileData || null)}
-                        className="w-11 h-11 rounded-lg object-cover border border-slate-700 shrink-0 cursor-pointer"
-                      />
-                    ) : (
-                      <div className="w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
-                        <FileDocIcon fileName={item.fileName} mimeType={item.fileType} size="sm" />
-                      </div>
-                    )}
+                    {(() => {
+                      const mediaSrc = item.fileUrl || item.fileData || '';
+                      const isImg = Boolean((item.fileType && item.fileType.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|svg|bmp|heic|heif|avif)([?#&]|$)/i.test(item.fileName || '') || item.fileData?.startsWith('data:image'));
+                      const isVid = Boolean((item.fileType && item.fileType.startsWith('video/')) || /\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv|mts)([?#&]|$)/i.test(item.fileName || ''));
+                      const openReceivedMedia = () => {
+                        if (!mediaSrc) return;
+                        if (!isImg && !isVid) return;
+                        openMediaInLargeViewer({
+                          source: 'cloud',
+                          activeItem: {
+                            id: item.id,
+                            name: item.fileName || (isVid ? 'Video' : 'Hình ảnh'),
+                            title: item.fileName || (isVid ? 'Video' : 'Hình ảnh'),
+                            src: mediaSrc,
+                            thumbnail: item.fileData?.startsWith('data:image') ? item.fileData : null,
+                            size: item.fileSize,
+                            type: isVid ? 'video' : 'image',
+                            mimeType: item.fileType,
+                            senderName: item.senderName,
+                            createdAt: item.createdAt,
+                          },
+                        });
+                      };
 
-                    {/* File Meta & Download Button */}
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div>
-                        <h4 className="text-[11px] font-bold text-white truncate" title={item.fileName}>
-                          {item.fileName}
-                        </h4>
-                        <p className="text-[10px] text-slate-400">
-                          {formatFileSize(item.fileSize)}
-                        </p>
-                      </div>
+                      return (
+                        <>
+                          {/* Thumbnail / Icon */}
+                          {item.fileData && item.fileData.startsWith('data:image') ? (
+                            <img
+                              src={item.fileData}
+                              alt={item.fileName}
+                              onClick={() => (isVid || item.fileUrl ? openReceivedMedia() : setPreviewImage(item.fileData || null))}
+                              className="w-11 h-11 rounded-lg object-cover border border-slate-700 shrink-0 cursor-pointer"
+                            />
+                          ) : (
+                            <div
+                              onClick={() => (isVid || isImg) && openReceivedMedia()}
+                              className={`w-11 h-11 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 ${(isVid || isImg) ? 'cursor-pointer' : ''}`}
+                            >
+                              <FileDocIcon fileName={item.fileName} mimeType={item.fileType} size="sm" />
+                            </div>
+                          )}
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleDownload(item)}
-                          className="flex-1 py-1 px-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span>{t('receive.download')}</span>
-                        </button>
+                          {/* File Meta & Download Button */}
+                          <div className="flex-1 min-w-0 space-y-1">
+                            <div>
+                              <h4 className="text-[11px] font-bold text-white truncate" title={item.fileName}>
+                                {item.fileName}
+                              </h4>
+                              <p className="text-[10px] text-slate-400">
+                                {formatFileSize(item.fileSize)}
+                              </p>
+                            </div>
 
-                        {!isCompleted && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTransfer(item.id)}
-                            className="py-1 px-2 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 border border-slate-700 font-semibold text-[10.5px] flex items-center justify-center gap-1 active:scale-95 transition-all"
-                            title={t('receive.reject')}
-                          >
-                            <X className="w-3 h-3 text-rose-400" />
-                            <span>{t('receive.reject')}</span>
-                          </button>
-                        )}
+                            <div className="flex items-center gap-1.5">
+                              {(isVid || isImg) && mediaSrc && (
+                                <button
+                                  type="button"
+                                  onClick={openReceivedMedia}
+                                  className="py-1 px-2.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 font-semibold text-[11px] flex items-center justify-center gap-1 active:scale-95 transition-all"
+                                  title={isVid ? 'Xem video' : 'Xem ảnh'}
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>{isVid ? 'Xem' : 'Xem'}</span>
+                                </button>
+                              )}
 
-                        {item.fileData?.startsWith('data:image') && (
-                          <button
-                            type="button"
-                            onClick={() => setPreviewImage(item.fileData || null)}
-                            className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 active:scale-95 transition-all"
-                            title="Xem ảnh"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDownload(item)}
+                                className="flex-1 py-1 px-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center justify-center gap-1 shadow-sm active:scale-95 transition-all"
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>{t('receive.download')}</span>
+                              </button>
+
+                              {!isCompleted && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTransfer(item.id)}
+                                  className="py-1 px-2 rounded-lg bg-slate-800 hover:bg-rose-900/40 text-slate-300 hover:text-rose-300 border border-slate-700 font-semibold text-[10.5px] flex items-center justify-center gap-1 active:scale-95 transition-all"
+                                  title={t('receive.reject')}
+                                >
+                                  <X className="w-3 h-3 text-rose-400" />
+                                  <span>{t('receive.reject')}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

@@ -7,7 +7,7 @@ import React, {
   forwardRef 
 } from 'react';
 
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 export interface RichChatInputHandle {
   applyBold: () => void;
@@ -131,9 +131,12 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
   const { currentLang } = useLanguage();
   const effectivePlaceholder = placeholder !== undefined 
     ? placeholder 
-    : (currentLang === 'en' 
-        ? "Type message... (Select & Ctrl+B for bold, Ctrl+I for italic, Enter to send)" 
-        : "Nhập tin nhắn... (Bôi đen & Ctrl+B để in đậm, Ctrl+I để in nghiêng, Enter gửi)");
+    : pickLang(
+        currentLang,
+        "Nhập tin nhắn... (Bôi đen & Ctrl+B để in đậm, Ctrl+I để in nghiêng, Enter gửi)",
+        "Type message... (Select & Ctrl+B for bold, Ctrl+I for italic, Enter to send)",
+        "输入消息...（选中后 Ctrl+B 加粗，Ctrl+I 斜体，Enter 发送）"
+      );
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
 

@@ -1,7 +1,9 @@
 import { inspectFileSecurity, sanitizeFilename } from './fileSecurity';
-import { getTelegramConfig, uploadToTelegram } from './telegramStorage';
+import { getTelegramConfig, uploadToTelegram, isGifFile } from './telegramStorage';
 import { storeFileBlobLocally } from './idbStorage';
 import { uploadToExternalWebServices } from './externalStorage';
+
+export { isGifFile };
 
 async function cacheAndReturn(file: File, fileInfo: UploadedFileInfo): Promise<UploadedFileInfo> {
   try {
@@ -41,22 +43,23 @@ export const MAX_FILE_SIZE_LABEL = '10 GB';
  * Checks if a file is an image based on mimeType or common extensions
  * (handles phone camera photos, iPhone HEIC/HEIF, RAW, etc.)
  */
-export function isImageFile(file?: { name?: string; type?: string } | null): boolean {
+export function isImageFile(file?: { name?: string; type?: string; url?: string } | null): boolean {
   if (!file) return false;
   if (file.type && file.type.startsWith('image/')) return true;
-  const ext = (file.name || '').toLowerCase();
-  return /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|dng|raw|svg|avif)$/i.test(ext);
+  if (isGifFile(file.name || file.url || '', file.type)) return true;
+  const candidate = `${file.name || ''} ${file.url || ''}`.toLowerCase();
+  return /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|dng|raw|svg|avif)([?#&]|$|\s)/i.test(candidate);
 }
 
 /**
  * Checks if a file is a video based on mimeType or common video extensions
  * (handles MP4, WebM, MOV, MKV, AVI, M4V, 3GP, FLV, TS, etc.)
  */
-export function isVideoFile(file?: { name?: string; type?: string } | null): boolean {
+export function isVideoFile(file?: { name?: string; type?: string; url?: string } | null): boolean {
   if (!file) return false;
   if (file.type && file.type.startsWith('video/')) return true;
-  const ext = (file.name || '').toLowerCase();
-  return /\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)$/i.test(ext);
+  const candidate = `${file.name || ''} ${file.url || ''}`.toLowerCase();
+  return /\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv)([?#&]|$|\s)/i.test(candidate);
 }
 
 /**
@@ -214,6 +217,117 @@ export function generateVideoThumbnail(file: File | Blob): Promise<string> {
       }, 3500);
     } catch {
       resolve('');
+    }
+  });
+}
+
+/**
+ * Extracts up to 4 representative keyframes across a local video file (at ~12%, 38%, 65%, 88% duration)
+ * for fast pre-upload AI video moderation in public chat rooms.
+ */
+export function extractVideoModerationFrames(file: File | Blob, maxFrames: number = 4): Promise<string[]> {
+  return new Promise((resolve) => {
+    if (!isVideoFile({ name: (file as File).name, type: file.type })) {
+      resolve([]);
+      return;
+    }
+
+    // For ultra-heavy files (> 250MB), skip client seeking and let server ffmpeg inspect safely
+    if (file.size > 250 * 1024 * 1024) {
+      resolve([]);
+      return;
+    }
+
+    const frames: string[] = [];
+    let finished = false;
+
+    try {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      const objectUrl = URL.createObjectURL(file);
+      video.src = objectUrl;
+
+      const cleanup = () => {
+        if (!finished) {
+          finished = true;
+          try { URL.revokeObjectURL(objectUrl); } catch {}
+          video.remove();
+        }
+      };
+
+      const finishNow = () => {
+        cleanup();
+        resolve(frames);
+      };
+
+      let targets: number[] = [];
+      let currentIndex = 0;
+
+      const captureFrame = () => {
+        if (finished) return;
+        try {
+          const maxDim = 480;
+          let w = video.videoWidth || 480;
+          let h = video.videoHeight || 270;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(16, w);
+          canvas.height = Math.max(16, h);
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+            if (dataUrl && dataUrl.startsWith('data:image/')) {
+              frames.push(dataUrl);
+            }
+          }
+        } catch {
+          // ignore individual canvas draw failures
+        }
+
+        currentIndex++;
+        if (currentIndex < targets.length && frames.length < maxFrames) {
+          video.currentTime = targets[currentIndex];
+        } else {
+          finishNow();
+        }
+      };
+
+      video.onloadedmetadata = () => {
+        const dur = isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+        if (dur > 1.5) {
+          const ratios = [0.12, 0.38, 0.65, 0.88].slice(0, maxFrames);
+          targets = ratios.map(r => Math.max(0.2, Math.min(dur - 0.1, dur * r)));
+        } else if (dur > 0) {
+          targets = [Math.min(dur * 0.25, 0.3), Math.min(dur * 0.75, dur - 0.05)].filter(t => t >= 0);
+        } else {
+          targets = [0.3];
+        }
+        currentIndex = 0;
+        if (targets.length > 0) {
+          video.currentTime = targets[0];
+        } else {
+          finishNow();
+        }
+      };
+
+      video.onseeked = captureFrame;
+      video.onerror = finishNow;
+
+      // Hard timeout 6s so slow codecs never block UI
+      setTimeout(finishNow, 6000);
+    } catch {
+      resolve(frames);
     }
   });
 }
@@ -479,19 +593,63 @@ function uploadViaMultipart(
  */
 export async function uploadViaChunks(
   file: File,
-  onProgress?: (percent: number) => void
+  onProgress?: (percent: number) => void,
+  options?: { chunkSize?: number; concurrency?: number }
 ): Promise<UploadedFileInfo> {
-  // Adaptive chunk size: 8MB for files up to 300MB, 16MB for very large files (> 300MB)
-  const CHUNK_SIZE = file.size > 300 * 1024 * 1024 ? 16 * 1024 * 1024 : 8 * 1024 * 1024;
+  // Default 3MB chunk size stays strictly below Cloud Run / reverse-proxy body limits and recovers quickly
+  const CHUNK_SIZE = options?.chunkSize || 3 * 1024 * 1024;
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const uploadId = `up_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   let assembledFile: UploadedFileInfo | null = null;
-  let completedChunks = 0;
+  const chunkLoadedBytes = new Array<number>(totalChunks).fill(0);
 
-  // Blazing fast parallel pipeline: Send up to 4 chunks simultaneously at full line speed
-  const CONCURRENCY = Math.min(4, totalChunks);
+  const emitSmoothProgress = () => {
+    if (!onProgress) return;
+    const totalLoaded = chunkLoadedBytes.reduce((sum, b) => sum + b, 0);
+    const pct = Math.min(98, Math.max(5, Math.round((totalLoaded / Math.max(1, file.size)) * 100)));
+    onProgress(pct);
+  };
+
+  // 4 parallel XHR streams saturate bandwidth without exhausting Chrome's 6-connection-per-origin limit
+  const CONCURRENCY = Math.min(options?.concurrency || 4, totalChunks);
   let nextChunkIndex = 0;
   let fatalError: Error | null = null;
+
+  const uploadSingleChunkXhr = (formData: FormData, chunkIdx: number, chunkByteLen: number): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/upload-chunk', true);
+      xhr.timeout = 120000;
+
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) {
+          chunkLoadedBytes[chunkIdx] = Math.min(chunkByteLen, ev.loaded);
+          emitSmoothProgress();
+        }
+      };
+
+      xhr.onload = () => {
+        const rawText = xhr.responseText || '';
+        if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
+          return reject(new Error('HTML_RESPONSE'));
+        }
+        try {
+          const data = JSON.parse(rawText);
+          if (xhr.status < 200 || xhr.status >= 300 || !data.success) {
+            return reject(new Error(data?.error || `Lỗi tải mảnh HTTP ${xhr.status}`));
+          }
+          chunkLoadedBytes[chunkIdx] = chunkByteLen;
+          emitSmoothProgress();
+          resolve(data);
+        } catch {
+          reject(new Error('INVALID_JSON'));
+        }
+      };
+      xhr.onerror = () => reject(new Error('NETWORK_ERROR'));
+      xhr.ontimeout = () => reject(new Error('TIMEOUT_ERROR'));
+      xhr.send(formData);
+    });
+  };
 
   async function chunkWorker() {
     while (nextChunkIndex < totalChunks && !fatalError && !assembledFile) {
@@ -520,46 +678,17 @@ export async function uploadViaChunks(
           formData.append('fileType', file.type || 'application/octet-stream');
           formData.append('chunk', chunkBlob, `${file.name}.part${chunkIndex}`);
 
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s safety timeout per chunk
-
-          const res = await fetch('/api/upload-chunk', {
-            method: 'POST',
-            body: formData,
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-
-          const rawText = await res.text();
-          if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
-            throw new Error('HTML_RESPONSE');
-          }
-
-          let data: any;
-          try {
-            data = JSON.parse(rawText);
-          } catch {
-            throw new Error('INVALID_JSON');
-          }
-
-          if (!res.ok || !data.success) {
-            throw new Error(data?.error || `Lỗi tải mảnh HTTP ${res.status}`);
-          }
+          const data = await uploadSingleChunkXhr(formData, chunkIndex, chunkBlob.size);
 
           if (data.assembled && data.file) {
             assembledFile = data.file;
           }
 
           chunkSuccess = true;
-          completedChunks++;
-          if (onProgress) {
-            const currentPct = Math.min(98, Math.round((completedChunks / totalChunks) * 100));
-            onProgress(currentPct);
-          }
           break;
         } catch (err: any) {
           lastChunkError = err;
-          // Check if server is already assembling or already assembled the file
+          chunkLoadedBytes[chunkIndex] = 0;
           try {
             const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
             const statusData = await statusRes.json();
@@ -569,12 +698,11 @@ export async function uploadViaChunks(
               break;
             }
           } catch {}
-          await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
+          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
         }
       }
 
       if (!chunkSuccess && !assembledFile) {
-        // Final sanity check on assembly status before declaring fatal error
         try {
           const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
           const statusData = await statusRes.json();
@@ -729,18 +857,47 @@ export async function uploadFileToServer(
     if (onProgress) onProgress(Math.min(99, Math.max(5, realPct)));
   };
 
+  const isVideoOrGif = isVideoFile(file) || isGifFile(file.name, file.type);
+
   try {
     // -------------------------------------------------------------
-    // PRIORITY 1: Ultra-Fast Direct Server Upload (/api/upload)
-    // Instant same-origin transfer with real-time socket progress
-    // Handles files up to 28MB in a single HTTP stream (< 1 second)
+    // PRIORITY 0 (MEDIA): Telegram Multi-Bot Sharded Storage for Video & GIF
+    // Uses 14MB structured shards across the 20-Bot cluster + HTTP Range 206 streaming
+    // Falls through cleanly to server upload if Telegram bots fail.
     // -------------------------------------------------------------
-    if (file.size <= 28 * 1024 * 1024) {
+    if (isVideoOrGif) {
+      try {
+        const tgMediaRes = await uploadToTelegram(file, undefined, reportProgress);
+        if (tgMediaRes.downloadUrl) {
+          if (onProgress) onProgress(100);
+          return await cacheAndReturn(file, {
+            id: tgMediaRes.fileId,
+            name: file.name,
+            originalName: file.name,
+            size: file.size,
+            type: file.type || tgMediaRes.mimeType || (tgMediaRes.isGif ? 'image/gif' : 'video/mp4'),
+            url: tgMediaRes.downloadUrl,
+            viewUrl: tgMediaRes.viewUrl || tgMediaRes.downloadUrl,
+            thumbnail: tgMediaRes.isGif ? (tgMediaRes.viewUrl || tgMediaRes.downloadUrl) : undefined
+          });
+        }
+      } catch (tgMediaErr: any) {
+        console.warn(`Telegram sharded media upload notice for "${file.name}", falling back to Express server:`, tgMediaErr?.message || tgMediaErr);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // PRIORITY 1: Ultra-Fast Direct Server Upload (/api/upload)
+    // Handles files <= 3.5MB in a single HTTP stream without proxy limits
+    // -------------------------------------------------------------
+    let directMultipartFailed = false;
+    if (file.size <= 3.5 * 1024 * 1024) {
       try {
         const res = await uploadViaMultipart(file, reportProgress);
         if (onProgress) onProgress(100);
         return await cacheAndReturn(file, res);
       } catch (err: any) {
+        directMultipartFailed = true;
         console.warn(`Fast XHR upload notice for "${file.name}", trying fetch fallback:`, err?.message || err);
         try {
           const res = await uploadViaFetch(file, reportProgress);
@@ -753,19 +910,24 @@ export async function uploadFileToServer(
     }
 
     // -------------------------------------------------------------
-    // PRIORITY 2: High-Speed Parallel Chunked Upload (/api/upload-chunk)
-    // For files > 28MB up to 2GB+, uses 4 parallel socket workers
-    // Bypasses any proxy size limit or buffer congestion
+    // PRIORITY 2: Resilient 4-Worker Parallel Chunked Upload (/api/upload-chunk)
+    // Uses 3MB proxy-safe chunks, automatically stepping down to 1.5MB / 2 workers on retry
     // -------------------------------------------------------------
-    if (file.size > 28 * 1024 * 1024) {
+    if (file.size > 3.5 * 1024 * 1024 || directMultipartFailed) {
       try {
-        const res = await uploadViaChunks(file, reportProgress);
+        const res = await uploadViaChunks(file, reportProgress, {
+          chunkSize: 3 * 1024 * 1024,
+          concurrency: 4
+        });
         if (onProgress) onProgress(100);
         return await cacheAndReturn(file, res);
       } catch (chunkErr: any) {
         console.warn(`Chunked upload attempt 1 notice for "${file.name}":`, chunkErr?.message || chunkErr);
         try {
-          const res = await uploadViaChunks(file, reportProgress);
+          const res = await uploadViaChunks(file, reportProgress, {
+            chunkSize: 1.5 * 1024 * 1024,
+            concurrency: 2
+          });
           if (onProgress) onProgress(100);
           return await cacheAndReturn(file, res);
         } catch (retryErr: any) {
@@ -788,11 +950,11 @@ export async function uploadFileToServer(
     }
 
     // -------------------------------------------------------------
-    // PRIORITY 4: Telegram Cloud Storage Fallback (Files <= 20MB)
+    // PRIORITY 4: Telegram Cloud Storage Fallback (Supports sharding too)
     // -------------------------------------------------------------
-    if (file.size <= 20 * 1024 * 1024) {
+    if (!isVideoOrGif && file.size <= 250 * 1024 * 1024) {
       try {
-        const tgRes = await uploadToTelegram(file);
+        const tgRes = await uploadToTelegram(file, undefined, reportProgress);
         if (tgRes.downloadUrl) {
           if (onProgress) onProgress(100);
           return await cacheAndReturn(file, {
@@ -800,10 +962,10 @@ export async function uploadFileToServer(
             name: file.name,
             originalName: file.name,
             size: file.size,
-            type: file.type || 'application/octet-stream',
+            type: file.type || tgRes.mimeType || 'application/octet-stream',
             url: tgRes.downloadUrl,
             viewUrl: tgRes.viewUrl || tgRes.downloadUrl,
-            thumbnail: isImageFile(file) ? tgRes.downloadUrl : undefined
+            thumbnail: isImageFile(file) ? (tgRes.viewUrl || tgRes.downloadUrl) : undefined
           });
         }
       } catch (tgErr: any) {

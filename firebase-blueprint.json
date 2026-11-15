@@ -11,6 +11,9 @@
         "deviceName": { "type": "string" },
         "deviceType": { "type": "string" },
         "avatarColor": { "type": "string" },
+        "linkedEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "linkedPhone": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "displayName"]
@@ -123,6 +126,9 @@
         "deviceName": { "type": "string" },
         "deviceType": { "type": "string" },
         "avatarColor": { "type": "string" },
+        "linkedEmail": { "type": "string" },
+        "phone": { "type": "string" },
+        "linkedPhone": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "passwordHash", "displayName", "createdAt"]

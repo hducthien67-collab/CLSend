@@ -34,7 +34,8 @@ export const INNOCENT_PHRASES_LIST = [
   'vui lòng', 'vui long', 'hài lòng', 'hai long', 'tấm lòng', 'tam long',
   'hạ long', 'ha long', 'thăng long', 'thang long', 'long lanh', 'cầu lông', 'cau long',
   'edit', 'credit', 'audit', 'reddit', 'condition', 'edition', 'traditional', 'predict',
-  'asset', 'assign', 'assist', 'class', 'pass', 'glass', 'grass', 'bass',
+  'asset', 'assign', 'assist', 'class', 'pass', 'glass', 'grass', 'bass', 'shirt', 'shift',
+  'cocktail', 'peacock', 'shell', 'hello', 'analysis', 'document', 'circumstance', 'scrap',
   'cm', 'mm', 'dm', 'km', 'kg', 'ml', 'admin', 'welcome', 'đi tới', 'di toi', 'đi tiếp', 'di tiep',
   'đi tắm', 'di tam', 'đi tìm', 'di tim', 'đi thi', 'di thi', 'đi chơi', 'di choi'
 ];
@@ -98,25 +99,40 @@ const STRAIGHT_PROFANITY_PATTERNS: { name: string; regex: RegExp }[] = [
     name: 'chich',
     regex: new RegExp(`${B_START}(?:chịch)${B_END}`, 'gi')
   },
-  // English: SEX / PORN (chỉ bắt viết thẳng)
+  // English: FUCK / WTF / STFU / GTFO
   {
-    name: 'sex/porn',
-    regex: new RegExp(`${B_START}(?:sex|porn(?:o)?)${B_END}`, 'gi')
+    name: 'fuck/slang',
+    regex: new RegExp(`${B_START}(?:motherfuck(?:er|ing|ers|s)?|fuck(?:ing|er|ers|ed|s)?|fuk|wtf|stfu|gtfo)${B_END}`, 'gi')
   },
-  // English: BITCH / CUNT / ASSHOLE
+  // English: SHIT / BULLSHIT
+  {
+    name: 'shit',
+    regex: new RegExp(`${B_START}(?:bullshit|shit(?:head|ty|ting|s)?)${B_END}`, 'gi')
+  },
+  // English: SEX / PORN / NSFW
+  {
+    name: 'sex/porn/nsfw',
+    regex: new RegExp(`${B_START}(?:sex|porn(?:o|ography)?|hentai|nude(?:s)?|blowjob|handjob|boobs|titties|cumshot|milf)${B_END}`, 'gi')
+  },
+  // English: BITCH / CUNT / ASSHOLE / ASS
   {
     name: 'bitch/asshole',
-    regex: new RegExp(`${B_START}(?:bitch(?:es)?|cunt(?:s)?|asshole(?:s)?|dumbass|jackass)${B_END}`, 'gi')
+    regex: new RegExp(`${B_START}(?:son\\s+of\\s+a\\s+bitch|bitch(?:es|ing|y)?|cunt(?:s)?|asshole(?:s)?|dumbass|jackass|smartass|asswipe|bitchass|ass)${B_END}`, 'gi')
   },
-  // English: DICK / PUSSY / HENTAI
+  // English: DICK / COCK / PUSSY
   {
-    name: 'dick/pussy',
-    regex: new RegExp(`${B_START}(?:dick(?:s)?|pussy|hentai)${B_END}`, 'gi')
+    name: 'dick/cock/pussy',
+    regex: new RegExp(`${B_START}(?:dick(?:head|s)?|cock(?:sucker|s)?|pussy|pussies)${B_END}`, 'gi')
   },
-  // English: WHORE / SLUT / BASTARD
+  // English: WHORE / SLUT / BASTARD / WANKER / PRICK
   {
     name: 'whore/slut',
-    regex: new RegExp(`${B_START}(?:whore(?:s)?|slut(?:s)?|bastard(?:s)?)${B_END}`, 'gi')
+    regex: new RegExp(`${B_START}(?:whore(?:s)?|slut(?:s|tish)?|bastard(?:s)?|wanker(?:s)?|prick(?:s)?|twat(?:s)?)${B_END}`, 'gi')
+  },
+  // English: SLURS & SEVERE HARASSMENT
+  {
+    name: 'english_slurs',
+    regex: new RegExp(`${B_START}(?:faggot(?:s)?|retard(?:ed|s)?|nigger(?:s)?|nigga(?:s)?|kill\\s+yourself|kys)${B_END}`, 'gi')
   },
   // Vietnamese sexually explicit & vulgar phrases
   {
@@ -318,14 +334,14 @@ export interface ImageModerationResult {
  * Extreme cases or bad actors are reported by users via the "Tố cáo" (Report) feature.
  */
 export async function scanImageHeuristics(dataUrl: string, fileName = ''): Promise<ImageModerationResult> {
-  // Check clearly explicit 18+ filenames (e.g. porn.mp4, xxx.png, hentai.jpg)
+  // Check clearly explicit 18+ filenames (e.g. porn.mp4, xxx.png, hentai.jpg, nudes.png)
   const lowerName = fileName.toLowerCase();
-  const explicitKeywordRegex = /(?:^|[._\-\s])(?:porn|hentai|xxx|sex_video|khoa_than|nude_photo|dam_duc)(?:[._\-\s]|$)/i;
+  const explicitKeywordRegex = /(?:^|[._\-\s])(?:porn|porno|hentai|xxx|sex_video|khoa_than|nude_photo|nude|nudes|naked|nsfw|boobs|tits|pussy|dick|cock|blowjob|cumshot|dam_duc|clip_nong|khieu_dam|jav|onlyfans)(?:[._\-\s]|$)/i;
   
   if (explicitKeywordRegex.test(lowerName)) {
     return {
       safe: false,
-      reason: 'Tệp đã bị từ chối do tên tệp chứa từ khóa khiêu dâm 18+ rõ ràng.',
+      reason: '🚫 Nội dung đã bị xóa ngay lập tức do tên tệp chứa từ khóa khiêu dâm 18+.',
       category: 'nsfw_sex'
     };
   }
@@ -335,25 +351,46 @@ export async function scanImageHeuristics(dataUrl: string, fileName = ''): Promi
 }
 
 /**
+ * Silently remove a temporary uploaded file from server disk if it failed AI moderation.
+ */
+export function deleteServerUploadedFile(fileUrl?: string): void {
+  if (!fileUrl) return;
+  try {
+    const match = fileUrl.match(/\/api\/files\/(?:view|download)\/([^/?#]+)/);
+    if (match && match[1]) {
+      fetch(`/api/files/${match[1]}`, { method: 'DELETE' }).catch(() => {});
+    }
+  } catch {
+    // ignore cleanup errors
+  }
+}
+
+/**
  * Comprehensive Image Moderation:
- * Combines local heuristic scan + server AI check when available.
+ * Combines local heuristic scan + server AI check (OpenAI omni-moderation-latest + censored-18+ vs meme Vision check).
  */
 export async function moderateUploadedImage(dataUrl: string, fileName = ''): Promise<ImageModerationResult> {
-  // If no base64 dataUrl (e.g., heavy file awaiting server upload or HEIC), allow pass through
-  if (!dataUrl || !dataUrl.startsWith('data:image/')) {
-    return { safe: true, category: 'clean' };
-  }
-
-  // 1. Fast local heuristic scan (catches obvious porn keyword filenames)
+  // 1. Fast local heuristic scan (catches obvious 18+ keyword filenames even without image bytes)
   const localScan = await scanImageHeuristics(dataUrl, fileName);
   if (!localScan.safe) {
     return localScan;
   }
 
-  // 2. Try calling server-side moderation if endpoint exists
+  const hasValidSource =
+    typeof dataUrl === 'string' &&
+    (dataUrl.startsWith('data:image/') ||
+      dataUrl.startsWith('https://') ||
+      dataUrl.startsWith('http://') ||
+      dataUrl.startsWith('/api/files/'));
+
+  if (!hasValidSource) {
+    return { safe: true, category: 'clean' };
+  }
+
+  // 2. Call server-side AI image moderation
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 14000);
 
     const res = await fetch('/api/moderate-image', {
       method: 'POST',
@@ -371,7 +408,7 @@ export async function moderateUploadedImage(dataUrl: string, fileName = ''): Pro
           if (data && data.safe === false) {
             return {
               safe: false,
-              reason: data.reason || 'Ảnh đã tự động bị hủy khỏi nội dung gửi do vi phạm tiêu chuẩn nghiêm cấm.',
+              reason: data.reason || '🚫 Phát hiện hình ảnh 18+/khiêu dâm (hoặc cố tình che) vi phạm tiêu chuẩn cộng đồng. Ảnh đã bị xóa ngay lập tức!',
               category: data.category || 'nsfw_sex'
             };
           }
@@ -382,6 +419,77 @@ export async function moderateUploadedImage(dataUrl: string, fileName = ''): Pro
     }
   } catch {
     // If server is not reachable, timed out or in offline mode, fall back to safe pass
+  }
+
+  return { safe: true, category: 'clean' };
+}
+
+/**
+ * Comprehensive Video Moderation:
+ * Checks extracted keyframes (or lets server ffmpeg sample frames from uploaded video URL)
+ * to block 18+/pornographic/censored-18+ videos in public rooms while keeping harmless meme videos safe.
+ */
+export async function moderateUploadedVideo(
+  frames: string[],
+  fileName = '',
+  videoUrl = ''
+): Promise<ImageModerationResult> {
+  // 1. Fast filename check
+  const localScan = await scanImageHeuristics('', fileName);
+  if (!localScan.safe) {
+    return {
+      ...localScan,
+      reason: '🚫 Video đã bị xóa ngay lập tức do tên tệp chứa từ khóa khiêu dâm 18+.'
+    };
+  }
+
+  const validFrames = Array.isArray(frames)
+    ? frames.filter(f => typeof f === 'string' && f.startsWith('data:image/')).slice(0, 5)
+    : [];
+
+  const hasServerUrl =
+    typeof videoUrl === 'string' &&
+    (videoUrl.startsWith('/api/files/') || videoUrl.startsWith('https://') || videoUrl.startsWith('http://'));
+
+  if (validFrames.length === 0 && !hasServerUrl) {
+    return { safe: true, category: 'clean' };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+    const res = await fetch('/api/moderate-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        frames: validFrames,
+        fileName,
+        videoUrl
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const rawText = await res.text();
+      if (rawText && rawText.trim()) {
+        try {
+          const data = JSON.parse(rawText);
+          if (data && data.safe === false) {
+            return {
+              safe: false,
+              reason: data.reason || '🚫 Cảnh báo: AI phát hiện video chứa nội dung 18+/khiêu dâm nên đã xóa ngay lập tức!',
+              category: data.category || 'nsfw_sex'
+            };
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+    }
+  } catch {
+    // fallback safe pass on timeout/network failure
   }
 
   return { safe: true, category: 'clean' };

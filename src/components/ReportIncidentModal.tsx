@@ -10,7 +10,7 @@ import {
   Send,
   MessageSquare
 } from 'lucide-react';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface ReportIncidentModalProps {
   isOpen: boolean;
@@ -30,7 +30,10 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
   currentUserName
 }) => {
   const { currentLang } = useLanguage();
-  const isEn = currentLang === 'en';
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const isEn = !isVi && !isZh;
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
 
   const [category, setCategory] = useState<'profanity_bypass' | 'nsfw_18' | 'harassment' | 'spam' | 'impersonation' | 'other'>('profanity_bypass');
   const [targetMember, setTargetMember] = useState('');
@@ -70,6 +73,37 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
       id: 'other',
       title: 'Other Community Violations',
       desc: 'Any behavior that disrupts the chat experience'
+    }
+  ] : isZh ? [
+    {
+      id: 'profanity_bypass',
+      title: '绕过脏话过滤 / 人身侮辱',
+      desc: '使用特殊符号、句号或谐音伪装粗俗辱骂他人'
+    },
+    {
+      id: 'nsfw_18',
+      title: '18+ 成人色情或低俗内容',
+      desc: '发送不雅露骨图片、成人视频或低俗诱导文字'
+    },
+    {
+      id: 'harassment',
+      title: '骚扰 / 威胁 / 恶意攻击',
+      desc: '存在霸凌、恐吓、地域/群体歧视或干扰他人行为'
+    },
+    {
+      id: 'spam',
+      title: '刷屏骚扰 / 破坏聊天室秩序',
+      desc: '连续刷屏、使用脚本恶意捣乱或拥堵传输通道'
+    },
+    {
+      id: 'impersonation',
+      title: '冒充管理员 (Admin/Dev) 及诈骗',
+      desc: '假冒开发人员或管理团队索要 PIN 码或实施欺诈'
+    },
+    {
+      id: 'other',
+      title: '其他违规行为',
+      desc: '任何影响聊天室安全与良好氛围的不当行为'
     }
   ] : [
     {
@@ -111,12 +145,12 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
     setSubmitting(true);
     try {
       const selectedCategoryObj = categories.find(c => c.id === category);
-      const categoryTitle = selectedCategoryObj ? selectedCategoryObj.title : (isEn ? 'Rule Violation' : 'Vi phạm quy tắc');
+      const categoryTitle = selectedCategoryObj ? selectedCategoryObj.title : pick('Vi phạm quy tắc', 'Rule Violation', '违反规则');
 
       await addDoc(collection(db, 'reports'), {
         roomId,
         roomName,
-        targetMember: targetMember.trim() || (isEn ? 'Room General' : 'Toàn phòng'),
+        targetMember: targetMember.trim() || pick('Toàn phòng', 'Room General', '整个房间'),
         reportedByUid: currentUserId,
         reportedByName: currentUserName,
         category,
@@ -137,7 +171,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
       }, 2000);
     } catch (err) {
       console.error('Submit report error:', err);
-      alert(isEn ? 'Failed to submit report. Please try again.' : 'Không thể gửi báo cáo, vui lòng thử lại sau.');
+      alert(pick('Không thể gửi báo cáo, vui lòng thử lại sau.', 'Failed to submit report. Please try again.', '无法提交举报，请稍后重试。'));
       setSubmitting(false);
     }
   };
@@ -157,10 +191,10 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                {isEn ? 'Report Violation to DEV / Admin' : 'Báo Cáo Vi Phạm Tới DEV / Admin'}
+                {pick('Báo Cáo Vi Phạm Tới DEV / Admin', 'Report Violation to DEV / Admin', '向开发者 / 管理员举报违规')}
               </h3>
               <p className="text-xs text-slate-400 truncate max-w-xs">
-                {isEn ? `Room: ${roomName}` : `Phòng: ${roomName}`}
+                {pick(`Phòng: ${roomName}`, `Room: ${roomName}`, `房间：${roomName}`)}
               </p>
             </div>
           </div>
@@ -168,7 +202,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
-            title={isEn ? 'Close' : 'Đóng'}
+            title={pick('Đóng', 'Close', '关闭')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -180,12 +214,14 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
               <CheckCircle2 className="w-7 h-7" />
             </div>
             <h4 className="text-base font-bold text-white">
-              {isEn ? 'Report Submitted Successfully!' : 'Đã Gửi Báo Cáo Thành Công!'}
+              {pick('Đã Gửi Báo Cáo Thành Công!', 'Report Submitted Successfully!', '举报提交成功！')}
             </h4>
             <p className="text-xs text-slate-300 max-w-xs mx-auto">
-              {isEn 
-                ? 'Thank you for keeping CloudSend safe. The DEV / Moderation team will inspect and take action shortly.'
-                : 'Cảm ơn bạn đã giữ gìn môi trường văn minh trên CloudSend. Đội ngũ DEV sẽ kiểm tra và áp dụng chế tài sớm nhất.'}
+              {pick(
+                'Cảm ơn bạn đã giữ gìn môi trường văn minh trên CloudSend. Đội ngũ DEV sẽ kiểm tra và áp dụng chế tài sớm nhất.',
+                'Thank you for keeping CloudSend safe. The DEV / Moderation team will inspect and take action shortly.',
+                '感谢您维护 CloudSend 的安全与文明环境。开发与管理团队将尽快核查并处理。'
+              )}
             </p>
           </div>
         ) : (
@@ -193,13 +229,13 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
             {/* Target Member (Optional) */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">
-                {isEn ? 'Member committing violation (optional):' : 'Thành viên vi phạm (không bắt buộc):'}
+                {pick('Thành viên vi phạm (không bắt buộc):', 'Member committing violation (optional):', '违规成员（可选）：')}
               </label>
               <input
                 type="text"
                 value={targetMember}
                 onChange={(e) => setTargetMember(e.target.value)}
-                placeholder={isEn ? 'Enter username or device name...' : 'Ví dụ: Tên hiển thị hoặc tên máy thành viên...'}
+                placeholder={pick('Ví dụ: Tên hiển thị hoặc tên máy thành viên...', 'Enter username or device name...', '输入成员昵称或设备名...')}
                 className="w-full px-3.5 py-2 bg-slate-950 border border-slate-800 focus:border-rose-500/60 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none transition-colors"
               />
             </div>
@@ -207,7 +243,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
             {/* Violation Category */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">
-                {isEn ? 'Violation Category:' : 'Hành vi vi phạm:'}
+                {pick('Hành vi vi phạm:', 'Violation Category:', '违规类别：')}
               </label>
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.5)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full">
                 {categories.map((c) => (
@@ -238,13 +274,17 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
             {/* Details Input */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">
-                {isEn ? 'Additional details / Evidence explanation:' : 'Chi tiết bổ sung / Mô tả tình huống:'}
+                {pick('Chi tiết bổ sung / Mô tả tình huống:', 'Additional details / Evidence explanation:', '补充详情 / 情况说明：')}
               </label>
               <textarea
                 rows={3}
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
-                placeholder={isEn ? 'Describe what happened (e.g. offensive language, repeated spam, inappropriate files)...' : 'Mô tả chi tiết vi phạm (ví dụ: thành viên cố tình spam, dùng từ ngữ khiêu khích, chia sẻ liên kết xấu)...'}
+                placeholder={pick(
+                  'Mô tả chi tiết vi phạm (ví dụ: thành viên cố tình spam, dùng từ ngữ khiêu khích, chia sẻ liên kết xấu)...',
+                  'Describe what happened (e.g. offensive language, repeated spam, inappropriate files)...',
+                  '请详细描述违规情况（例如：恶意刷屏、使用侮辱性言语、发送不雅内容或恶意链接）...'
+                )}
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-rose-500/60 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none resize-none transition-colors [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.5)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full"
               />
             </div>
@@ -256,7 +296,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
               >
-                {isEn ? 'Cancel' : 'Hủy'}
+                {pick('Hủy', 'Cancel', '取消')}
               </button>
               <button
                 type="submit"
@@ -264,11 +304,11 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white transition-all shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
                 {submitting ? (
-                  <span>{isEn ? 'Sending...' : 'Đang gửi...'}</span>
+                  <span>{pick('Đang gửi...', 'Sending...', '正在提交...')}</span>
                 ) : (
                   <>
                     <Flag className="w-3.5 h-3.5" />
-                    <span>{isEn ? 'Submit Report' : 'Gửi Báo Cáo'}</span>
+                    <span>{pick('Gửi Báo Cáo', 'Submit Report', '提交举报')}</span>
                   </>
                 )}
               </button>

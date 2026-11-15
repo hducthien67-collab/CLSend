@@ -43,16 +43,18 @@ import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { MobileBottomSheet } from './MobileBottomSheet';
+import { openMediaInLargeViewer } from '../../utils/mediaViewerSession';
 import { useLanguage } from '../../context/LanguageContext';
 import { getVideoWebWatchUrl, openVideoInWebTab } from '../../utils/videoWatch';
 import { PersistentVideoPlayerModal } from '../PersistentVideoPlayerModal';
 import { saveVideoToIndexedDB } from '../AllInOneVideoPlayer';
 import { storeFileBlobLocally } from '../../utils/idbStorage';
+import { subscribeUserCloudFiles } from '../../utils/cloudSync';
 
 const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 export const MobileCloudView: React.FC = () => {
-  const { currentUser, settings } = useAuth();
+  const { currentUser, userProfile, settings } = useAuth();
   const { t } = useLanguage();
   const [files, setFiles] = useState<CloudDriveFile[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'image' | 'video' | 'audio' | 'document' | 'favorite'>('all');
@@ -73,24 +75,22 @@ export const MobileCloudView: React.FC = () => {
     setTimeout(() => setToastText(null), 3000);
   };
 
-  // Real-time listener for user's Cloud files
+  // Real-time listener for user's Cloud files (supports linked UIDs & email across Chrome profiles)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser?.uid) {
+      setFiles([]);
+      return;
+    }
 
-    const cloudRef = collection(db, 'cloud_files');
-    const q = query(cloudRef, where('userId', '==', currentUser.uid));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: CloudDriveFile[] = [];
-      snapshot.docs.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as CloudDriveFile);
-      });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setFiles(list);
-    });
+    const unsubscribe = subscribeUserCloudFiles(
+      currentUser,
+      userProfile,
+      (list) => setFiles(list),
+      (err) => console.warn('Mobile cloud sync error:', err)
+    );
 
     return () => unsubscribe();
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, currentUser?.email, currentUser?.linkedEmail, (currentUser?.linkedUids || []).join(','), userProfile?.linkedEmail, (userProfile?.linkedUids || []).join(',')]);
 
   const totalUsedBytes = files.reduce((acc, f) => acc + (f.size || 0), 0);
   const usedPercent = Math.min(100, Math.round((totalUsedBytes / MAX_QUOTA_BYTES) * 100));
@@ -106,24 +106,29 @@ export const MobileCloudView: React.FC = () => {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
         let fileUrl = '';
+        let fileViewUrl = '';
         let thumb: string | null = null;
-
-        if (isImageFile(file)) {
-          try {
-            thumb = await generateImageThumbnail(file, 480, 0.75);
-          } catch {}
-        }
+        const thumbPromise: Promise<string | null> = isImageFile(file)
+          ? generateImageThumbnail(file, 480, 0.75).catch(() => null)
+          : isVideoFile(file)
+          ? generateVideoThumbnail(file).catch(() => null)
+          : Promise.resolve(null);
 
         try {
           const uploaded = await uploadFileToServer(file, (pct) => {
             setUploadPercent(Math.min(95, Math.round((i * 100 + pct) / fileList.length)));
           });
           fileUrl = uploaded.url;
-          if (uploaded.thumbnail) thumb = uploaded.thumbnail;
+          fileViewUrl = uploaded.viewUrl || uploaded.url;
+          thumb = uploaded.thumbnail || await Promise.race([
+            thumbPromise,
+            new Promise<null>((res) => setTimeout(() => res(null), 800))
+          ]);
         } catch {
           const fallback = await createClientFallbackFileInfo(file);
           fileUrl = fallback.url;
-          thumb = fallback.thumbnail || null;
+          fileViewUrl = fallback.viewUrl || fallback.url;
+          thumb = fallback.thumbnail || await thumbPromise;
         }
 
         // Safety check: Never save empty URL docs to Firestore
@@ -135,11 +140,12 @@ export const MobileCloudView: React.FC = () => {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         let category: 'image' | 'video' | 'audio' | 'document' | 'other' = 'other';
         if (file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) category = 'image';
-        else if (file.type.startsWith('video/') || ['mp4', 'mov', 'webm'].includes(ext)) category = 'video';
+        else if (file.type.startsWith('video/') || ['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v', '3gp'].includes(ext)) category = 'video';
         else if (file.type.startsWith('audio/') || ['mp3', 'wav', 'm4a'].includes(ext)) category = 'audio';
         else if (['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'zip'].includes(ext)) category = 'document';
 
         const safeUrl = (fileUrl && fileUrl.length < 700000) ? fileUrl : '';
+        const safeViewUrl = (fileViewUrl && fileViewUrl.length < 700000) ? fileViewUrl : safeUrl;
         const safeThumb = (thumb && thumb.length < 700000) ? thumb : null;
 
         if (!safeUrl || !safeUrl.trim()) {
@@ -152,12 +158,13 @@ export const MobileCloudView: React.FC = () => {
         await setDoc(doc(db, 'cloud_files', docId), {
           id: docId,
           userId: currentUser.uid,
-          userEmail: currentUser.email || '',
+          userEmail: (currentUser.email || '').trim().toLowerCase(),
           userName: currentUser.displayName || settings?.deviceName || 'Người dùng',
           name: file.name,
           size: file.size,
           type: file.type || 'application/octet-stream',
           url: safeUrl,
+          viewUrl: safeViewUrl,
           thumbnail: safeThumb,
           category: category,
           isFavorite: false,
@@ -208,34 +215,27 @@ export const MobileCloudView: React.FC = () => {
     }
   };
 
-  // Nhấn vào thẻ video hoặc hình ảnh: chuyển ngay sang Trang Riêng Biệt (0% Lag)
+  // Nhấn vào thẻ video hoặc hình ảnh: mở ngay khung xem lớn độc lập (nguồn Kho Cloud)
   const handleMobileCardClick = (file: CloudDriveFile) => {
-    const isVideo = file.category === 'video' || (file.type && file.type.startsWith('video/')) || file.name.match(/\.(mp4|webm|mov|mkv|avi|m4v|3gp)$/i);
-    const isImage = file.category === 'image' || (file.type && file.type.startsWith('image/')) || file.name.match(/\.(jpg|jpeg|png|webp|gif|svg|bmp)$/i);
+    const isVideo = file.category === 'video' || (file.type && file.type.startsWith('video/')) || /\.(mp4|webm|mov|mkv|avi|m4v|3gp|flv|wmv|ts|ogv|mts)([?#&]|$)/i.test(file.name);
+    const isImage = file.category === 'image' || (file.type && file.type.startsWith('image/')) || /\.(jpg|jpeg|png|webp|gif|svg|bmp|heic|heif|avif)([?#&]|$)/i.test(file.name);
+    const mediaSrc = file.viewUrl || file.url;
 
-    if (isVideo || isImage) {
-      try {
-        sessionStorage.setItem('clsend_player_video', JSON.stringify({
+    if ((isVideo || isImage) && mediaSrc) {
+      openMediaInLargeViewer({
+        source: 'cloud',
+        activeItem: {
           id: file.id,
           name: file.name,
           title: file.name,
-          src: file.viewUrl || file.url,
+          src: mediaSrc,
           thumbnail: file.thumbnail || null,
           size: file.size,
-          type: isVideo ? 'video' : 'image'
-        }));
-      } catch (e) {
-        console.warn(e);
-      }
-      const q = new URLSearchParams();
-      q.set('page', 'player');
-      q.set('id', file.id);
-      q.set('name', file.name);
-      q.set('src', file.viewUrl || file.url);
-      if (file.size) q.set('size', String(file.size));
-      q.set('type', isVideo ? 'video' : 'image');
-      window.history.pushState(null, '', `/?${q.toString()}`);
-      window.dispatchEvent(new PopStateEvent('popstate'));
+          type: isVideo ? 'video' : 'image',
+          mimeType: file.type,
+          createdAt: file.createdAt,
+        },
+      });
       return;
     }
 
@@ -522,21 +522,22 @@ export const MobileCloudView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    try {
-                      sessionStorage.setItem('clsend_player_video', JSON.stringify({
-                        id: selectedFileAction.id,
-                        name: selectedFileAction.name,
-                        title: selectedFileAction.name,
-                        src: selectedFileAction.viewUrl || selectedFileAction.url,
-                        size: selectedFileAction.size
-                      }));
-                    } catch (e) {
-                      console.warn(e);
-                    }
                     const target = selectedFileAction;
                     setSelectedFileAction(null);
-                    window.history.pushState(null, '', `/?page=player&id=${encodeURIComponent(target.id)}&name=${encodeURIComponent(target.name)}&src=${encodeURIComponent(target.viewUrl || target.url)}`);
-                    window.dispatchEvent(new PopStateEvent('popstate'));
+                    openMediaInLargeViewer({
+                      source: 'cloud',
+                      activeItem: {
+                        id: target.id,
+                        name: target.name,
+                        title: target.name,
+                        src: target.viewUrl || target.url,
+                        thumbnail: target.thumbnail || null,
+                        size: target.size,
+                        type: 'video',
+                        mimeType: target.type,
+                        createdAt: target.createdAt,
+                      },
+                    });
                   }}
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all cursor-pointer"
                 >
@@ -551,8 +552,22 @@ export const MobileCloudView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setPreviewFile(selectedFileAction);
+                  const target = selectedFileAction;
                   setSelectedFileAction(null);
+                  openMediaInLargeViewer({
+                    source: 'cloud',
+                    activeItem: {
+                      id: target.id,
+                      name: target.name,
+                      title: target.name,
+                      src: target.viewUrl || target.url,
+                      thumbnail: target.thumbnail || null,
+                      size: target.size,
+                      type: 'image',
+                      mimeType: target.type,
+                      createdAt: target.createdAt,
+                    },
+                  });
                 }}
                 className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 border border-slate-700 active:scale-98 transition-all"
               >

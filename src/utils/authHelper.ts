@@ -5,6 +5,11 @@
 export interface CustomAuthAccount {
   uid: string;
   email: string;
+  linkedEmail?: string;
+  phone?: string;
+  linkedPhone?: string;
+  linkedUids?: string[];
+  googleUid?: string;
   username?: string;
   dob?: string;
   gender?: 'Nam' | 'Nữ' | 'Không Muốn Trả Lời' | string;
@@ -15,6 +20,23 @@ export interface CustomAuthAccount {
   deviceType?: string;
   avatarColor?: string;
   createdAt: string;
+}
+
+export function normalizePhoneNumber(phone?: string | null): string {
+  if (!phone) return '';
+  let cleaned = phone.trim().replace(/[\s\-().]/g, '');
+  if (!cleaned) return '';
+  // Normalize common Vietnamese local format 0xxxxxxxxx -> +84xxxxxxxxx
+  if (/^0\d{8,10}$/.test(cleaned)) {
+    cleaned = '+84' + cleaned.slice(1);
+  } else if (/^84\d{8,10}$/.test(cleaned)) {
+    cleaned = '+' + cleaned;
+  } else if (/^\+0\d+$/.test(cleaned)) {
+    cleaned = '+' + cleaned.slice(2);
+  }
+  const digitsOnly = cleaned.replace(/\D/g, '');
+  if (digitsOnly.length < 7) return '';
+  return cleaned.startsWith('+') ? `+${digitsOnly}` : digitsOnly;
 }
 
 export async function hashPassword(password: string, salt: string): Promise<string> {

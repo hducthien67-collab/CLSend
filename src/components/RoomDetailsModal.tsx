@@ -23,14 +23,20 @@ import {
   Info,
   Zap,
   Server,
-  Shield
+  Shield,
+  Film,
+  Play
 } from 'lucide-react';
 import { AVATAR_COLORS } from '../utils/device';
 import { isDevUser } from '../utils/devModeration';
 import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
 import { ResetServerModal } from './ResetServerModal';
+import { ChatMediaImage } from './ChatMediaImage';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
+import { downloadFileSafely } from '../utils/fileDownload';
+import { formatFileSize } from '../utils/fileUpload';
+import { extractRoomMediaFromMessages, openMediaInLargeViewer } from '../utils/mediaViewerSession';
 
 interface RoomDetailsModalProps {
   isOpen: boolean;
@@ -58,8 +64,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   onRoomLeft,
 }) => {
   const { t, currentLang } = useLanguage();
-  const isEn = currentLang === 'en';
-  const [activeTab, setActiveTab] = useState<'info' | 'members' | 'gallery'>('info');
+  const isVi = currentLang === 'vi';
+  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
+  const isEn = !isVi && !isZh;
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
+  const [activeTab, setActiveTab] = useState<'info' | 'members' | 'gallery' | 'videos'>('info');
 
   // Edit room state
   const [roomName, setRoomName] = useState(room.name);
@@ -122,29 +131,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
     customAvatar !== (room.avatar || '')
   );
 
-  // Extract all images ever sent in this room from messages
-  const allImages: { url: string; name: string; sender: string; time: string }[] = [];
-  messages.forEach((msg) => {
-    if (msg.attachments && msg.attachments.length > 0) {
-      msg.attachments.forEach((att) => {
-        if (att.type.startsWith('image/')) {
-          allImages.push({
-            url: att.data,
-            name: att.name,
-            sender: msg.senderName,
-            time: msg.createdAt,
-          });
-        }
-      });
-    } else if (msg.fileData && (msg.fileType?.startsWith('image/') || msg.fileName?.match(/\.(jpg|jpeg|png|webp|gif)$/i))) {
-      allImages.push({
-        url: msg.fileData,
-        name: msg.fileName || 'Ảnh',
-        sender: msg.senderName,
-        time: msg.createdAt,
-      });
-    }
-  });
+  // Extract all images, GIFs, and videos sent in this room with resolved inline/Telegram URLs
+  const { images: allImages, videos: allVideos, unifiedMedia: roomUnifiedMedia } = React.useMemo(() => {
+    return extractRoomMediaFromMessages(messages, { roomId: room.id });
+  }, [messages, room.id]);
 
   // Ensure members list has owner first
   const membersList: RoomMember[] = [...(room.members || [])];
@@ -360,7 +350,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={() => {
                   if (canEditRoom) fileInputRef.current?.click();
                 }}
-                title={canEditRoom ? (isEn ? "Click to change room avatar (Host only)" : "Bấm để đổi ảnh đại diện nhóm (Chỉ Trưởng phòng)") : (isEn ? "Room avatar" : "Ảnh đại diện nhóm")}
+                title={canEditRoom ? pick("Bấm để đổi ảnh đại diện nhóm (Chỉ Trưởng phòng)", "Click to change room avatar (Host only)", "点击更换群头像（仅限房主）") : pick("Ảnh đại diện nhóm", "Room avatar", "群头像")}
               >
                 {customAvatar ? (
                   <img src={customAvatar} alt="Room" className="w-full h-full object-cover" />
@@ -373,7 +363,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 {canEditRoom && (
                   <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity text-white">
                     <Camera className="w-3.5 h-3.5 text-emerald-300" />
-                    <span className="text-[7.5px] font-bold">{isEn ? 'Change' : 'Đổi ảnh'}</span>
+                    <span className="text-[7.5px] font-bold">{pick('Đổi ảnh', 'Change', '更换')}</span>
                   </div>
                 )}
               </div>
@@ -381,7 +371,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <h3 className="text-xs sm:text-sm font-bold text-white truncate max-w-[150px] sm:max-w-[200px]">
-                    {room.id === 'public-relay-lounge' ? (isEn ? 'Global Lounge' : (roomName || room.name)) : (roomName || room.name)}
+                    {room.id === 'public-relay-lounge' ? pick(roomName || room.name, 'Global Lounge', '全球大厅') : (roomName || room.name)}
                   </h3>
                   <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shrink-0 ${
                     room.isPrivate !== false 
@@ -389,7 +379,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                   }`}>
                     {room.isPrivate !== false ? <Lock className="w-2.5 h-2.5" /> : <Globe className="w-2.5 h-2.5" />}
-                    {room.isPrivate !== false ? (isEn ? 'Private' : 'Riêng tư') : (isEn ? 'Public' : 'Cộng đồng')}
+                    {room.isPrivate !== false ? pick('Riêng tư', 'Private', '私密') : pick('Cộng đồng', 'Public', '公开')}
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5 text-[10.5px]">
@@ -397,13 +387,13 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     type="button"
                     onClick={handleCopyCode}
                     className="font-mono text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 shrink-0"
-                    title={isEn ? "Copy ID / Room Code" : "Sao chép ID / Mã phòng"}
+                    title={pick("Sao chép ID / Mã phòng", "Copy ID / Room Code", "复制 ID / 房间代码")}
                   >
                     <span className="copyable-text select-text cursor-text" data-copyable="true">ID: {room.code}</span>
                     {copiedCode ? <Check className="w-2.5 h-2.5 text-emerald-400" /> : <Copy className="w-2.5 h-2.5 text-slate-400" />}
                   </button>
                   <span className="text-slate-500">•</span>
-                  <span className="text-slate-400 shrink-0">{membersList.length} {isEn ? (membersList.length > 1 ? 'members' : 'member') : 'thành viên'}</span>
+                  <span className="text-slate-400 shrink-0">{membersList.length} {pick('thành viên', membersList.length > 1 ? 'members' : 'member', '位成员')}</span>
                 </div>
               </div>
             </div>
@@ -417,43 +407,55 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             </button>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex border-b border-slate-800 bg-slate-950/40 px-2 pt-0.5 shrink-0">
+          {/* Navigation Tabs - Compact single-row bar */}
+          <div className="flex border-b border-slate-800 bg-slate-950/40 px-1.5 pt-0.5 shrink-0 overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setActiveTab('info')}
-              className={`flex-1 py-1.5 text-xs font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors ${
+              className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'info'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>{isEn ? 'Structure & Photo' : 'Cấu trúc & Ảnh nhóm'}</span>
+              <Edit3 className="w-3 h-3 shrink-0" />
+              <span>{pick('Cấu trúc & Ảnh nhóm', 'Structure & Photo', '群设置与头像')}</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('members')}
-              className={`flex-1 py-1.5 text-xs font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors ${
+              className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'members'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>{isEn ? `Members (${membersList.length})` : `Thành viên (${membersList.length})`}</span>
+              <Users className="w-3 h-3 shrink-0" />
+              <span>{pick(`Thành viên (${membersList.length})`, `Members (${membersList.length})`, `成员 (${membersList.length})`)}</span>
             </button>
             <button
               type="button"
               onClick={() => setActiveTab('gallery')}
-              className={`flex-1 py-1.5 text-xs font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors ${
+              className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'gallery'
                   ? 'border-emerald-500 text-emerald-400'
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               }`}
             >
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span>{isEn ? `Images (${allImages.length})` : `Hình ảnh (${allImages.length})`}</span>
+              <ImageIcon className="w-3 h-3 shrink-0" />
+              <span>{pick(`Hình ảnh (${allImages.length})`, `Images (${allImages.length})`, `图片 (${allImages.length})`)}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('videos')}
+              className={`flex-1 py-1.5 px-1.5 text-[11px] font-semibold flex items-center justify-center gap-1 border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'videos'
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Film className="w-3 h-3 shrink-0" />
+              <span>{`Video (${allVideos.length})`}</span>
             </button>
           </div>
 
@@ -479,19 +481,19 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       </div>
                       <div className="min-w-0 flex-1">
                         <h3 className="text-sm font-bold text-white truncate">
-                          {room.id === 'public-relay-lounge' ? (isEn ? 'Global Lounge' : room.name) : room.name}
+                          {room.id === 'public-relay-lounge' ? pick(room.name, 'Global Lounge', '全球大厅') : room.name}
                         </h3>
                         <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">
                           {room.id === 'public-relay-lounge' 
-                            ? (isEn ? 'Public connection lounge without limits for all devices on the network' : (room.description || 'Chưa có mô tả cho nhóm chat này.'))
-                            : (room.description || (isEn ? 'No description for this chat group yet.' : 'Chưa có mô tả cho nhóm chat này.'))}
+                            ? pick(room.description || 'Chưa có mô tả cho nhóm chat này.', 'Public connection lounge without limits for all devices on the network', '网络中所有设备无限制的公开交流大厅')
+                            : (room.description || pick('Chưa có mô tả cho nhóm chat này.', 'No description for this chat group yet.', '此群聊暂无简介。'))}
                         </p>
                       </div>
                     </div>
 
                     <div className="p-2.5 rounded-xl bg-slate-950/40 border border-slate-800/80 text-[11px] text-slate-400 flex items-center gap-2">
                       <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>{isEn ? 'Only Room Owner can edit group name, avatar, and color.' : 'Chỉ Trưởng phòng mới có quyền chỉnh sửa tên, ảnh đại diện và màu sắc nhóm.'}</span>
+                      <span>{pick('Chỉ Trưởng phòng mới có quyền chỉnh sửa tên, ảnh đại diện và màu sắc nhóm.', 'Only Room Owner can edit group name, avatar, and color.', '仅限房主可编辑群名称、头像与颜色。')}</span>
                     </div>
                   </div>
                 ) : (
@@ -500,11 +502,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between">
                         <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                          {isEn ? '1. Chat room avatar' : '1. Ảnh đại diện phòng chat'}
+                          {pick('1. Ảnh đại diện phòng chat', '1. Chat room avatar', '1. 聊天室头像')}
                         </label>
                         {avatarSaveSuccess && (
                           <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1 animate-pulse">
-                            <Check className="w-3 h-3" /> {isEn ? "Photo selected! Click 'Save' below to apply" : "Đã chọn ảnh! Nhấn 'Lưu' bên dưới để áp dụng"}
+                            <Check className="w-3 h-3" /> {pick("Đã chọn ảnh! Nhấn 'Lưu' bên dưới để áp dụng", "Photo selected! Click 'Save' below to apply", "已选择头像！点击下方“保存”生效")}
                           </span>
                         )}
                       </div>
@@ -551,7 +553,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               fileInputRef.current?.click();
                             }
                           }}
-                          title={customAvatar ? (isEn ? 'Click to zoom in' : 'Bấm để phóng to xem ảnh') : (isEn ? 'Click to upload photo' : 'Bấm để tải ảnh lên')}
+                          title={customAvatar ? pick('Bấm để phóng to xem ảnh', 'Click to zoom in', '点击放大查看') : pick('Bấm để tải ảnh lên', 'Click to upload photo', '点击上传图片')}
                         >
                           {customAvatar ? (
                             <img src={customAvatar} alt="Room" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
@@ -573,7 +575,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-[11px] font-semibold text-emerald-300 border border-emerald-500/40 flex items-center gap-1 transition-colors cursor-pointer active:scale-95 shadow-xs"
                             >
                               <Camera className="w-3 h-3 text-emerald-400" />
-                              <span>{customAvatar ? (isEn ? 'Change photo' : 'Đổi ảnh khác') : (isEn ? 'Upload photo' : 'Tải ảnh lên')}</span>
+                              <span>{customAvatar ? pick('Đổi ảnh khác', 'Change photo', '更换图片') : pick('Tải ảnh lên', 'Upload photo', '上传图片')}</span>
                             </button>
                             {customAvatar && (
                               <button
@@ -581,14 +583,14 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                                 onClick={handleRemoveAvatar}
                                 className="px-2 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[11px] font-medium transition-colors cursor-pointer"
                               >
-                                {isEn ? 'Remove photo' : 'Xóa ảnh'}
+                                {pick('Xóa ảnh', 'Remove photo', '删除图片')}
                               </button>
                             )}
                           </div>
 
                           {/* Color Palette */}
                           <div className="flex items-center gap-1 flex-wrap">
-                            <span className="text-[10px] text-slate-400 mr-0.5">{isEn ? 'Background:' : 'Màu nền:'}</span>
+                            <span className="text-[10px] text-slate-400 mr-0.5">{pick('Màu nền:', 'Background:', '背景色：')}</span>
                             {AVATAR_COLORS.map((col) => (
                               <button
                                 key={col}
@@ -598,21 +600,21 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                                   selectedColor === col ? 'scale-110 ring-2 ring-white' : 'hover:scale-105 opacity-80 hover:opacity-100'
                                 }`}
                                 style={{ backgroundColor: col }}
-                                title={isEn ? `Select color ${col}` : `Chọn màu ${col}`}
+                                title={pick(`Chọn màu ${col}`, `Select color ${col}`, `选择颜色 ${col}`)}
                               />
                             ))}
                           </div>
                         </div>
                       </div>
                       <p className="text-[10px] text-slate-500 italic">
-                        {isEn ? '💡 Tip: You can drag and drop photos directly into the box above. After selecting, click "Save room structure" to update.' : '💡 Mẹo: Bạn có thể kéo thả ảnh trực tiếp vào ô trên. Sau khi chọn ảnh, nhấn "Lưu cấu trúc phòng" để cập nhật.'}
+                        {pick('💡 Mẹo: Bạn có thể kéo thả ảnh trực tiếp vào ô trên. Sau khi chọn ảnh, nhấn "Lưu cấu trúc phòng" để cập nhật.', '💡 Tip: You can drag and drop photos directly into the box above. After selecting, click "Save room structure" to update.', '💡 提示：您可以直接将图片拖放到上方框中，选择后点击“保存房间设置”即可更新。')}
                       </p>
                     </div>
 
                     {/* 2. Tên của nhóm */}
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                        {isEn ? '2. Group Name' : '2. Tên của nhóm'}
+                        {pick('2. Tên của nhóm', '2. Group Name', '2. 群聊名称')}
                       </label>
                       <input
                         type="text"
@@ -622,7 +624,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.preventDefault();
                         }}
-                        placeholder={isEn ? 'Enter room name...' : 'Nhập tên phòng...'}
+                        placeholder={pick('Nhập tên phòng...', 'Enter room name...', '输入房间名称...')}
                         className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                     </div>
@@ -630,7 +632,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     {/* 3. Mô tả phòng */}
                     <div className="space-y-1">
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                        {isEn ? '3. Room Description' : '3. Mô tả phòng'}
+                        {pick('3. Mô tả phòng', '3. Room Description', '3. 房间简介')}
                       </label>
                       <input
                         type="text"
@@ -639,7 +641,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') e.preventDefault();
                         }}
-                        placeholder={isEn ? 'Describe the purpose of this chat group...' : 'Mô tả mục đích nhóm chat...'}
+                        placeholder={pick('Mô tả mục đích nhóm chat...', 'Describe the purpose of this chat group...', '描述此群聊的用途...')}
                         className="w-full px-3 py-1.5 bg-slate-950/60 border border-slate-800 rounded-lg text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                       />
                     </div>
@@ -648,11 +650,11 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                     <div className="flex items-center justify-between pt-1">
                       {saveSuccess ? (
                         <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" /> {isEn ? 'Room structure saved successfully!' : 'Đã lưu cấu trúc phòng thành công!'}
+                          <Check className="w-3.5 h-3.5" /> {pick('Đã lưu cấu trúc phòng thành công!', 'Room structure saved successfully!', '房间设置已保存！')}
                         </span>
                       ) : hasUnsavedChanges ? (
                         <span className="text-[10px] text-amber-400 font-medium flex items-center gap-1">
-                          {isEn ? '⚠️ Unsaved changes' : '⚠️ Có thay đổi chưa lưu'}
+                          {pick('⚠️ Có thay đổi chưa lưu', '⚠️ Unsaved changes', '⚠️ 有未保存的更改')}
                         </span>
                       ) : (
                         <span />
@@ -667,7 +669,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               : 'bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-50'
                           }`}
                         >
-                          {isSaving ? (isEn ? 'Saving...' : 'Đang lưu...') : hasUnsavedChanges ? (isEn ? '💾 Save room structure' : '💾 Lưu cấu trúc phòng') : (isEn ? 'Save room structure' : 'Lưu cấu trúc phòng')}
+                          {isSaving ? pick('Đang lưu...', 'Saving...', '保存中...') : hasUnsavedChanges ? pick('💾 Lưu cấu trúc phòng', '💾 Save room structure', '💾 保存房间设置') : pick('Lưu cấu trúc phòng', 'Save room structure', '保存房间设置')}
                         </button>
                       </div>
                     </div>
@@ -679,17 +681,17 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                   {room.id === 'public-relay-lounge' ? (
                     <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
                       <Shield className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>{isEn ? 'Global Lounge is a system default room, permanently protected and cannot be deleted.' : 'Đại Sảnh Toàn Cầu là phòng hệ thống mặc định, được bảo vệ vĩnh viễn và không thể xóa.'}</span>
+                      <span>{pick('Đại Sảnh Toàn Cầu là phòng hệ thống mặc định, được bảo vệ vĩnh viễn và không thể xóa.', 'Global Lounge is a system default room, permanently protected and cannot be deleted.', '全球大厅为系统默认房间，受永久保护，不可删除。')}</span>
                     </div>
                   ) : isOwner || isDev ? (
                     <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-rose-300 flex items-center gap-1">
                           <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                          {isEn ? 'Dissolve & Delete Group' : 'Giải tán & Xóa nhóm'}
+                          {pick('Giải tán & Xóa nhóm', 'Dissolve & Delete Group', '解散并删除群组')}
                         </h4>
                         <p className="text-[10px] text-rose-400/80 mt-0.5 leading-snug">
-                          {isEn ? 'Room Owner sends a final message to all members upon dissolving.' : 'Trưởng phòng gửi lời nhắn cuối cùng tới các thành viên khi giải tán.'}
+                          {pick('Trưởng phòng gửi lời nhắn cuối cùng tới các thành viên khi giải tán.', 'Room Owner sends a final message to all members upon dissolving.', '解散群组时，房主可向所有成员发送最后通知。')}
                         </p>
                       </div>
                       <button
@@ -697,7 +699,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onClick={() => setShowDissolveModal(true)}
                         className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs shrink-0 shadow-md transition-colors cursor-pointer"
                       >
-                        {isEn ? 'Delete Group' : 'Xóa nhóm'}
+                        {pick('Xóa nhóm', 'Delete Group', '删除群组')}
                       </button>
                     </div>
                   ) : (
@@ -705,10 +707,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       <div className="min-w-0">
                         <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1">
                           <LogOut className="w-3.5 h-3.5 text-slate-400" />
-                          {isEn ? 'Leave Group' : 'Rời khỏi nhóm'}
+                          {pick('Rời khỏi nhóm', 'Leave Group', '退出群组')}
                         </h4>
                         <p className="text-[10px] text-slate-400 mt-0.5 leading-snug">
-                          {isEn ? 'You will leave this room and can rejoin using the room code.' : 'Bạn sẽ rời khỏi phòng này và có thể tham gia lại bằng mã phòng.'}
+                          {pick('Bạn sẽ rời khỏi phòng này và có thể tham gia lại bằng mã phòng.', 'You will leave this room and can rejoin using the room code.', '您将退出此房间，日后可通过房间代码重新加入。')}
                         </p>
                       </div>
                       <button
@@ -716,7 +718,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         onClick={handleLeaveRoom}
                         className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs shrink-0 border border-slate-700 transition-colors cursor-pointer"
                       >
-                        {isEn ? 'Leave Group' : 'Rời nhóm'}
+                        {pick('Rời nhóm', 'Leave Group', '退出群组')}
                       </button>
                     </div>
                   )}
@@ -727,7 +729,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
                           <Zap className="w-4 h-4 text-amber-400 fill-amber-400" />
-                          <h4 className="text-xs font-bold text-white">{isEn ? 'Reset Server (DEV Privilege)' : 'Reset Máy Chủ (Đặc quyền DEV)'}</h4>
+                          <h4 className="text-xs font-bold text-white">{pick('Reset Máy Chủ (Đặc quyền DEV)', 'Reset Server (DEV Privilege)', '重置服务器（DEV 特权）')}</h4>
                         </div>
                         <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-0.5">
                           <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
@@ -735,7 +737,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         </span>
                       </div>
                       <p className="text-[10.5px] text-slate-400 leading-snug">
-                        {isEn ? 'Delete all messages or automatically clean messages older than 1 week (7 days) to prevent server lag.' : 'Xóa toàn bộ tin nhắn hoặc tự động dọn dẹp các tin nhắn cũ hơn 1 tuần (7 ngày) để chống máy chủ bị lag.'}
+                        {pick('Xóa toàn bộ tin nhắn hoặc tự động dọn dẹp các tin nhắn cũ hơn 1 tuần (7 ngày) để chống máy chủ bị lag.', 'Delete all messages or automatically clean messages older than 1 week (7 days) to prevent server lag.', '清空全部消息或自动清理 1 周（7 天）前的旧消息，防止服务器卡顿。')}
                       </p>
                       <button
                         type="button"
@@ -743,7 +745,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                         className="w-full py-2 rounded-xl bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white font-bold text-xs shadow-md shadow-amber-500/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
                       >
                         <Zap className="w-3.5 h-3.5 fill-current" />
-                        <span>{isEn ? 'Open Reset Server Control Panel' : 'Mở Bảng Điều Khiển Reset Máy Chủ'}</span>
+                        <span>{pick('Mở Bảng Điều Khiển Reset Máy Chủ', 'Open Reset Server Control Panel', '打开重置服务器控制面板')}</span>
                       </button>
                     </div>
                   )}
@@ -756,10 +758,10 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {isEn ? `MEMBERS LIST (${membersList.length})` : `DANH SÁCH THÀNH VIÊN (${membersList.length})`}
+                    {pick(`DANH SÁCH THÀNH VIÊN (${membersList.length})`, `MEMBERS LIST (${membersList.length})`, `成员列表 (${membersList.length})`)}
                   </h4>
                   <span className="text-[10px] text-slate-500">
-                    {isEn ? 'Host at the top' : 'Trưởng phòng đứng đầu'}
+                    {pick('Trưởng phòng đứng đầu', 'Host at the top', '房主置顶')}
                   </span>
                 </div>
 
@@ -804,7 +806,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               </span>
                               {isSelf && (
                                 <span className="text-[9px] px-1 py-0.2 rounded bg-slate-800 text-slate-300">
-                                  {isEn ? 'You' : 'Bạn'}
+                                  {pick('Bạn', 'You', '你')}
                                 </span>
                               )}
                               {isMemberDev && (
@@ -816,12 +818,12 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                               {isRoomOwner && !isMemberDev && (
                                 <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
                                   <Crown className="w-2.5 h-2.5 text-amber-400" />
-                                  {isEn ? 'Host' : 'Trưởng phòng'}
+                                  {pick('Trưởng phòng', 'Host', '房主')}
                                 </span>
                               )}
                             </div>
                             <p className="text-[10px] text-slate-400 truncate">
-                              {isMemberDev ? (isEn ? 'Supreme Admin' : 'Quản trị viên tối cao') : `${isEn ? 'Device: ' : 'Thiết bị: '}${m.deviceName || (isEn ? 'Online' : 'Trực tuyến')}`}
+                              {isMemberDev ? pick('Quản trị viên tối cao', 'Supreme Admin', '最高管理员') : `${pick('Thiết bị: ', 'Device: ', '设备：')}${m.deviceName || pick('Trực tuyến', 'Online', '在线')}`}
                             </p>
                           </div>
                         </div>
@@ -842,47 +844,187 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               </div>
             )}
 
-            {/* TAB 3: Thư viện hình ảnh đã gửi trong nhóm */}
+            {/* TAB 3: Thư viện hình ảnh & GIF đã gửi trong nhóm */}
             {activeTab === 'gallery' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {isEn ? `IMAGES IN ROOM (${allImages.length})` : `HÌNH ẢNH TRONG NHÓM (${allImages.length})`}
+                    {pick(`HÌNH ẢNH TRONG NHÓM (${allImages.length})`, `IMAGES IN ROOM (${allImages.length})`, `群内图片 (${allImages.length})`)}
                   </h4>
                   <span className="text-[10px] text-slate-500">
-                    {isEn ? 'Gallery' : 'Kho ảnh'}
+                    {pick('Kho ảnh', 'Gallery', '图库')}
                   </span>
                 </div>
 
                 {allImages.length === 0 ? (
                   <div className="p-6 text-center rounded-xl bg-slate-950/40 border border-slate-800 space-y-1.5">
                     <ImageIcon className="w-8 h-8 text-slate-600 mx-auto" />
-                    <p className="text-xs font-semibold text-slate-400">{isEn ? 'No images yet' : 'Chưa có hình ảnh nào'}</p>
-                    <p className="text-[10.5px] text-slate-500">{isEn ? 'Images sent in the room will be saved here automatically.' : 'Ảnh gửi trong phòng sẽ lưu tự động ở đây.'}</p>
+                    <p className="text-xs font-semibold text-slate-400">{pick('Chưa có hình ảnh nào', 'No images yet', '暂无图片')}</p>
+                    <p className="text-[10.5px] text-slate-500">{pick('Ảnh gửi trong phòng sẽ lưu tự động ở đây.', 'Images sent in the room will be saved here automatically.', '房间内发送的图片将自动保存于此。')}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                    {allImages.map((img, idx) => (
-                      <div key={idx} className="relative group rounded-lg overflow-hidden bg-black/50 border border-slate-800 aspect-square shadow-sm">
-                        <img 
-                          src={img.url} 
-                          alt={img.name} 
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 cursor-pointer"
-                          onClick={() => setViewingZoomImage({ url: img.url, name: img.name })}
-                        />
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-[9px] text-white truncate max-w-[60px]">{img.sender}</span>
-                          <button
-                            type="button"
-                            onClick={() => setViewingZoomImage({ url: img.url, name: img.name })}
-                            className="p-0.5 rounded bg-black/60 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
-                            title={isEn ? 'Zoom image' : 'Xem phóng to ảnh'}
-                          >
-                            <Eye className="w-3 h-3" />
-                          </button>
+                    {allImages.map((img, idx) => {
+                      const openGalleryImage = () => {
+                        onClose();
+                        openMediaInLargeViewer({
+                          source: 'chat',
+                          roomId: room.id,
+                          roomMedia: roomUnifiedMedia,
+                          activeItem: {
+                            id: img.id,
+                            name: img.name,
+                            title: img.name,
+                            src: img.url,
+                            downloadUrl: img.downloadUrl,
+                            thumbnail: img.url,
+                            size: img.size,
+                            type: 'image',
+                            mimeType: img.isGif ? 'image/gif' : 'image/jpeg',
+                            isGif: img.isGif,
+                            senderName: img.sender,
+                            senderAvatar: img.senderAvatar || null,
+                            createdAt: img.time,
+                            roomId: room.id,
+                          },
+                        });
+                      };
+                      return (
+                        <div
+                          key={img.id || idx}
+                          onClick={openGalleryImage}
+                          className="relative group rounded-lg overflow-hidden bg-black/50 border border-slate-800 aspect-square shadow-sm cursor-pointer"
+                        >
+                          <ChatMediaImage
+                            src={img.url}
+                            backupSrc={img.backupSrc}
+                            alt={img.name}
+                            isGif={img.isGif}
+                            minHeightClass="h-full min-h-0"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 cursor-pointer"
+                            onDownload={(e) => {
+                              e.stopPropagation();
+                              downloadFileSafely(img.downloadUrl || img.url, img.name);
+                            }}
+                          />
+                          {img.isGif && (
+                            <span className="absolute top-1 left-1 px-1 py-0.2 rounded bg-black/75 text-[8px] font-bold text-emerald-300 border border-emerald-500/40 pointer-events-none z-10">
+                              GIF
+                            </span>
+                          )}
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                            <span className="text-[9px] text-white truncate max-w-[60px]">{img.sender}</span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openGalleryImage();
+                              }}
+                              className="p-0.5 rounded bg-black/60 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
+                              title={pick('Xem ảnh lớn', 'Open viewer', '查看大图')}
+                            >
+                              <Eye className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 4: Kho Video đã gửi trong nhóm */}
+            {activeTab === 'videos' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    {pick(`VIDEO TRONG NHÓM (${allVideos.length})`, `VIDEOS IN ROOM (${allVideos.length})`, `群内视频 (${allVideos.length})`)}
+                  </h4>
+                  <span className="text-[10px] text-slate-500">
+                    {pick('Kho video', 'Videos', '视频库')}
+                  </span>
+                </div>
+
+                {allVideos.length === 0 ? (
+                  <div className="p-6 text-center rounded-xl bg-slate-950/40 border border-slate-800 space-y-1.5">
+                    <Film className="w-8 h-8 text-slate-600 mx-auto" />
+                    <p className="text-xs font-semibold text-slate-400">{pick('Chưa có video nào', 'No videos yet', '暂无视频')}</p>
+                    <p className="text-[10.5px] text-slate-500">{pick('Video gửi trong phòng sẽ hiển thị tại đây.', 'Videos sent in the room will appear here.', '房间内发送的视频将显示在此处。')}</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                    {allVideos.map((vid, idx) => {
+                      const openRoomVideo = () => {
+                        onClose();
+                        openMediaInLargeViewer({
+                          source: 'chat',
+                          roomId: room.id,
+                          roomMedia: roomUnifiedMedia,
+                          activeItem: {
+                            id: vid.id,
+                            name: vid.name,
+                            title: vid.name,
+                            src: vid.url,
+                            downloadUrl: vid.downloadUrl,
+                            thumbnail: vid.poster || null,
+                            size: vid.size,
+                            type: 'video',
+                            mimeType: 'video/mp4',
+                            senderName: vid.sender,
+                            senderAvatar: vid.senderAvatar || null,
+                            createdAt: vid.time,
+                            roomId: room.id,
+                          },
+                        });
+                      };
+                      return (
+                        <div
+                          key={vid.id || idx}
+                          onClick={openRoomVideo}
+                          className="relative group rounded-lg overflow-hidden bg-slate-950 border border-slate-800 aspect-square shadow-sm cursor-pointer flex items-center justify-center"
+                          title={vid.name}
+                        >
+                          {vid.poster ? (
+                            <img
+                              src={vid.poster}
+                              alt={vid.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900/90 text-slate-400 p-1.5">
+                              <Film className="w-5 h-5 text-emerald-400/70" />
+                            </div>
+                          )}
+
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
+                            <div className="w-7 h-7 rounded-full bg-black/65 border border-white/35 flex items-center justify-center shadow">
+                              <Play className="w-3.5 h-3.5 fill-white text-white translate-x-0.5" />
+                            </div>
+                          </div>
+
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-1 flex items-center justify-between gap-1">
+                            <div className="min-w-0">
+                              <p className="text-[9px] text-white truncate font-medium leading-tight">{vid.name}</p>
+                              {vid.size ? (
+                                <p className="text-[8px] text-slate-400 font-mono leading-tight">{formatFileSize(vid.size)}</p>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                downloadFileSafely(vid.downloadUrl || vid.url, vid.name);
+                              }}
+                              className="p-0.5 rounded bg-black/60 hover:bg-emerald-600 text-white transition-colors shrink-0 cursor-pointer"
+                              title={pick('Tải video về máy', 'Download video', '下载视频')}
+                            >
+                              <Download className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -907,7 +1049,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
           isOpen={Boolean(viewingZoomImage)}
           onClose={() => setViewingZoomImage(null)}
           imageUrl={viewingZoomImage.url}
-          imageName={viewingZoomImage.name || (isEn ? 'Image' : 'Hình ảnh')}
+          imageName={viewingZoomImage.name || pick('Hình ảnh', 'Image', '图片')}
         />
       )}
 
@@ -920,26 +1062,26 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 <AlertTriangle className="w-4 h-4 text-rose-400" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-xs sm:text-sm font-bold text-white">{isEn ? 'Dissolve Group' : 'Giải tán nhóm'}</h3>
+                <h3 className="text-xs sm:text-sm font-bold text-white">{pick('Giải tán nhóm', 'Dissolve Group', '解散群组')}</h3>
                 <p className="text-[10px] text-rose-300">
-                  {isEn ? 'A notification message will be sent to all members in the room!' : 'Lời nhắn sẽ được gửi tới tất cả thành viên trong phòng!'}
+                  {pick('Lời nhắn sẽ được gửi tới tất cả thành viên trong phòng!', 'A notification message will be sent to all members in the room!', '解散通知将发送给房间内所有成员！')}
                 </p>
               </div>
             </div>
 
             <div className="space-y-1.5">
               <label className="block text-[11px] font-semibold text-slate-300">
-                {isEn ? 'Farewell notice content:' : 'Nội dung lời nhắn thông báo:'}
+                {pick('Nội dung lời nhắn thông báo:', 'Farewell notice content:', '告别通知内容：')}
               </label>
               <textarea
                 rows={3}
                 value={finalMessage}
                 onChange={(e) => setFinalMessage(e.target.value)}
-                placeholder={isEn ? 'Enter farewell message or reason for dissolving group...' : 'Nhập lời chào tạm biệt hoặc lý do giải tán nhóm...'}
+                placeholder={pick('Nhập lời chào tạm biệt hoặc lý do giải tán nhóm...', 'Enter farewell message or reason for dissolving group...', '输入告别留言或解散群组原因...')}
                 className="w-full p-2.5 bg-slate-950/80 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500"
               />
               <p className="text-[10px] text-slate-400 leading-snug">
-                {isEn ? 'The chat room will be permanently deleted and all members will receive this notice.' : 'Phòng chat sẽ được xóa vĩnh viễn và các thành viên sẽ nhận được thông báo này.'}
+                {pick('Phòng chat sẽ được xóa vĩnh viễn và các thành viên sẽ nhận được thông báo này.', 'The chat room will be permanently deleted and all members will receive this notice.', '此聊天室将被永久删除，所有成员均会收到此通知。')}
               </p>
             </div>
 
@@ -950,7 +1092,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={() => setShowDissolveModal(false)}
                 className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
               >
-                {isEn ? 'Cancel' : 'Hủy bỏ'}
+                {pick('Hủy bỏ', 'Cancel', '取消')}
               </button>
               <button
                 type="button"
@@ -958,7 +1100,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                 onClick={handleDissolveRoom}
                 className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md flex items-center gap-1.5 transition-all active:scale-95"
               >
-                {isDeleting ? (isEn ? 'Deleting...' : 'Đang xóa...') : (isEn ? 'Dissolve Group' : 'Giải tán nhóm')}
+                {isDeleting ? pick('Đang xóa...', 'Deleting...', '删除中...') : pick('Giải tán nhóm', 'Dissolve Group', '解散群组')}
                 <Send className="w-3 h-3" />
               </button>
             </div>

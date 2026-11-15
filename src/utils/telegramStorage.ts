@@ -711,6 +711,41 @@ export function buildTelegramDownloadUrl(fileId: string, botToken: string, fileN
   return `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken)}&name=${encodeURIComponent(fileName)}${inline ? '&inline=true' : ''}`;
 }
 
+export interface TelegramManifestShard {
+  index: number;
+  start: number;
+  end: number;
+  size: number;
+  fileId: string;
+  botToken: string;
+  botId?: string;
+  chatId: string;
+}
+
+export interface TelegramManifestV2 {
+  version: 2;
+  schema: 'clsend_tg_manifest_v2';
+  name: string;
+  size: number;
+  type: string;
+  chunkSize: number;
+  totalParts: number;
+  shards: TelegramManifestShard[];
+  createdAt: string;
+}
+
+export const TELEGRAM_SAFE_CHUNK_SIZE = 12 * 1024 * 1024; // 12MB shards stay below 20MB Bot API limit and avoid hitting 20 msg/min channel flood limits
+
+// Remember if direct browser->api.telegram.org calls are blocked/slow so subsequent chunks skip straight to relay
+let preferTelegramRelay = false;
+
+export function isGifFile(fileName: string, mimeType?: string): boolean {
+  const lower = (fileName || '').toLowerCase();
+  if (lower.endsWith('.gif') || /\.gif([?#&]|$)/i.test(lower)) return true;
+  if (mimeType && mimeType.toLowerCase() === 'image/gif') return true;
+  return false;
+}
+
 export interface TelegramUploadResult {
   fileId: string;
   botToken?: string;
@@ -722,379 +757,442 @@ export interface TelegramUploadResult {
   isAudio?: boolean;
   isVideo?: boolean;
   isImage?: boolean;
+  isGif?: boolean;
+  isSharded?: boolean;
+  totalParts?: number;
   mimeType?: string;
 }
 
+function buildTelegramCandidateBots(
+  fileName: string,
+  mimeType: string,
+  customConfig?: TelegramStorageConfig
+): StorageBotInfo[] {
+  if (customConfig && customConfig.botToken) {
+    return [
+      {
+        id: 'custom-bot',
+        name: 'Custom Telegram Bot',
+        botToken: customConfig.botToken.trim(),
+        chatId: (customConfig.chatId || '@ClsendStorage').trim(),
+        enabled: true,
+        facility: 'main',
+        supportedTypes: 'all'
+      }
+    ];
+  }
+
+  const allBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
+  const facilityChannels = getFacilityChannels();
+  const isAud = isAudioFile(fileName, mimeType);
+  const isVid = isVideoFile(fileName, mimeType);
+  const isDoc = isDocumentFile(fileName, mimeType);
+  const isImg = isImageFile(fileName, mimeType);
+
+  let targetFacilityChatId = facilityChannels.default || '@ClsendStorage';
+  if (isAud) targetFacilityChatId = facilityChannels.audio || targetFacilityChatId;
+  else if (isVid) targetFacilityChatId = facilityChannels.video || targetFacilityChatId;
+  else if (isImg) targetFacilityChatId = facilityChannels.image || targetFacilityChatId;
+  else if (isDoc) targetFacilityChatId = facilityChannels.document || targetFacilityChatId;
+
+  const list: StorageBotInfo[] = [];
+  const pushBot = (b: StorageBotInfo, overrideChat?: string) => {
+    if (!b.botToken?.trim()) return;
+    if (list.some(x => x.botToken.trim() === b.botToken.trim())) return;
+    list.push({
+      ...b,
+      botToken: b.botToken.trim(),
+      chatId: overrideChat || ((b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId.trim() : targetFacilityChatId)
+    });
+  };
+
+  if (isAud) {
+    const audioBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'audio');
+    const startIdx = audioBotRoundRobinIndex % (audioBots.length || 1);
+    audioBotRoundRobinIndex++;
+    for (let i = 0; i < audioBots.length; i++) pushBot(audioBots[(startIdx + i) % audioBots.length]);
+  } else if (isVid) {
+    const videoBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'video');
+    const startIdx = videoBotRoundRobinIndex % (videoBots.length || 1);
+    videoBotRoundRobinIndex++;
+    for (let i = 0; i < videoBots.length; i++) pushBot(videoBots[(startIdx + i) % videoBots.length]);
+  } else if (isImg) {
+    const imageBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'image');
+    const startIdx = imageBotRoundRobinIndex % (imageBots.length || 1);
+    imageBotRoundRobinIndex++;
+    for (let i = 0; i < imageBots.length; i++) pushBot(imageBots[(startIdx + i) % imageBots.length]);
+  } else if (isDoc) {
+    const docBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'document');
+    const startIdx = docBotRoundRobinIndex % (docBots.length || 1);
+    docBotRoundRobinIndex++;
+    for (let i = 0; i < docBots.length; i++) pushBot(docBots[(startIdx + i) % docBots.length]);
+  } else {
+    const startIdx = generalBotRoundRobinIndex % (allBots.length || 1);
+    generalBotRoundRobinIndex++;
+    for (let i = 0; i < allBots.length; i++) pushBot(allBots[(startIdx + i) % allBots.length]);
+  }
+
+  // Add remaining active bots in cluster as secondary failover bots
+  for (const b of allBots) {
+    pushBot(b);
+  }
+
+  const mainConfig = getTelegramConfig();
+  if (mainConfig.botToken && mainConfig.chatId) {
+    pushBot({
+      id: 'master-fallback',
+      name: 'Master Storage Bot',
+      botToken: mainConfig.botToken,
+      chatId: mainConfig.chatId,
+      enabled: true,
+      facility: 'main',
+      supportedTypes: 'all'
+    }, mainConfig.chatId);
+  }
+
+  return list;
+}
+
+async function uploadFormToTelegramEndpoint(
+  token: string,
+  endpoint: string,
+  fieldName: string,
+  targetChat: string,
+  blob: Blob,
+  fileName: string,
+  caption: string,
+  mode: 'document' | 'video' | 'audio'
+): Promise<any> {
+  const sendViaRelay = async () => {
+    const relayForm = new FormData();
+    relayForm.append('botToken', token);
+    relayForm.append('chatId', targetChat);
+    relayForm.append('endpoint', endpoint);
+    relayForm.append('caption', caption);
+    relayForm.append('file', blob, fileName);
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), 90000);
+    try {
+      const relayRes = await fetch('/api/telegram/upload-chunk', {
+        method: 'POST',
+        body: relayForm,
+        signal: controller.signal
+      });
+      return await relayRes.json().catch(() => ({ ok: false, error: `Relay HTTP ${relayRes.status}` }));
+    } finally {
+      clearTimeout(tid);
+    }
+  };
+
+  if (preferTelegramRelay) {
+    return await sendViaRelay();
+  }
+
+  const form = new FormData();
+  form.append('chat_id', targetChat);
+  form.append(fieldName, blob, fileName);
+  form.append('caption', caption);
+  if (mode === 'video') {
+    form.append('supports_streaming', 'true');
+  } else if (mode === 'audio') {
+    form.append('title', fileName.replace(/\.[^/.]+$/, ''));
+  }
+
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const tid = setTimeout(() => controller.abort(), 90000);
+  try {
+    const directRes = await fetch(`https://api.telegram.org/bot${token}/${endpoint}`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal
+    });
+    clearTimeout(tid);
+    return await directRes.json();
+  } catch (err: any) {
+    clearTimeout(tid);
+    // Only latch relay mode if direct browser->Telegram call was fast-blocked (CORS/DNS/firewall)
+    if (err?.name !== 'AbortError' && Date.now() - startedAt < 8000) {
+      preferTelegramRelay = true;
+    }
+    return await sendViaRelay();
+  }
+}
+
+async function sendSingleBlobToTelegram(
+  blob: Blob,
+  fileName: string,
+  caption: string,
+  candidates: StorageBotInfo[],
+  preferredStartIdx: number,
+  mode: 'document' | 'video' | 'audio'
+): Promise<{ fileId: string; botToken: string; botId?: string; chatId: string }> {
+  let lastError: any = null;
+  const total = Math.min(3, candidates.length); // Cap attempts across up to 3 distinct bots to fail over quickly if offline
+
+  for (let offset = 0; offset < total; offset++) {
+    const bot = candidates[(preferredStartIdx + offset) % candidates.length];
+    const token = bot.botToken.trim();
+    const chatsToTry = bot.chatId && bot.chatId !== '@ClsendStorage'
+      ? [bot.chatId.trim(), '@ClsendStorage']
+      : ['@ClsendStorage'];
+
+    for (const targetChat of chatsToTry) {
+      let currentMode = mode;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const endpoint =
+            currentMode === 'audio' ? 'sendAudio'
+            : currentMode === 'video' ? 'sendVideo'
+            : 'sendDocument';
+          const fieldName = currentMode === 'audio' ? 'audio' : currentMode === 'video' ? 'video' : 'document';
+
+          const data = await uploadFormToTelegramEndpoint(
+            token,
+            endpoint,
+            fieldName,
+            targetChat,
+            blob,
+            fileName,
+            caption,
+            currentMode
+          );
+
+          if (data?.ok && data?.result) {
+            const obj =
+              data.result.document ||
+              data.result.video ||
+              data.result.audio ||
+              data.result.voice ||
+              data.result.animation ||
+              data.result.photo?.[data.result.photo.length - 1];
+            if (obj?.file_id) {
+              return { fileId: obj.file_id, botToken: token, botId: bot.id, chatId: targetChat };
+            }
+          }
+          if (!data?.ok && data?.fileId) {
+            return { fileId: data.fileId, botToken: token, botId: bot.id, chatId: targetChat };
+          }
+
+          const errCode = Number(data?.error_code || 0);
+          // Invalid token (401/404) -> skip straight to next bot
+          if (errCode === 401 || errCode === 404) {
+            lastError = new Error(data?.description || `Invalid bot token (${errCode})`);
+            break;
+          }
+
+          const retryAfter = data?.parameters?.retry_after;
+          if (retryAfter && attempt === 0 && retryAfter <= 4) {
+            await new Promise(r => setTimeout(r, (retryAfter + 0.3) * 1000));
+            continue;
+          }
+
+          lastError = new Error(data?.description || data?.error || `Telegram error (${endpoint})`);
+          // If sendVideo / sendAudio failed, immediately retry sendDocument on same chat once
+          if (currentMode !== 'document') {
+            currentMode = 'document';
+            continue;
+          }
+          break;
+        } catch (err: any) {
+          lastError = err;
+          if (attempt === 0) {
+            await new Promise(r => setTimeout(r, 250));
+            continue;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error('Tất cả Telegram Bot đều bận hoặc không thể tải dữ liệu.');
+}
+
 /**
- * Uploads a file (Audio, Video, Document, Image, or General file) to Telegram and retrieves direct download URL.
- * Supports:
- * - Audio streaming & native player tags via /sendAudio API
- * - Video streaming via /sendVideo with supports_streaming=true
- * - Document upload via /sendDocument
- * - Multi-bot failover across Sub-facility cluster (Bot 02-05, Audio Bots) and Main Bot
- * - 20MB limit safeguard (Telegram Bot API download constraint)
+ * Uploads a file (Audio, Video, GIF, Document, Image, or General file) to Telegram.
+ * Uses Multi-Bot Striped Data Sharding (14MB chunks <= Telegram 20MB getFile limit) for large files,
+ * preserves exact GIF animation via sendDocument, registers manifest with backend for zero-hop Range 206 streaming,
+ * and falls back seamlessly across the 20-Bot cluster.
  */
 export async function uploadToTelegram(
-  file: File, 
-  customConfig?: TelegramStorageConfig
+  file: File,
+  customConfig?: TelegramStorageConfig,
+  onProgress?: (percent: number) => void
 ): Promise<TelegramUploadResult> {
   const isAud = isAudioFile(file.name, file.type);
   const isVid = isVideoFile(file.name, file.type);
-  const isDoc = isDocumentFile(file.name, file.type);
+  const isGif = isGifFile(file.name, file.type);
   const isImg = isImageFile(file.name, file.type);
+  const isDoc = isDocumentFile(file.name, file.type);
+  const effectiveMime = file.type || (isGif ? 'image/gif' : isVid ? 'video/mp4' : 'application/octet-stream');
 
-  // If file size > 40MB, automatically chunk into 40MB parts for Telegram channel upload
-  const CHUNK_SIZE = 40 * 1024 * 1024;
+  const candidates = buildTelegramCandidateBots(file.name, effectiveMime, customConfig);
+  if (candidates.length === 0) {
+    throw new Error('Chưa cấu hình Telegram Bot Token hoặc Chat ID.');
+  }
+
+  if (onProgress) onProgress(5);
+
+  // Use 14MB Sharding strictly below Telegram Bot getFile 20MB ceiling!
+  const CHUNK_SIZE = TELEGRAM_SAFE_CHUNK_SIZE;
   if (file.size > CHUNK_SIZE) {
-    const allBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
-    const mainConfig = getTelegramConfig();
-    const targetChatId = mainConfig.chatId || '@ClsendStorage';
-    const bot = allBots[0] || MASTER_TELEGRAM_CONFIG;
-    const botToken = customConfig?.botToken || bot.botToken;
-    const chatId = customConfig?.chatId || bot.chatId || targetChatId;
-
     const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-    const partFileIds: string[] = [];
+    const shards: TelegramManifestShard[] = new Array(totalParts);
+    let completedParts = 0;
+    let nextPartIndex = 0;
 
-    for (let partIndex = 0; partIndex < totalParts; partIndex++) {
-      const start = partIndex * CHUNK_SIZE;
-      const end = Math.min(file.size, start + CHUNK_SIZE);
-      const chunkBlob = file.slice(start, end);
-      const chunkFile = new File([chunkBlob], `${file.name}.part${partIndex + 1}_of_${totalParts}`, { type: file.type });
+    // 4 parallel bot pipelines saturate bandwidth cleanly while leaving HTTP slots open for UI/status checks
+    const CONCURRENCY = Math.min(4, totalParts);
+    const runWorker = async () => {
+      while (nextPartIndex < totalParts) {
+        const partIndex = nextPartIndex++;
+        const start = partIndex * CHUNK_SIZE;
+        const end = Math.min(file.size, start + CHUNK_SIZE);
+        const chunkBlob = file.slice(start, end, 'application/octet-stream');
+        const chunkName = `${file.name}.shard${String(partIndex + 1).padStart(3, '0')}_of_${String(totalParts).padStart(3, '0')}`;
+        const chunkSizeMb = (chunkBlob.size / (1024 * 1024)).toFixed(2);
+        const caption = `📦 ClSend Shard [${partIndex + 1}/${totalParts}] (${chunkSizeMb} MB): ${file.name}`;
 
-      const chunkForm = new FormData();
-      chunkForm.append('chat_id', chatId.trim());
-      chunkForm.append('document', chunkFile);
-      chunkForm.append('caption', `📦 CloudSend Chunk [${partIndex + 1}/${totalParts}]: ${file.name} (${(chunkFile.size / (1024 * 1024)).toFixed(2)} MB)`);
+        const uploadedShard = await sendSingleBlobToTelegram(
+          chunkBlob,
+          chunkName,
+          caption,
+          candidates,
+          partIndex % candidates.length,
+          'document'
+        );
 
-      const res = await fetch(`https://api.telegram.org/bot${botToken.trim()}/sendDocument`, {
-        method: 'POST',
-        body: chunkForm
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        throw new Error(data.description || `Lỗi khi tải phần ${partIndex + 1}/${totalParts} lên Telegram.`);
+        shards[partIndex] = {
+          index: partIndex,
+          start,
+          end,
+          size: chunkBlob.size,
+          fileId: uploadedShard.fileId,
+          botToken: uploadedShard.botToken,
+          botId: uploadedShard.botId,
+          chatId: uploadedShard.chatId
+        };
+
+        completedParts++;
+        if (onProgress) {
+          const pct = Math.min(92, 8 + Math.round((completedParts / totalParts) * 84));
+          onProgress(pct);
+        }
       }
-      const docObj = data.result?.document || data.result?.audio || data.result?.video;
-      if (!docObj?.file_id) {
-        throw new Error(`Không nhận được file_id cho phần ${partIndex + 1}/${totalParts}.`);
-      }
-      partFileIds.push(docObj.file_id);
-    }
+    };
 
-    const manifest = {
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => runWorker()));
+
+    const manifest: TelegramManifestV2 = {
+      version: 2,
+      schema: 'clsend_tg_manifest_v2',
       name: file.name,
       size: file.size,
-      type: file.type,
+      type: effectiveMime,
+      chunkSize: CHUNK_SIZE,
       totalParts,
-      parts: partFileIds
+      shards,
+      createdAt: new Date().toISOString()
     };
-    const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-    const manifestFile = new File([manifestBlob], `${file.name}.clsend_manifest.json`, { type: 'application/json' });
 
-    const manifestForm = new FormData();
-    manifestForm.append('chat_id', chatId.trim());
-    manifestForm.append('document', manifestFile);
-    manifestForm.append('caption', `📋 CloudSend Manifest (Large File): ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB, ${totalParts} parts)`);
+    const manifestJson = JSON.stringify(manifest);
+    const manifestBlob = new Blob([manifestJson], { type: 'application/json' });
+    const manifestBot = candidates[0];
+    const manifestUpload = await sendSingleBlobToTelegram(
+      manifestBlob,
+      `${file.name}.clsend_manifest.json`,
+      `📋 ClSend Manifest v2 (${totalParts} shards • ${(file.size / (1024 * 1024)).toFixed(1)} MB): ${file.name}`,
+      [manifestBot, ...candidates.slice(1)],
+      0,
+      'document'
+    );
 
-    const mRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/sendDocument`, {
-      method: 'POST',
-      body: manifestForm
-    });
-    const mData = await mRes.json();
-    if (!mData.ok) {
-      throw new Error(mData.description || 'Lỗi khi tải tệp cấu trúc manifest lên Telegram.');
-    }
-    const manifestDoc = mData.result?.document;
-    const fileId = manifestDoc?.file_id;
-    if (!fileId) {
-      throw new Error('Không nhận được file_id cho tệp cấu trúc manifest.');
-    }
+    const fileId = manifestUpload.fileId;
+    const manifestToken = manifestUpload.botToken;
 
-    const getFileRes = await fetch(`https://api.telegram.org/bot${botToken.trim()}/getFile?file_id=${fileId}`);
-    const getFileData = await getFileRes.json();
-    let rawTelegramUrl = '';
-    if (getFileData.ok && getFileData.result?.file_path) {
-      rawTelegramUrl = `https://api.telegram.org/file/bot${botToken.trim()}/${getFileData.result.file_path}`;
-    }
+    // Pre-register manifest with backend cache so first <video> Range 206 playback starts instantly!
+    try {
+      await fetch('/api/telegram/register-manifest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId, botToken: manifestToken, manifest })
+      });
+    } catch {}
 
-    const downloadProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}`;
-    const viewProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}&inline=true`;
+    const baseProxy = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(manifestToken)}&name=${encodeURIComponent(file.name)}`;
+    const downloadProxyUrl = baseProxy;
+    const viewProxyUrl = `${baseProxy}&inline=true`;
+
+    if (onProgress) onProgress(100);
 
     return {
       fileId,
-      botToken: botToken.trim(),
+      botToken: manifestToken,
       downloadUrl: downloadProxyUrl,
       viewUrl: viewProxyUrl,
-      rawTelegramUrl,
+      rawTelegramUrl: '',
       fileSize: file.size,
       fileName: file.name,
       isAudio: isAud,
       isVideo: isVid,
       isImage: isImg,
-      mimeType: file.type
+      isGif,
+      isSharded: true,
+      totalParts,
+      mimeType: effectiveMime
     };
   }
 
-  // Determine list of candidate configs to attempt
-  const candidateConfigs: TelegramStorageConfig[] = [];
+  // Single-file upload (<= 14MB): wrap GIF as raw binary document so Telegram does NOT convert it into an H.264 MP4 animation!
+  const preferredMode: 'document' | 'video' | 'audio' =
+    isGif ? 'document' : isAud ? 'audio' : isVid ? 'video' : 'document';
 
-  if (customConfig && customConfig.botToken) {
-    candidateConfigs.push(customConfig);
-  } else {
-    const allBots = getAllBotsConfig().filter(b => b.enabled && b.botToken && b.chatId);
-    const facilityChannels = getFacilityChannels();
+  const icon = isAud ? '🎵' : isVid ? '🎬' : isGif ? '🎞️' : isImg ? '🖼️' : isDoc ? '📄' : '📁';
+  const caption = `${icon} ClSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`;
 
-    // Determine target facility channel based on file category
-    let targetFacilityChatId = facilityChannels.default || '@ClsendStorage';
-    if (isAud) {
-      targetFacilityChatId = facilityChannels.audio || targetFacilityChatId;
-    } else if (isVid) {
-      targetFacilityChatId = facilityChannels.video || targetFacilityChatId;
-    } else if (isImg) {
-      targetFacilityChatId = facilityChannels.image || targetFacilityChatId;
-    } else if (isDoc) {
-      targetFacilityChatId = facilityChannels.document || targetFacilityChatId;
-    }
+  if (onProgress) onProgress(30);
 
-    if (isAud) {
-      // Prioritize audio-capable bots in round-robin order
-      const audioBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'audio');
-      const startIdx = audioBotRoundRobinIndex % (audioBots.length || 1);
-      audioBotRoundRobinIndex++;
+  const uploadBlob: Blob = isGif
+    ? new Blob([file], { type: 'application/octet-stream' })
+    : file;
+  const uploadFileName = isGif ? `${file.name}.clsend_raw` : file.name;
 
-      for (let i = 0; i < audioBots.length; i++) {
-        const b = audioBots[(startIdx + i) % audioBots.length];
-        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-      }
+  const singleUpload = await sendSingleBlobToTelegram(
+    uploadBlob,
+    uploadFileName,
+    caption,
+    candidates,
+    0,
+    preferredMode
+  );
 
-      // Add other active bots as fallback
-      for (const b of allBots) {
-        if (!candidateConfigs.some(c => c.botToken === b.botToken)) {
-          const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-        }
-      }
-    } else if (isVid) {
-      // Prioritize video-capable bots in round-robin order
-      const videoBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'video');
-      const startIdx = videoBotRoundRobinIndex % (videoBots.length || 1);
-      videoBotRoundRobinIndex++;
+  if (onProgress) onProgress(94);
 
-      for (let i = 0; i < videoBots.length; i++) {
-        const b = videoBots[(startIdx + i) % videoBots.length];
-        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-      }
+  // Server proxy auto-resolves & caches file_path using fileId+botToken, so skip blocking post-upload getFile latency
+  const baseProxy = `/api/telegram/download?fileId=${encodeURIComponent(singleUpload.fileId)}&botToken=${encodeURIComponent(singleUpload.botToken)}&name=${encodeURIComponent(file.name)}`;
+  const downloadProxyUrl = baseProxy;
+  const viewProxyUrl = `${baseProxy}&inline=true`;
+  const rawTelegramUrl = '';
 
-      // Add main config as fallback
-      const mainConfig = getTelegramConfig();
-      if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
-      }
-    } else if (isImg) {
-      // Prioritize image-capable bots in round-robin order
-      const imageBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'image');
-      const startIdx = imageBotRoundRobinIndex % (imageBots.length || 1);
-      imageBotRoundRobinIndex++;
+  if (onProgress) onProgress(100);
 
-      for (let i = 0; i < imageBots.length; i++) {
-        const b = imageBots[(startIdx + i) % imageBots.length];
-        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-      }
-
-      // Add other active bots as fallback
-      for (const b of allBots) {
-        if (!candidateConfigs.some(c => c.botToken === b.botToken)) {
-          const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-          candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-        }
-      }
-    } else if (isDoc) {
-      // Prioritize document bots
-      const docBots = allBots.filter(b => !b.supportedTypes || b.supportedTypes === 'all' || b.supportedTypes === 'document');
-      const startIdx = docBotRoundRobinIndex % (docBots.length || 1);
-      docBotRoundRobinIndex++;
-
-      for (let i = 0; i < docBots.length; i++) {
-        const b = docBots[(startIdx + i) % docBots.length];
-        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-      }
-
-      const mainConfig = getTelegramConfig();
-      if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
-      }
-    } else {
-      // General file: use round-robin across all active bots
-      const startIdx = generalBotRoundRobinIndex % (allBots.length || 1);
-      generalBotRoundRobinIndex++;
-
-      for (let i = 0; i < allBots.length; i++) {
-        const b = allBots[(startIdx + i) % allBots.length];
-        const effectiveChat = (b.chatId && b.chatId !== '@ClsendStorage') ? b.chatId : targetFacilityChatId;
-        candidateConfigs.push({ enabled: true, botToken: b.botToken, chatId: effectiveChat });
-      }
-
-      const mainConfig = getTelegramConfig();
-      if (mainConfig.botToken && mainConfig.chatId && !candidateConfigs.some(c => c.botToken === mainConfig.botToken)) {
-        candidateConfigs.push({ enabled: true, botToken: mainConfig.botToken, chatId: targetFacilityChatId });
-      }
-    }
-  }
-
-  if (candidateConfigs.length === 0) {
-    throw new Error('Chưa cấu hình Telegram Bot Token hoặc Chat ID.');
-  }
-
-  let lastError: any = null;
-
-  for (const config of candidateConfigs) {
-    try {
-      let fileId = '';
-
-      // 1. For Audio files, attempt Telegram's native sendAudio endpoint first (enables audio player tags)
-      if (isAud) {
-        try {
-          const audioForm = new FormData();
-          audioForm.append('chat_id', config.chatId.trim());
-          audioForm.append('audio', file);
-          audioForm.append('caption', `🎵 CloudSend Audio: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
-          const songTitle = file.name.replace(/\.[^/.]+$/, '');
-          audioForm.append('title', songTitle);
-
-          const audioRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendAudio`, {
-            method: 'POST',
-            body: audioForm
-          });
-
-          const audioData = await audioRes.json();
-          if (audioData.ok && audioData.result) {
-            fileId = audioData.result?.audio?.file_id || 
-                     audioData.result?.voice?.file_id || 
-                     audioData.result?.document?.file_id;
-          }
-        } catch (audErr) {
-          console.warn('sendAudio endpoint notice, attempting sendDocument fallback:', audErr);
-        }
-      }
-
-      // 2. For Video files, attempt Telegram's native sendVideo endpoint (enables video streaming & poster)
-      if (!fileId && isVid) {
-        try {
-          const videoForm = new FormData();
-          videoForm.append('chat_id', config.chatId.trim());
-          videoForm.append('video', file);
-          videoForm.append('caption', `🎬 CloudSend Video: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
-          videoForm.append('supports_streaming', 'true');
-
-          const videoRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendVideo`, {
-            method: 'POST',
-            body: videoForm
-          });
-
-          const videoData = await videoRes.json();
-          if (videoData.ok && videoData.result) {
-            fileId = videoData.result?.video?.file_id || 
-                     videoData.result?.document?.file_id || 
-                     videoData.result?.animation?.file_id;
-          }
-        } catch (vidErr) {
-          console.warn('sendVideo endpoint notice, attempting sendDocument fallback:', vidErr);
-        }
-      }
-
-      // 3. If sendAudio/sendVideo was skipped or failed, use sendDocument (universal format)
-      if (!fileId) {
-        const formData = new FormData();
-        formData.append('chat_id', config.chatId.trim());
-        formData.append('document', file);
-        const icon = isAud ? '🎵' : isVid ? '🎬' : isImg ? '🖼️' : isDoc ? '📄' : '📁';
-        formData.append('caption', `${icon} CloudSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
-
-        let sendRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
-          method: 'POST',
-          body: formData
-        });
-
-        let sendData = await sendRes.json();
-        // Fallback: If sending to a specific facility channel failed (e.g., chat not found / bot not admin yet),
-        // automatically fallback to master channel @ClsendStorage to ensure 100% upload success!
-        if (!sendData.ok && config.chatId !== '@ClsendStorage') {
-          console.warn(`Gửi vào kênh ${config.chatId} chưa thành công (${sendData.description}), đang lưu tạm vào kênh tổng @ClsendStorage...`);
-          const fallbackForm = new FormData();
-          fallbackForm.append('chat_id', '@ClsendStorage');
-          fallbackForm.append('document', file);
-          fallbackForm.append('caption', `${icon} CloudSend Storage: ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)`);
-          const fallbackRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/sendDocument`, {
-            method: 'POST',
-            body: fallbackForm
-          });
-          const fallbackData = await fallbackRes.json();
-          if (fallbackData.ok) {
-            sendData = fallbackData;
-          }
-        }
-
-        if (!sendData.ok) {
-          throw new Error(sendData.description || 'Lỗi khi gửi tệp lên máy chủ Telegram.');
-        }
-
-        const documentObj = sendData.result?.document || 
-                            sendData.result?.audio || 
-                            sendData.result?.voice || 
-                            sendData.result?.video || 
-                            sendData.result?.animation || 
-                            sendData.result?.photo?.[sendData.result.photo.length - 1];
-        fileId = documentObj?.file_id;
-      }
-
-      if (!fileId) {
-        throw new Error('Không nhận được file_id từ Telegram.');
-      }
-
-      // 4. Always fetch file path dynamically at the moment of download to ensure fresh URL
-      const getFileRes = await fetch(`https://api.telegram.org/bot${config.botToken.trim()}/getFile?file_id=${fileId}`);
-      const getFileData = await getFileRes.json();
-      
-      let rawTelegramUrl = '';
-      if (getFileData.ok && getFileData.result?.file_path) {
-        rawTelegramUrl = `https://api.telegram.org/file/bot${config.botToken.trim()}/${getFileData.result.file_path}`;
-      }
-
-      if (!rawTelegramUrl) {
-        throw new Error('Telegram Bot không thể tạo liên kết tải về cho tệp này.');
-      }
-
-      // Create streaming proxy URL that binds the EXACT botToken and fileId to ensure:
-      // 1. Correct bot gets the file (Lỗi 1 fixed)
-      // 2. Link can be refreshed on-the-fly when expired after 1 hour (Lỗi 4 fixed)
-      const downloadProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(config.botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}`;
-      const viewProxyUrl = `/api/telegram/download?fileId=${encodeURIComponent(fileId)}&botToken=${encodeURIComponent(config.botToken.trim())}&name=${encodeURIComponent(file.name)}&url=${encodeURIComponent(rawTelegramUrl)}&inline=true`;
-
-      return {
-        fileId,
-        botToken: config.botToken.trim(),
-        downloadUrl: downloadProxyUrl,
-        viewUrl: viewProxyUrl,
-        rawTelegramUrl,
-        fileSize: file.size,
-        fileName: file.name,
-        isAudio: isAud,
-        isVideo: isVid,
-        isImage: isImg,
-        mimeType: file.type
-      };
-    } catch (err: any) {
-      lastError = err;
-      console.warn(`Thử bot (${config.botToken.slice(0, 8)}...) thất bại, đang chuyển tiếp bot khác:`, err?.message || err);
-    }
-  }
-
-  throw lastError || new Error('Tất cả các Bot Telegram lưu trữ đều bận hoặc chưa được thêm vào kênh làm Quản trị viên.');
+  return {
+    fileId: singleUpload.fileId,
+    botToken: singleUpload.botToken,
+    downloadUrl: downloadProxyUrl,
+    viewUrl: viewProxyUrl,
+    rawTelegramUrl,
+    fileSize: file.size,
+    fileName: file.name,
+    isAudio: isAud,
+    isVideo: isVid,
+    isImage: isImg,
+    isGif,
+    isSharded: false,
+    totalParts: 1,
+    mimeType: effectiveMime
+  };
 }
 
 /**

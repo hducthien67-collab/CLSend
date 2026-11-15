@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../firebase/config';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, collection, addDoc } from 'firebase/firestore';
 import { UserSanction } from './types';
+import { getEmailSanctionDocId, getPhoneSanctionDocId, isRealEmail } from '../utils/devModeration';
 import { 
   ShieldAlert, 
   AlertTriangle, 
@@ -27,39 +28,57 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
   const [activeSanction, setActiveSanction] = useState<UserSanction | null>(null);
   const [agreedTerms, setAgreedTerms] = useState(false);
   const [timeLeft, setTimeLeft] = useState<string>('');
+  const [isAppealModalOpen, setIsAppealModalOpen] = useState(false);
+  const [appealReason, setAppealReason] = useState('');
+  const [appealStatus, setAppealStatus] = useState<string | null>(null);
 
-  // Subscribe to real-time sanction record for current user
+  const handleSubmitAppeal = async () => {
+    if (!appealReason.trim() || !currentUser) return;
+    try {
+      await addDoc(collection(db, 'reports'), {
+        type: 'account_appeal',
+        status: 'pending',
+        senderId: currentUser.uid,
+        senderName: currentUser.displayName || offenderName,
+        senderEmail: currentUser.email || offenderEmail,
+        reason: appealReason.trim(),
+        createdAt: new Date().toISOString(),
+        timestamp: Date.now()
+      });
+      setAppealStatus('Kháng cáo của bạn đã được gửi thành công tới tab Báo Cáo trong DataStore.');
+      setTimeout(() => {
+        setIsAppealModalOpen(false);
+        setAppealReason('');
+        setAppealStatus(null);
+      }, 3000);
+    } catch (err) {
+      console.error('Submit appeal error:', err);
+      alert('Lỗi khi gửi kháng cáo lên hệ thống.');
+    }
+  };
+
+  // Subscribe to real-time sanction record for current user (uid, real email, linkedEmail, linked phone, linkedUids)
   useEffect(() => {
     if (!currentUser) {
       setActiveSanction(null);
       return;
     }
 
-    const uid = currentUser.uid;
-    const cleanEmail = (currentUser.email || '').trim().toLowerCase();
-    const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
-
-    const unsubUid = onSnapshot(doc(db, 'sanctions', uid), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as UserSanction;
-        handleSanctionUpdate(data);
-      } else if (emailDocId) {
-        // Fallback to email doc
-        onSnapshot(doc(db, 'sanctions', emailDocId), (emailSnap) => {
-          if (emailSnap.exists()) {
-            handleSanctionUpdate(emailSnap.data() as UserSanction);
-          } else {
-            setActiveSanction(null);
-          }
-        });
-      } else {
-        setActiveSanction(null);
-      }
+    const docIds = new Set<string>();
+    if (currentUser.uid) docIds.add(currentUser.uid);
+    if (isRealEmail(currentUser.email)) docIds.add(getEmailSanctionDocId(currentUser.email!));
+    if (isRealEmail(currentUser.linkedEmail)) docIds.add(getEmailSanctionDocId(currentUser.linkedEmail!));
+    const phoneId = getPhoneSanctionDocId(currentUser.phone || currentUser.linkedPhone || '');
+    if (phoneId) docIds.add(phoneId);
+    (currentUser.linkedUids || []).forEach((u) => {
+      if (u && u.trim()) docIds.add(u.trim());
     });
+
+    const docSanctions = new Map<string, UserSanction>();
 
     const handleSanctionUpdate = (data: UserSanction) => {
       const now = Date.now();
-      
+
       // Check if ban is still active
       if (data.isBanned) {
         if (data.banExpiresAt) {
@@ -82,7 +101,7 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
             return;
           }
         }
-        
+
         const ackKey = `cloudsend_ack_sanction_${data.uid}_${data.lastSanctionType}_${data.violationCount}`;
         const isAcked = localStorage.getItem(ackKey) === 'true';
         if (!isAcked) {
@@ -96,7 +115,43 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
       setActiveSanction(null);
     };
 
-    return () => unsubUid();
+    const reevaluate = () => {
+      // Prefer active ban over chat lock
+      let chosen: UserSanction | null = null;
+      for (const s of docSanctions.values()) {
+        if (s.isBanned) {
+          chosen = s;
+          break;
+        }
+        if (!chosen) chosen = s;
+      }
+      if (!chosen) {
+        setActiveSanction(null);
+        return;
+      }
+      handleSanctionUpdate(chosen);
+    };
+
+    const unsubs = Array.from(docIds).map((docId) =>
+      onSnapshot(
+        doc(db, 'sanctions', docId),
+        (snap) => {
+          if (snap.exists()) {
+            docSanctions.set(docId, snap.data() as UserSanction);
+          } else {
+            docSanctions.delete(docId);
+          }
+          reevaluate();
+        },
+        (err) => {
+          console.warn('Error listening to sanction doc:', docId, err);
+        }
+      )
+    );
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
   }, [currentUser]);
 
   // Lock body & container scroll when moderation modal is open
@@ -302,23 +357,16 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
           </div>
 
           {/* 3 THÔNG TIN BÊN NGƯỜI NHẬN THEO YÊU CẦU: */}
-          {/* 1. THÔNG TIN NGƯỜI GỬI / TÀI KHOẢN & NGƯỜI XỬ LÝ */}
+          {/* 1. THÔNG TIN TÀI KHOẢN BỊ KỶ LUẬT (Đã ẩn hoàn toàn thông tin người kiểm duyệt) */}
           <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 space-y-1.5">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
               <ShieldAlert className="w-3 h-3 text-sky-400" />
-              <span>2. Người gửi & Tài khoản vi phạm:</span>
+              <span>2. Tài khoản & Thiết bị vi phạm:</span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                <div className="text-[9px] text-slate-400 uppercase font-mono">Tên người gửi / vi phạm:</div>
-                <div className="text-white font-bold truncate mt-0.5">{offenderName}</div>
-                {offenderEmail && <div className="text-[9px] text-slate-500 truncate font-mono">{offenderEmail}</div>}
-              </div>
-              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800/80">
-                <div className="text-[9px] text-slate-400 uppercase font-mono">Người ban hành kỷ luật:</div>
-                <div className="text-amber-300 font-bold truncate mt-0.5">{actedBy}</div>
-                <div className="text-[9px] text-emerald-400 font-mono">Hệ Thống An Toàn ClSend</div>
-              </div>
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800/80 text-[11px]">
+              <div className="text-[9px] text-slate-400 uppercase font-mono">Tên tài khoản / Biệt danh:</div>
+              <div className="text-white font-bold truncate mt-0.5">{offenderName}</div>
+              {offenderEmail && <div className="text-[9px] text-slate-500 truncate font-mono mt-0.5">Gmail: {offenderEmail}</div>}
             </div>
           </div>
 
@@ -395,14 +443,24 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
 
           <div className="flex items-center gap-2">
             {isBanned ? (
-              <button
-                type="button"
-                onClick={logout}
-                className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Đăng Xuất</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAppealModalOpen(true)}
+                  className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-sky-600/30 transition-all cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Kháng Cáo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Đăng Xuất</span>
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -417,6 +475,63 @@ export const RobloxModerationModal: React.FC<RobloxModerationModalProps> = ({ on
           </div>
         </div>
       </div>
+
+      {/* Appeal Modal Dialog */}
+      {isAppealModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-5 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-sky-400" />
+                <span>Gửi Kháng Cáo Tài Khoản Bị Cấm</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAppealModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {appealStatus ? (
+              <div className="p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-semibold text-center">
+                {appealStatus}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-slate-300">
+                  Nhập lý do hoặc lời giải thích của bạn để Quản Trị Viên xem xét và mở khóa tài khoản trong tab **Báo Cáo** của DataStore:
+                </p>
+                <textarea
+                  rows={4}
+                  placeholder="Nhập lý do kháng cáo của bạn ở đây..."
+                  value={appealReason}
+                  onChange={(e) => setAppealReason(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-sky-500 resize-none"
+                />
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAppealModalOpen(false)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 text-xs font-semibold"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!appealReason.trim()}
+                    onClick={handleSubmitAppeal}
+                    className="px-4 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white text-xs font-bold shadow-md shadow-sky-950/40"
+                  >
+                    Gửi Kháng Cáo Ngay
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

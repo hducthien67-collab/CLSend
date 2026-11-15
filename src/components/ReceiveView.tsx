@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 import { db } from '../firebase/config';
 import { 
   collection, 
@@ -75,6 +75,7 @@ function getFileCategory(mimeType: string, fileName: string): 'image' | 'video' 
 const ReceiveViewComponent: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
   const { t, currentLang } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
   const [transfers, setTransfers] = useState<DirectTransfer[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewMedia, setPreviewMedia] = useState<{ type: 'image' | 'video'; url: string; name?: string } | null>(null);
@@ -103,8 +104,8 @@ const ReceiveViewComponent: React.FC = () => {
     localStorage.setItem('cloudsend_auto_save_cloud', enabled ? 'true' : 'false');
     showToast(
       enabled 
-        ? (currentLang === 'en' ? '⚡ Auto-save all received files to Cloud Drive ENABLED!' : '⚡ Đã BẬT tính năng Tự động lưu mọi tệp nhận vào Kho Cloud!')
-        : (currentLang === 'en' ? 'Auto-save to Cloud Drive disabled.' : 'Đã tắt tính năng tự động lưu vào Kho Cloud.'),
+        ? pick('⚡ Đã BẬT tính năng Tự động lưu mọi tệp nhận vào Kho Cloud!', '⚡ Auto-save all received files to Cloud Drive ENABLED!', '⚡ 已开启接收文件自动保存到云盘！')
+        : pick('Đã tắt tính năng tự động lưu vào Kho Cloud.', 'Auto-save to Cloud Drive disabled.', '已关闭自动保存到云盘。'),
       'info'
     );
   };
@@ -173,7 +174,7 @@ const ReceiveViewComponent: React.FC = () => {
       if (settings.soundEnabled) {
         playReceiveSound();
       }
-      showToast(currentLang === 'en' ? 'Accepted incoming file!' : 'Đã chấp nhận tệp gửi đến!', 'success');
+      showToast(pick('Đã chấp nhận tệp gửi đến!', 'Accepted incoming file!', '已接收传入文件！'), 'success');
     } catch (err) {
       console.error('Accept transfer error:', err);
     }
@@ -182,7 +183,7 @@ const ReceiveViewComponent: React.FC = () => {
   // Handle Decline: Xóa ngay lập tức khỏi hệ thống khi người nhận từ chối
   const handleDecline = async (id: string) => {
     setTransfers(prev => prev.filter(t => t.id !== id));
-    showToast(currentLang === 'en' ? 'Declined and removed incoming file.' : 'Đã từ chối và xóa tệp gửi đến.', 'info');
+    showToast(pick('Đã từ chối và xóa tệp gửi đến.', 'Declined and removed incoming file.', '已拒绝并移除传入文件。'), 'info');
     try {
       await deleteDoc(doc(db, 'transfers', id));
     } catch (err) {
@@ -193,7 +194,7 @@ const ReceiveViewComponent: React.FC = () => {
   // Handle Delete Single
   const handleDelete = async (id: string) => {
     setTransfers(prev => prev.filter(t => t.id !== id));
-    showToast(currentLang === 'en' ? 'Removed item from received history.' : 'Đã xóa mục khỏi lịch sử nhận.', 'info');
+    showToast(pick('Đã xóa mục khỏi lịch sử nhận.', 'Removed item from received history.', '已从接收记录中移除。'), 'info');
     try {
       await deleteDoc(doc(db, 'transfers', id));
     } catch (err) {
@@ -214,9 +215,9 @@ const ReceiveViewComponent: React.FC = () => {
       });
       await batch.commit();
       setShowClearConfirm(false);
-      showToast(currentLang === 'en' ? 'Cleared all received history!' : 'Đã xóa sạch toàn bộ lịch sử nhận tệp!', 'success');
+      showToast(pick('Đã xóa sạch toàn bộ lịch sử nhận tệp!', 'Cleared all received history!', '已清空全部接收记录！'), 'success');
     } catch (err: any) {
-      showToast(currentLang === 'en' ? `Unable to delete: ${err?.message || 'Try again later'}` : `Không thể xóa: ${err?.message || 'Thử lại sau'}`, 'error');
+      showToast(pick(`Không thể xóa: ${err?.message || 'Thử lại sau'}`, `Unable to delete: ${err?.message || 'Try again later'}`, `无法删除：${err?.message || '请稍后重试'}`), 'error');
     } finally {
       setIsClearingAll(false);
     }
@@ -227,7 +228,7 @@ const ReceiveViewComponent: React.FC = () => {
     if (!text) return;
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    showToast(currentLang === 'en' ? 'Copied content to clipboard!' : 'Đã sao chép nội dung vào bộ nhớ tạm!', 'success');
+    showToast(pick('Đã sao chép nội dung vào bộ nhớ tạm!', 'Copied content to clipboard!', '已复制内容到剪贴板！'), 'success');
     setTimeout(() => setCopiedId(null), 2000);
   };
 
@@ -239,18 +240,18 @@ const ReceiveViewComponent: React.FC = () => {
     if (!fileSource && item.textContent) {
       const textBlob = new Blob([item.textContent], { type: 'text/plain;charset=utf-8' });
       fileSource = URL.createObjectURL(textBlob);
-      name = currentLang === 'en' ? `Text_${Date.now()}.txt` : `Van_ban_${Date.now()}.txt`;
+      name = pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`);
     }
 
     if (!fileSource) {
-      showToast(currentLang === 'en' ? 'Cannot find file source to download.' : 'Không tìm thấy nguồn tệp tin để tải về.', 'error');
+      showToast(pick('Không tìm thấy nguồn tệp tin để tải về.', 'Cannot find file source to download.', '未找到可下载的文件来源。'), 'error');
       return;
     }
 
     const isTeraBox = item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(fileSource || '');
     if (isTeraBox) {
       window.open(fileSource, '_blank', 'noopener,noreferrer');
-      showToast(currentLang === 'en' ? 'Opening file in TeraBox...' : 'Đang mở tệp trong TeraBox...', 'success');
+      showToast(pick('Đang mở tệp trong TeraBox...', 'Opening file in TeraBox...', '正在 TeraBox 中打开文件...'), 'success');
       return;
     }
 
@@ -258,7 +259,7 @@ const ReceiveViewComponent: React.FC = () => {
     const success = await downloadFileSafely(fileSource, name);
     if (success) {
       setDownloadingIds(prev => ({ ...prev, [item.id]: 'done' }));
-      showToast(currentLang === 'en' ? `Downloaded "${name}" successfully!` : `Đã tải xuống "${name}" thành công!`, 'success');
+      showToast(pick(`Đã tải xuống "${name}" thành công!`, `Downloaded "${name}" successfully!`, `已成功下载 “${name}”！`), 'success');
       setTimeout(() => {
         setDownloadingIds(prev => {
           const next = { ...prev };
@@ -278,7 +279,7 @@ const ReceiveViewComponent: React.FC = () => {
   // Save single item to Cloud Drive
   const handleSaveToCloudDrive = async (item: DirectTransfer) => {
     if (!currentUser) {
-      showToast(currentLang === 'en' ? 'Please log in to save files to Cloud Drive.' : 'Vui lòng đăng nhập để lưu tệp vào Kho Cloud.', 'error');
+      showToast(pick('Vui lòng đăng nhập để lưu tệp vào Kho Cloud.', 'Please log in to save files to Cloud Drive.', '请登录以将文件保存到云盘。'), 'error');
       return;
     }
 
@@ -286,7 +287,7 @@ const ReceiveViewComponent: React.FC = () => {
 
     try {
       const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      const fileName = item.fileName || (item.textContent ? (currentLang === 'en' ? `Text_${Date.now()}.txt` : `Van_ban_${Date.now()}.txt`) : 'received_file.bin');
+      const fileName = item.fileName || (item.textContent ? pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`) : 'received_file.bin');
       const fileType = item.fileType || (item.textContent ? 'text/plain' : 'application/octet-stream');
       const category = getFileCategory(fileType, fileName);
 
@@ -308,7 +309,7 @@ const ReceiveViewComponent: React.FC = () => {
         id: docId,
         userId: currentUser.uid,
         userEmail: currentUser.email || '',
-        userName: currentUser.displayName || settings.deviceName || (currentLang === 'en' ? 'User' : 'Người dùng'),
+        userName: currentUser.displayName || settings.deviceName || pick('Người dùng', 'User', '用户'),
         name: fileName,
         size: item.fileSize || (item.textContent ? item.textContent.length : 0),
         type: fileType,
@@ -321,7 +322,7 @@ const ReceiveViewComponent: React.FC = () => {
       });
 
       setSavedCloudIds(prev => ({ ...prev, [item.id]: 'saved' }));
-      showToast(currentLang === 'en' ? `✨ Saved "${fileName}" to Cloud Drive successfully!` : `✨ Đã lưu "${fileName}" vào Kho Cloud thành công!`, 'success');
+      showToast(pick(`✨ Đã lưu "${fileName}" vào Kho Cloud thành công!`, `✨ Saved "${fileName}" to Cloud Drive successfully!`, `✨ 已成功将 “${fileName}” 保存到云盘！`), 'success');
     } catch (err: any) {
       console.error('Save to cloud error:', err);
       setSavedCloudIds(prev => {
@@ -329,14 +330,14 @@ const ReceiveViewComponent: React.FC = () => {
         delete next[item.id];
         return next;
       });
-      showToast(currentLang === 'en' ? `Error saving to Cloud: ${err.message || 'Try again later'}` : `Lỗi khi lưu vào Cloud: ${err.message || 'Thử lại sau'}`, 'error');
+      showToast(pick(`Lỗi khi lưu vào Cloud: ${err.message || 'Thử lại sau'}`, `Error saving to Cloud: ${err.message || 'Try again later'}`, `保存到云盘出错：${err.message || '请稍后重试'}`), 'error');
     }
   };
 
   // Save all items to Cloud Drive
   const handleSaveAllToCloudDrive = async () => {
     if (!currentUser) {
-      showToast(currentLang === 'en' ? 'Please log in to save files to Cloud Drive.' : 'Vui lòng đăng nhập để lưu vào Kho Cloud.', 'error');
+      showToast(pick('Vui lòng đăng nhập để lưu vào Kho Cloud.', 'Please log in to save files to Cloud Drive.', '请登录以将文件保存到云盘。'), 'error');
       return;
     }
     if (transfers.length === 0) return;
@@ -348,7 +349,7 @@ const ReceiveViewComponent: React.FC = () => {
       for (const item of transfers) {
         if (savedCloudIds[item.id] === 'saved') continue;
         const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        const fileName = item.fileName || (item.textContent ? (currentLang === 'en' ? `Text_${Date.now()}.txt` : `Van_ban_${Date.now()}.txt`) : 'received_file.bin');
+        const fileName = item.fileName || (item.textContent ? pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`) : 'received_file.bin');
         const fileType = item.fileType || (item.textContent ? 'text/plain' : 'application/octet-stream');
         const category = getFileCategory(fileType, fileName);
 
@@ -368,7 +369,7 @@ const ReceiveViewComponent: React.FC = () => {
           id: docId,
           userId: currentUser.uid,
           userEmail: currentUser.email || '',
-          userName: currentUser.displayName || settings.deviceName || (currentLang === 'en' ? 'User' : 'Người dùng'),
+          userName: currentUser.displayName || settings.deviceName || pick('Người dùng', 'User', '用户'),
           name: fileName,
           size: item.fileSize || (item.textContent ? item.textContent.length : 0),
           type: fileType,
@@ -384,9 +385,9 @@ const ReceiveViewComponent: React.FC = () => {
         successCount++;
       }
 
-      showToast(currentLang === 'en' ? `✨ Saved all ${successCount} files/notes to Cloud Drive successfully!` : `✨ Đã lưu tất cả ${successCount} tệp/văn bản vào Kho Cloud thành công!`, 'success');
+      showToast(pick(`✨ Đã lưu tất cả ${successCount} tệp/văn bản vào Kho Cloud thành công!`, `✨ Saved all ${successCount} files/notes to Cloud Drive successfully!`, `✨ 已成功将全部 ${successCount} 个文件/文本保存到云盘！`), 'success');
     } catch (err: any) {
-      showToast(currentLang === 'en' ? `Error saving to Cloud: ${err.message || 'Try again later'}` : `Lỗi khi lưu vào Kho Cloud: ${err.message || 'Thử lại sau'}`, 'error');
+      showToast(pick(`Lỗi khi lưu vào Kho Cloud: ${err.message || 'Thử lại sau'}`, `Error saving to Cloud: ${err.message || 'Try again later'}`, `保存到云盘出错：${err.message || '请稍后重试'}`), 'error');
     } finally {
       setIsSavingAllToCloud(false);
     }
@@ -395,18 +396,18 @@ const ReceiveViewComponent: React.FC = () => {
   // Export history to JSON backup file
   const handleExportHistory = () => {
     if (transfers.length === 0) {
-      showToast(currentLang === 'en' ? 'No transfer history to export.' : 'Chưa có lịch sử nhận dữ liệu để xuất.', 'info');
+      showToast(pick('Chưa có lịch sử nhận dữ liệu để xuất.', 'No transfer history to export.', '暂无可导出的接收记录。'), 'info');
       return;
     }
 
     const historyData = transfers.map((t, idx) => ({
       stt: idx + 1,
       id: t.id,
-      fileName: t.fileName || (currentLang === 'en' ? 'Text snippet' : 'Đoạn văn bản'),
+      fileName: t.fileName || pick('Đoạn văn bản', 'Text snippet', '文本片段'),
       fileSize: t.fileSize ? formatFileSize(t.fileSize) : 'N/A',
       fileType: t.fileType || 'text',
-      senderName: t.senderName || (currentLang === 'en' ? 'Anonymous Sender' : 'Người gửi ẩn danh'),
-      senderDevice: t.senderDevice || (currentLang === 'en' ? 'Device' : 'Thiết bị'),
+      senderName: t.senderName || pick('Người gửi ẩn danh', 'Anonymous Sender', '匿名发送者'),
+      senderDevice: t.senderDevice || pick('Thiết bị', 'Device', '设备'),
       createdAt: t.createdAt,
       status: t.status,
       textContent: t.textContent || '',
@@ -422,7 +423,7 @@ const ReceiveViewComponent: React.FC = () => {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast(currentLang === 'en' ? 'Backed up transfer history (.json) successfully!' : 'Đã sao lưu tệp lịch sử nhận (.json) thành công!', 'success');
+    showToast(pick('Đã sao lưu tệp lịch sử nhận (.json) thành công!', 'Backed up transfer history (.json) successfully!', '已成功备份接收记录（.json）！'), 'success');
   };
 
   // Filtered transfers by Tab and Search
@@ -484,16 +485,18 @@ const ReceiveViewComponent: React.FC = () => {
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-base sm:text-lg font-bold text-white tracking-wide">
-                    {currentLang === 'en' ? 'Smart TV Mode' : 'Chế độ Smart TV (Truyền hình thông minh)'}
+                    {pick('Chế độ Smart TV (Truyền hình thông minh)', 'Smart TV Mode', '智能电视模式')}
                   </h3>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    {currentLang === 'en' ? 'DPI Optimized' : 'Đã tối ưu DPI'}
+                    {pick('Đã tối ưu DPI', 'DPI Optimized', 'DPI 已优化')}
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-                  {currentLang === 'en'
-                    ? `Optimized display sizing for TV screens. Open CloudSend on Phone/PC and select "${settings.deviceName}" to stream photos, videos or files to this TV.`
-                    : `Đã tự động tăng kích thước hiển thị chống mỏi mắt. Mở CloudSend trên Điện thoại/Máy tính và chọn "${settings.deviceName}" để gửi ảnh, video hoặc tệp lên TV này.`}
+                  {pick(
+                    `Đã tự động tăng kích thước hiển thị chống mỏi mắt. Mở CloudSend trên Điện thoại/Máy tính và chọn "${settings.deviceName}" để gửi ảnh, video hoặc tệp lên TV này.`,
+                    `Optimized display sizing for TV screens. Open CloudSend on Phone/PC and select "${settings.deviceName}" to stream photos, videos or files to this TV.`,
+                    `已为电视屏幕优化显示尺寸。在手机/电脑上打开 CloudSend 并选择 “${settings.deviceName}” 即可发送照片、视频或文件到此电视。`
+                  )}
                 </p>
               </div>
             </div>
@@ -502,7 +505,7 @@ const ReceiveViewComponent: React.FC = () => {
             <div className="flex items-center gap-1.5 bg-slate-950/80 p-1.5 rounded-xl border border-slate-800 self-start sm:self-auto shrink-0">
               <span className="text-[11px] font-semibold text-slate-400 px-2 flex items-center gap-1">
                 <Sliders className="w-3 h-3 text-amber-400" />
-                {currentLang === 'en' ? 'TV DPI:' : 'DPI TV:'}
+                {pick('DPI TV:', 'TV DPI:', '电视 DPI：')}
               </span>
               {[
                 { scale: 1.25, label: '125%' },
@@ -532,14 +535,16 @@ const ReceiveViewComponent: React.FC = () => {
 
           <div className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-3 flex flex-wrap items-center gap-4">
             <span className="flex items-center gap-1">
-              {currentLang === 'en' ? (
-                <>🎮 <strong>Remote Control:</strong> Use Arrow keys [⬅️ ➡️] to switch tabs, [OK] to select, [Back] to return.</>
-              ) : (
+              {currentLang === 'vi' ? (
                 <>🎮 <strong>Điều khiển từ xa (Remote):</strong> Dùng phím Mũi tên [⬅️ ➡️] chuyển Tab, [OK] chọn nút, [Back] quay lại.</>
+              ) : (currentLang === 'zh-CN' || currentLang === 'zh-TW') ? (
+                <>🎮 <strong>遥控器操作：</strong>使用方向键 [⬅️ ➡️] 切换标签页，[OK] 确认选择，[返回] 返回。</>
+              ) : (
+                <>🎮 <strong>Remote Control:</strong> Use Arrow keys [⬅️ ➡️] to switch tabs, [OK] to select, [Back] to return.</>
               )}
             </span>
             <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-              {currentLang === 'en' ? '⚡ Auto-accept incoming files is enabled for TV.' : '⚡ Tự động nhận tệp (Auto Accept) đang bật cho TV.'}
+              {pick('⚡ Tự động nhận tệp (Auto Accept) đang bật cho TV.', '⚡ Auto-accept incoming files is enabled for TV.', '⚡ 已为电视开启自动接收传入文件。')}
             </span>
           </div>
         </div>

@@ -40,7 +40,7 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
 
   // Dynamic intensity factors
   const opacityMultiplier = intensity === 'vibrant' ? 1.4 : intensity === 'subtle' ? 0.65 : 1.0;
-  const particleCount = intensity === 'subtle' ? 20 : intensity === 'vibrant' ? 45 : 32;
+  const particleCount = intensity === 'subtle' ? 10 : intensity === 'vibrant' ? 20 : 14;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -50,7 +50,7 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
 
     let animationFrameId: number | null = null;
     let isPaused = false;
-    let dpr = 1; // 1x resolution for silky 60-120 FPS without GPU bandwidth waste
+    const canvasScale = 0.4; // Low internal resolution CSS-upscaled to eliminate fillrate strain
 
     let width = window.innerWidth;
     let height = window.innerHeight;
@@ -106,13 +106,11 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
       if (!canvas) return;
       width = window.innerWidth;
       height = window.innerHeight;
-      dpr = 1;
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      canvas.width = Math.max(1, Math.floor(width * canvasScale));
+      canvas.height = Math.max(1, Math.floor(height * canvasScale));
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
+      ctx.setTransform(canvasScale, 0, 0, canvasScale, 0, 0);
       rebuildGradients();
     };
 
@@ -181,6 +179,8 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
 
     let time = 0;
     let lastTime = performance.now();
+    let lastDrawTime = 0;
+    const minFrameInterval = 50; // Cap background render at ~20 FPS for snappy main thread UI
 
     const handleVisibilityChange = () => {
       isPaused = document.hidden;
@@ -197,13 +197,18 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
         return;
       }
 
-      const delta = Math.min(32, now - lastTime);
+      if (now - lastDrawTime < minFrameInterval || document.body.classList.contains('modal-open')) {
+        animationFrameId = requestAnimationFrame(render);
+        return;
+      }
+      lastDrawTime = now;
+
+      const delta = Math.min(60, now - lastTime);
       lastTime = now;
       time += delta;
 
-      // Mouse position smoothing with spring easing
-      currentMouseX += (targetMouseX - currentMouseX) * 0.04;
-      currentMouseY += (targetMouseY - currentMouseY) * 0.04;
+      currentMouseX += (targetMouseX - currentMouseX) * 0.05;
+      currentMouseY += (targetMouseY - currentMouseY) * 0.05;
 
       ctx.clearRect(0, 0, width, height);
 
@@ -221,13 +226,12 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
       const nx = -uy;
       const ny = ux;
 
-      const steps = 20; // Lightweight smooth resolution
+      const steps = 12;
 
       const mouseFactorX = ((currentMouseX / width) - 0.5) * 30;
       const mouseFactorY = ((currentMouseY / height) - 0.5) * 30;
 
       ribbons.forEach((ribbon, rIndex) => {
-        ctx.save();
         ctx.beginPath();
 
         const phaseOffset = rIndex * 1.85;
@@ -280,10 +284,8 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
         ctx.lineTo(bottomPoints[0].x, bottomPoints[0].y);
         ctx.closePath();
 
-        // Satin wave gradient fill from pre-computed cache
         ctx.fillStyle = cachedGradients[rIndex] || `${ribbon.color1} 0.08)`;
         ctx.fill();
-        ctx.restore();
       });
 
       // 2. High-speed particle rendering using pre-rendered offscreen sprite cache
@@ -352,10 +354,10 @@ export const SilkFabricBackgroundComponent: React.FC<SilkFabricBackgroundProps> 
         }}
       />
 
-      {/* 2. Optional Subtle Cybernetic Matrix Grid Pattern */}
+      {/* 2. Optional Subtle Cybernetic Matrix Grid Pattern (static GPU layer, zero repaint) */}
       {showGrid && (
-        <div 
-          className="absolute inset-0 pointer-events-none opacity-[0.035] animate-cyber-grid bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:32px_32px]" 
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.035] bg-[radial-gradient(#10b981_1px,transparent_1px)] [background-size:32px_32px]"
         />
       )}
 

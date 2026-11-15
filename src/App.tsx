@@ -154,7 +154,11 @@ function MainApp() {
     };
 
     window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener('hashchange', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+      window.removeEventListener('hashchange', handlePopState);
+    };
   }, []);
 
   // Track whether an unauthenticated visitor has clicked to open the AuthModal
@@ -179,12 +183,15 @@ function MainApp() {
         !currentUser && 
         !showAuthModal && 
         !isRulesPage && 
+        !isPlayerPage &&
         page !== 'login' && 
         page !== 'auth' && 
         page !== 'datastore' &&
         page !== 'rules' &&
         page !== 'terms' &&
-        page !== 'dieu-khoan'
+        page !== 'dieu-khoan' &&
+        page !== 'player' &&
+        page !== 'watch'
       ) {
         if (page !== 'landing') {
           window.history.replaceState(null, '', '/?page=landing');
@@ -192,7 +199,7 @@ function MainApp() {
         }
       }
     }
-  }, [currentUser, showAuthModal, isRulesPage]);
+  }, [currentUser, showAuthModal, isRulesPage, isPlayerPage]);
 
   const [activeTab, setActiveTab] = useState<'send' | 'receive' | 'chat' | 'drive'>(() => {
     if (typeof window !== 'undefined') {
@@ -451,12 +458,29 @@ function MainApp() {
     const messagesRef = collection(db, 'rooms', 'public-relay-lounge', 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(1));
 
+    let isInitialSnapshot = true;
+    let initialDocId: string | null = null;
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      // Bỏ qua snapshot đầu tiên chứa tin nhắn cũ khi app vừa khởi động hoặc cập nhật
+      if (isInitialSnapshot) {
+        isInitialSnapshot = false;
+        if (!snapshot.empty) {
+          initialDocId = snapshot.docs[0].id;
+        }
+        return;
+      }
+
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
+          if (initialDocId && change.doc.id === initialDocId) {
+            return;
+          }
           const msg = change.doc.data();
-          const msgTime = msg.timestamp || (msg.createdAt ? new Date(msg.createdAt).getTime() : 0);
-          if (msgTime > sessionStartTime && msg.senderId !== currentUser.uid && msg.senderDevice !== settings?.deviceName) {
+          const msgTime = (msg.serverTimestamp?.toMillis?.()) || 
+                          (msg.serverTimestamp?.seconds ? msg.serverTimestamp.seconds * 1000 : 0) ||
+                          msg.timestamp || 
+                          (msg.createdAt ? new Date(msg.createdAt).getTime() : 0);
+          if (msgTime > (sessionStartTime + 2000) && msg.senderId !== currentUser.uid && msg.senderDevice !== settings?.deviceName) {
             // Count as unread if user is not currently looking at the chat tab
             const isViewingChat = activeTabRef.current === 'chat' && !document.hidden && (typeof document.hasFocus === 'function' ? document.hasFocus() : true);
             if (!isViewingChat) {
@@ -858,10 +882,14 @@ function MainApp() {
     return (
       <React.Suspense fallback={<div className="min-h-screen bg-[#030712] flex items-center justify-center text-white text-xs">Đang tải Trình phát Video...</div>}>
         <VideoPlayerPage
-          onBack={() => {
+          onBack={(returnTab) => {
             setIsPlayerPage(false);
+            const target = returnTab || activeTab;
+            if (target === 'chat' || target === 'drive') {
+              setActiveTab(target);
+            }
             if (currentUser) {
-              window.history.pushState(null, '', `/?page=${activeTab}`);
+              window.history.pushState(null, '', `/?page=${target}`);
             } else {
               window.history.pushState(null, '', '/?page=landing');
               setIsLandingTab(true);

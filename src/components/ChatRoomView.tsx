@@ -1,8 +1,10 @@
 import { UserProfileModal } from './UserProfileModal';
-import React, { useState, useEffect, useRef, startTransition } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, startTransition } from 'react';
 import { yieldToMain } from '../utils/scheduler';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
+import { ChatInlineVideoPlayer } from './ChatInlineVideoPlayer';
+import { ChatMediaImage } from './ChatMediaImage';
 import { db } from '../firebase/config';
 import { 
   collection, 
@@ -16,12 +18,20 @@ import {
   getDoc,
   getDocs, 
   where, 
-  limit, 
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  DocumentData,
   serverTimestamp, 
   deleteDoc,
   writeBatch 
 } from 'firebase/firestore';
 import { ChatRoom, ChatMessage, ChatAttachment, RoomMember } from './types';
+import {
+  getCachedRoomMessages,
+  setCachedRoomMessages,
+  removeCachedRoomMessage,
+} from '../utils/chatMessageCache';
 import { 
   MessagesSquare, 
   Plus, 
@@ -63,11 +73,12 @@ import {
   Loader2,
   History,
   Film,
-  Cloud
+  Cloud,
+  ExternalLink
 } from 'lucide-react';
 import { formatFileSize } from '../utils/device';
 import { playSendSound, playReceiveSound, playDestructSound, playShieldAlertSound } from '../utils/sound';
-import { censorProfanity, moderateUploadedImage } from '../utils/moderation';
+import { censorProfanity, moderateUploadedImage, moderateUploadedVideo, deleteServerUploadedFile } from '../utils/moderation';
 import { inspectFileSecurity } from '../utils/fileSecurity';
 import { checkContentWithAI } from '../utils/aiModeration';
 import { downloadFileSafely } from '../utils/fileDownload';
@@ -85,17 +96,18 @@ import { wrapSecureBase64Message, unwrapSecureBase64Message } from '../utils/bas
 
 // Global memory-efficient LRU cache to eliminate Base64 decoding and Profanity regex during scrolling
 const textMessageCleanCache = new Map<string, string>();
-function getCachedCleanMessageText(rawText: string): string {
+function getCachedCleanMessageText(rawText: string, shouldCensor = true): string {
   if (!rawText) return '';
-  let cached = textMessageCleanCache.get(rawText);
+  const cacheKey = `${shouldCensor ? 'pub' : 'priv'}:${rawText}`;
+  let cached = textMessageCleanCache.get(cacheKey);
   if (cached === undefined) {
     const unwrapped = unwrapSecureBase64Message(rawText);
-    cached = censorProfanity(unwrapped).cleanText;
+    cached = shouldCensor ? censorProfanity(unwrapped).cleanText : unwrapped;
     if (textMessageCleanCache.size > 300) {
       const first = textMessageCleanCache.keys().next().value;
       if (first) textMessageCleanCache.delete(first);
     }
-    textMessageCleanCache.set(rawText, cached);
+    textMessageCleanCache.set(cacheKey, cached);
   }
   return cached;
 }
@@ -103,8 +115,11 @@ import {
   uploadFileToServer, 
   generateImageThumbnail, 
   compressImageForDirectTransfer,
+  extractVideoModerationFrames,
+  fileToBase64,
   isImageFile,
   isVideoFile,
+  isGifFile,
   MAX_FILE_SIZE, 
   MAX_FILE_SIZE_LABEL 
 } from '../utils/fileUpload';
@@ -121,6 +136,7 @@ import { CloudDrivePickerModal } from './CloudDrivePickerModal';
 import { CloudDriveFile } from './types';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
 import { triggerIncomingChatMessageNotification } from '../utils/tabNotification';
+import { extractRoomMediaFromMessages, openMediaInLargeViewer } from '../utils/mediaViewerSession';
 
 // Default Earth / Globe SVG Avatar for Global Lounge (Đại Sảnh Toàn Cầu)
 const DEFAULT_GLOBAL_LOUNGE_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="%23064e3b" stroke="%2310b981" stroke-width="3"/><circle cx="50" cy="50" r="38" fill="%23047857"/><ellipse cx="50" cy="50" rx="18" ry="38" fill="none" stroke="%2334d399" stroke-width="2.5"/><line x1="12" y1="50" x2="88" y2="50" stroke="%2334d399" stroke-width="2.5"/><path d="M20 30 Q50 38 80 30" fill="none" stroke="%236ee7b7" stroke-width="2"/><path d="M20 70 Q50 62 80 70" fill="none" stroke="%236ee7b7" stroke-width="2"/></svg>`;
@@ -203,6 +219,17 @@ const ChatRoomViewComponent: React.FC = () => {
 
   const [viewingZoomImage, setViewingZoomImage] = useState<{ url: string; name?: string; size?: number } | null>(null);
   const [isDraggingAvatar, setIsDraggingAvatar] = useState(false);
+
+  const roomMediaGallery = React.useMemo(() => {
+    return extractRoomMediaFromMessages(messages, {
+      roomId: activeRoomId,
+      currentUserUid: currentUser?.uid,
+      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn',
+      currentUserAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || null,
+      memberNamesMap,
+      memberMetaMap,
+    });
+  }, [messages, activeRoomId, currentUser?.uid, currentUser?.photoURL, userProfile?.displayName, userProfile?.customAvatarUrl, settings?.customAvatarUrl, memberNamesMap, memberMetaMap]);
   
   // Create / Join Room state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -281,15 +308,30 @@ const ChatRoomViewComponent: React.FC = () => {
   const videoInputRef = useRef<HTMLInputElement>(null);
   const [isCloudPickerOpen, setIsCloudPickerOpen] = useState(false);
 
+  const INITIAL_LIVE_PAGE_SIZE = 35;
+  const OLDER_PAGE_BATCH_SIZE = 25;
+
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
-  // Pagination: load latest 10 messages by default, scroll up to load +10 more
-  const [messageLimit, setMessageLimit] = useState(10);
+
+  // Discord / Zalo / Messenger cursor-based message pagination & instant cache
+  const [isInitialLoadingMessages, setIsInitialLoadingMessages] = useState(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const previousScrollHeightRef = useRef<number>(0);
-  const previousScrollTopRef = useRef<number>(0);
+  const [unreadNewCount, setUnreadNewCount] = useState(0);
+  const [isScrolledUpFar, setIsScrolledUpFar] = useState(false);
+  const isScrolledUpFarRef = useRef(false);
+
+  const oldestCursorDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const hasLoadedOlderHistoryRef = useRef(false);
+  const isFetchingOlderRef = useRef(false);
+  const pendingScrollAnchorRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(null);
+  const pendingInitialSnapRef = useRef(false);
+  const activeRoomIdRef = useRef(activeRoomId);
+  activeRoomIdRef.current = activeRoomId;
+  const soundEnabledRef = useRef(Boolean(settings.soundEnabled));
+  soundEnabledRef.current = Boolean(settings.soundEnabled);
 
   const [mobileTab, setMobileTab] = useState<'rooms' | 'chat'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -301,30 +343,68 @@ const ChatRoomViewComponent: React.FC = () => {
   const lastSeenMessageIdRef = useRef<string | null>(null);
   const latestMessageIdRef = useRef<string | null>(null);
   const initialLoadRef = useRef(true);
+  const initialMessageIdsRef = useRef<Set<string>>(new Set());
+  const roomMountTimeRef = useRef<number>(Date.now());
 
-  // Reset scroll and pagination tracking when switching rooms
+  // Instant cache hydration & reset pagination when switching rooms (0ms Discord/Zalo feel)
   useEffect(() => {
     initialLoadRef.current = true;
+    initialMessageIdsRef.current.clear();
+    roomMountTimeRef.current = Date.now();
     lastSeenMessageIdRef.current = null;
     latestMessageIdRef.current = null;
     hasUnreadNewMessageRef.current = false;
     setHasUnreadNewMessage(false);
+    setUnreadNewCount(0);
     setShowScrollBottomBtn(false);
+    showScrollBottomBtnRef.current = false;
+    setIsScrolledUpFar(false);
+    isScrolledUpFarRef.current = false;
     isNearBottomRef.current = true;
-    setMessageLimit(10);
-    setOlderMessages([]);
-    setRecentMessages([]);
-    setHasMoreOlder(false);
-    setIsLoadingOlder(false);
-    previousScrollHeightRef.current = 0;
-    previousScrollTopRef.current = 0;
 
-    // Auto scroll down immediately when switching rooms
-    const timer = setTimeout(() => {
-      scrollToBottom(false);
-    }, 60);
-    return () => clearTimeout(timer);
+    oldestCursorDocRef.current = null;
+    hasLoadedOlderHistoryRef.current = false;
+    isFetchingOlderRef.current = false;
+    pendingScrollAnchorRef.current = null;
+    setIsLoadingOlder(false);
+    setOlderMessages([]);
+
+    const cached = getCachedRoomMessages(activeRoomId);
+    if (cached && cached.messages.length > 0) {
+      cached.messages.forEach((m) => initialMessageIdsRef.current.add(m.id));
+      const latestCached = cached.messages[cached.messages.length - 1];
+      if (latestCached) {
+        lastSeenMessageIdRef.current = latestCached.id;
+        latestMessageIdRef.current = latestCached.id;
+      }
+      setRecentMessages(cached.messages);
+      setHasMoreOlder(cached.hasMore);
+      setIsInitialLoadingMessages(false);
+      pendingInitialSnapRef.current = true;
+    } else {
+      setRecentMessages([]);
+      setHasMoreOlder(false);
+      setIsInitialLoadingMessages(true);
+      pendingInitialSnapRef.current = false;
+    }
   }, [activeRoomId]);
+
+  // Zero-jump scroll restoration BEFORE browser paint when prepending 25 older messages
+  useLayoutEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el || !pendingScrollAnchorRef.current) return;
+    const heightDiff = el.scrollHeight - pendingScrollAnchorRef.current.prevScrollHeight;
+    el.scrollTop = pendingScrollAnchorRef.current.prevScrollTop + heightDiff;
+    pendingScrollAnchorRef.current = null;
+  }, [olderMessages]);
+
+  // Instant snap to bottom on initial cache/snapshot load before paint
+  useLayoutEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el || !pendingInitialSnapRef.current || recentMessages.length === 0) return;
+    el.scrollTop = el.scrollHeight;
+    pendingInitialSnapRef.current = false;
+  }, [recentMessages, activeRoomId]);
 
   // Auto clear Global Lounge messages every Monday morning
   useEffect(() => {
@@ -359,7 +439,11 @@ const ChatRoomViewComponent: React.FC = () => {
     }
     hasUnreadNewMessageRef.current = false;
     setHasUnreadNewMessage(false);
+    setUnreadNewCount(0);
     setShowScrollBottomBtn(false);
+    showScrollBottomBtnRef.current = false;
+    setIsScrolledUpFar(false);
+    isScrolledUpFarRef.current = false;
     isNearBottomRef.current = true;
 
     if (chatContainerRef.current) {
@@ -372,23 +456,72 @@ const ChatRoomViewComponent: React.FC = () => {
     }
   };
 
-  // Tải thêm 10 đoạn chat cũ hơn khi cuộn lên trên
-  const handleLoadOlderMessages = () => {
-    if (isLoadingOlder || !hasMoreOlder || !activeRoomId) return;
-    const el = chatContainerRef.current;
-    if (el) {
-      previousScrollHeightRef.current = el.scrollHeight;
-      previousScrollTopRef.current = el.scrollTop;
-    }
+  // Cursor-based one-shot getDocs pagination (never tears down live onSnapshot listener)
+  const handleLoadOlderMessages = async () => {
+    if (isFetchingOlderRef.current || !hasMoreOlder || !activeRoomId) return;
+    const cursorDoc = oldestCursorDocRef.current;
+    if (!cursorDoc) return;
+
+    const targetRoomId = activeRoomId;
+    isFetchingOlderRef.current = true;
     setIsLoadingOlder(true);
-    setMessageLimit((prev) => prev + 10);
+
+    try {
+      const messagesRef = collection(db, 'rooms', targetRoomId, 'messages');
+      const olderQuery = query(
+        messagesRef,
+        orderBy('createdAt', 'desc'),
+        startAfter(cursorDoc),
+        limit(OLDER_PAGE_BATCH_SIZE)
+      );
+      const snap = await getDocs(olderQuery);
+
+      // Ignore stale response if user switched rooms while fetching
+      if (activeRoomIdRef.current !== targetRoomId) return;
+
+      const olderBatch: ChatMessage[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data({ serverTimestamps: 'estimate' });
+        olderBatch.push({ id: docSnap.id, ...data } as ChatMessage);
+        initialMessageIdsRef.current.add(docSnap.id);
+      });
+
+      if (snap.docs.length > 0) {
+        oldestCursorDocRef.current = snap.docs[snap.docs.length - 1];
+      }
+      hasLoadedOlderHistoryRef.current = true;
+      setHasMoreOlder(snap.docs.length >= OLDER_PAGE_BATCH_SIZE);
+
+      if (olderBatch.length > 0) {
+        const el = chatContainerRef.current;
+        if (el) {
+          pendingScrollAnchorRef.current = {
+            prevScrollHeight: el.scrollHeight,
+            prevScrollTop: el.scrollTop,
+          };
+        }
+        setOlderMessages((prev) => {
+          const map = new Map<string, ChatMessage>();
+          for (const m of prev) map.set(m.id, m);
+          for (const m of olderBatch) map.set(m.id, m);
+          return Array.from(map.values());
+        });
+      }
+    } catch (err) {
+      console.warn('Load older messages error:', err);
+    } finally {
+      isFetchingOlderRef.current = false;
+      if (activeRoomIdRef.current === targetRoomId) {
+        setIsLoadingOlder(false);
+      }
+    }
   };
 
   const showScrollBottomBtnRef = useRef(false);
   const scrollRafIdRef = useRef<number | null>(null);
   const lastLoadOlderTimeRef = useRef(0);
 
-  // Track scroll position to handle new unread messages & infinite scroll up to load +10 older messages (Throttled via rAF)
+  // Smooth pre-fetch near top + unread / scroll-to-bottom tracking (Throttled via rAF)
   const handleScrollChat = () => {
     if (scrollRafIdRef.current !== null) return;
 
@@ -397,16 +530,27 @@ const ChatRoomViewComponent: React.FC = () => {
       const el = chatContainerRef.current;
       if (!el) return;
 
-      // Khi người dùng lăn chuột lên gần đầu (<= 60px), tự động nạp thêm 10 tin nhắn cũ hơn (cooldown 400ms)
+      // Pre-fetch 25 older messages cleanly when user approaches top (<= 160px)
       const now = Date.now();
-      if (el.scrollTop <= 60 && hasMoreOlder && !isLoadingOlder && now - lastLoadOlderTimeRef.current > 400) {
+      if (
+        el.scrollTop <= 160 &&
+        hasMoreOlder &&
+        !isFetchingOlderRef.current &&
+        now - lastLoadOlderTimeRef.current > 350
+      ) {
         lastLoadOlderTimeRef.current = now;
         handleLoadOlderMessages();
       }
 
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const nearBottom = distanceToBottom < 100;
+      const nearBottom = distanceToBottom < 120;
+      const farFromBottom = distanceToBottom > 360;
       isNearBottomRef.current = nearBottom;
+
+      if (isScrolledUpFarRef.current !== farFromBottom) {
+        isScrolledUpFarRef.current = farFromBottom;
+        setIsScrolledUpFar(farFromBottom);
+      }
 
       if (nearBottom) {
         if (latestMessageIdRef.current) {
@@ -415,6 +559,7 @@ const ChatRoomViewComponent: React.FC = () => {
         if (hasUnreadNewMessageRef.current) {
           hasUnreadNewMessageRef.current = false;
           setHasUnreadNewMessage(false);
+          setUnreadNewCount(0);
         }
         if (showScrollBottomBtnRef.current) {
           showScrollBottomBtnRef.current = false;
@@ -635,122 +780,150 @@ const ChatRoomViewComponent: React.FC = () => {
     };
   }, []);
 
-  // Listen to messages in active room (Tải 10 tin nhắn mới nhất, cuộn lên để xem tiếp 10 tin nhắn cũ)
+  // Single stable live listener for latest 35 messages (never torn down when scrolling up)
   useEffect(() => {
     if (!currentUser || !activeRoomId) return;
 
-    const messagesRef = collection(db, 'rooms', activeRoomId, 'messages');
-    
-    // Tải theo messageLimit (bắt đầu là 10, tăng dần +10 khi cuộn lên trên)
+    const targetRoomId = activeRoomId;
+    const messagesRef = collection(db, 'rooms', targetRoomId, 'messages');
     const q = query(
-      messagesRef, 
+      messagesRef,
       orderBy('createdAt', 'desc'),
-      limit(messageLimit)
+      limit(INITIAL_LIVE_PAGE_SIZE)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs: ChatMessage[] = [];
-      let hasNewExternalMsg = false;
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        if (activeRoomIdRef.current !== targetRoomId) return;
 
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data({ serverTimestamps: 'estimate' });
-        const msg = { id: docSnap.id, ...data } as ChatMessage;
-        msgs.push(msg);
-        if (msg.senderId !== currentUser.uid && !initialLoadRef.current) {
-          hasNewExternalMsg = true;
-        }
-      });
-
-      // Nếu số lượng tin nhắn đạt tới messageLimit thì nghĩa là còn tin nhắn cũ hơn phía trước
-      setHasMoreOlder(snapshot.docs.length >= messageLimit);
-
-      // Sắp xếp thứ tự thời gian tăng dần để hiển thị từ trên xuống dưới
-      msgs.sort((a, b) => {
-        const timeA = getMessageTime(a);
-        const timeB = getMessageTime(b);
-        if (timeA !== timeB) {
-          return timeA - timeB;
-        }
-        const strA = a.createdAt || '';
-        const strB = b.createdAt || '';
-        if (strA !== strB) {
-          return strA.localeCompare(strB);
-        }
-        return a.id.localeCompare(b.id);
-      });
-
-      setRecentMessages(msgs);
-
-      if (hasNewExternalMsg) {
-        if (settings.soundEnabled) {
-          playReceiveSound();
-        }
-        if (typeof document !== 'undefined' && (document.hidden || !document.hasFocus())) {
-          triggerIncomingChatMessageNotification(1);
-        }
-      }
-
-      const latestMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
-      if (latestMsg) {
-        latestMessageIdRef.current = latestMsg.id;
-      }
-
-      const isFirst = initialLoadRef.current;
-      initialLoadRef.current = false;
-      
-      // Giữ nguyên vị trí mắt nhìn khi vừa nạp thêm 10 tin nhắn cũ (chống nhảy/giật màn hình)
-      if (isLoadingOlder) {
-        requestAnimationFrame(() => {
-          const el = chatContainerRef.current;
-          if (el) {
-            const heightDiff = el.scrollHeight - previousScrollHeightRef.current;
-            el.scrollTop = previousScrollTopRef.current + heightDiff;
+        const msgs: ChatMessage[] = [];
+        const confirmedTempIds = new Set<string>();
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data({ serverTimestamps: 'estimate' });
+          const msg = { id: docSnap.id, ...data } as ChatMessage;
+          msgs.push(msg);
+          if (msg.clientTempId) {
+            confirmedTempIds.add(msg.clientTempId);
           }
-          setIsLoadingOlder(false);
         });
-        return;
-      }
 
-      // Handle scrolling & scroll restoration
-      if (isFirst) {
-        if (latestMsg) {
-          lastSeenMessageIdRef.current = latestMsg.id;
+        let addedExternalCount = 0;
+        if (initialLoadRef.current) {
+          snapshot.forEach((docSnap) => {
+            initialMessageIdsRef.current.add(docSnap.id);
+          });
+        } else {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              const msgTime = getMessageTime(data as any);
+              if (
+                !initialMessageIdsRef.current.has(change.doc.id) &&
+                data.senderId !== currentUser.uid &&
+                msgTime > roomMountTimeRef.current + 1500
+              ) {
+                addedExternalCount += 1;
+                initialMessageIdsRef.current.add(change.doc.id);
+              }
+            }
+          });
         }
-        hasUnreadNewMessageRef.current = false;
-        setHasUnreadNewMessage(false);
-        setShowScrollBottomBtn(false);
-        requestAnimationFrame(() => {
-          scrollToBottom(false);
+
+        // Only update cursor & hasMoreOlder from the live window before user has paged deeper
+        if (!hasLoadedOlderHistoryRef.current) {
+          oldestCursorDocRef.current =
+            snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : null;
+          setHasMoreOlder(snapshot.docs.length >= INITIAL_LIVE_PAGE_SIZE);
+        }
+
+        // Sort ascending oldest -> newest
+        msgs.sort((a, b) => {
+          const timeA = getMessageTime(a);
+          const timeB = getMessageTime(b);
+          if (timeA !== timeB) return timeA - timeB;
+          const strA = a.createdAt || '';
+          const strB = b.createdAt || '';
+          if (strA !== strB) return strA.localeCompare(strB);
+          return a.id.localeCompare(b.id);
         });
-      } else if (!latestMsg) {
-        setShowScrollBottomBtn(false);
-      } else if (latestMsg.senderId === currentUser.uid) {
-        lastSeenMessageIdRef.current = latestMsg.id;
-        hasUnreadNewMessageRef.current = false;
-        setHasUnreadNewMessage(false);
-        setShowScrollBottomBtn(false);
-        requestAnimationFrame(() => {
-          scrollToBottom(true);
+
+        // Merge with any in-flight optimistic messages whose confirmed server doc hasn't arrived yet
+        setRecentMessages((prev) => {
+          const pendingOptimistic = prev.filter(
+            (m) => m.id.startsWith('temp-') && !confirmedTempIds.has(m.id)
+          );
+          if (pendingOptimistic.length === 0) return msgs;
+          const combined = [...msgs, ...pendingOptimistic];
+          combined.sort((a, b) => getMessageTime(a) - getMessageTime(b));
+          return combined;
         });
-      } else if (isNearBottomRef.current) {
-        lastSeenMessageIdRef.current = latestMsg.id;
-        hasUnreadNewMessageRef.current = false;
-        setHasUnreadNewMessage(false);
-        setShowScrollBottomBtn(false);
-        requestAnimationFrame(() => {
-          scrollToBottom(true);
-        });
-      } else {
-        if (latestMsg.id !== lastSeenMessageIdRef.current) {
+
+        setCachedRoomMessages(
+          targetRoomId,
+          msgs,
+          snapshot.docs.length >= INITIAL_LIVE_PAGE_SIZE
+        );
+
+        if (addedExternalCount > 0) {
+          if (soundEnabledRef.current) {
+            playReceiveSound();
+          }
+          if (typeof document !== 'undefined' && (document.hidden || !document.hasFocus())) {
+            triggerIncomingChatMessageNotification(addedExternalCount);
+          }
+        }
+
+        const latestMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+        if (latestMsg) {
+          latestMessageIdRef.current = latestMsg.id;
+        }
+
+        const isFirst = initialLoadRef.current;
+        initialLoadRef.current = false;
+        setIsInitialLoadingMessages(false);
+
+        if (isFirst) {
+          if (latestMsg) {
+            lastSeenMessageIdRef.current = latestMsg.id;
+          }
+          hasUnreadNewMessageRef.current = false;
+          setHasUnreadNewMessage(false);
+          setUnreadNewCount(0);
+          setShowScrollBottomBtn(false);
+          showScrollBottomBtnRef.current = false;
+          pendingInitialSnapRef.current = true;
+        } else if (!latestMsg) {
+          setShowScrollBottomBtn(false);
+          showScrollBottomBtnRef.current = false;
+        } else if (latestMsg.senderId === currentUser.uid || isNearBottomRef.current) {
+          lastSeenMessageIdRef.current = latestMsg.id;
+          hasUnreadNewMessageRef.current = false;
+          setHasUnreadNewMessage(false);
+          setUnreadNewCount(0);
+          setShowScrollBottomBtn(false);
+          showScrollBottomBtnRef.current = false;
+          requestAnimationFrame(() => {
+            scrollToBottom(true);
+          });
+        } else if (latestMsg.id !== lastSeenMessageIdRef.current) {
           hasUnreadNewMessageRef.current = true;
           setHasUnreadNewMessage(true);
+          if (addedExternalCount > 0) {
+            setUnreadNewCount((prev) => prev + addedExternalCount);
+          }
+          showScrollBottomBtnRef.current = true;
           setShowScrollBottomBtn(true);
         }
+      },
+      (err) => {
+        console.warn('Room messages listener notice:', err);
+        setIsInitialLoadingMessages(false);
       }
-    });
+    );
 
     return () => unsubscribe();
-  }, [currentUser, activeRoomId, messageLimit, settings.soundEnabled]);
+  }, [currentUser, activeRoomId]);
 
   // Auto-detect and register user as a member when entering any room
   useEffect(() => {
@@ -785,23 +958,39 @@ const ChatRoomViewComponent: React.FC = () => {
     }
   }, [currentUser, activeRoomId, rooms]);
 
-  // Compress a single image file to a lightweight data URL and upload original for heavy files
-  const compressImage = async (file: File): Promise<ChatAttachment> => {
-    // Generate lightweight preview thumbnail
+  // Compress a single image file (keeping animated GIFs untouched) and upload original for GIF/heavy files
+  const compressImage = async (file: File): Promise<ChatAttachment | null> => {
+    const isGif = isGifFile(file.name, file.type);
+    // Generate lightweight preview/moderation thumbnail
     const thumb = await generateImageThumbnail(file, 800, 0.75);
 
-    // If file is > 200KB or if it is HEIC/HEIF (which needs server conversion for browsers), upload to server
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+    let imageVerified = !isPublicRoom;
+
+    if (isPublicRoom && thumb) {
+      setUploadProgressText(`🛡️ AI đang kiểm tra an toàn ảnh "${file.name}"...`);
+      const imgMod = await moderateUploadedImage(thumb, file.name);
+      if (!imgMod.safe) {
+        playShieldAlertSound();
+        setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setTimeout(() => setModerationWarning(null), 9000);
+        return null;
+      }
+      imageVerified = true;
+    }
+
+    // Always upload GIFs (to preserve animation), HEIC/HEIF (for server conversion), or files > 200KB
     let fileUrl: string | undefined = undefined;
     let serverThumb: string | undefined = undefined;
     const isHeic = file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif') || file.type === 'image/heic' || file.type === 'image/heif';
 
-    if (file.size > 200 * 1024 || isHeic || !thumb) {
+    if (file.size > 200 * 1024 || isHeic || isGif || !thumb) {
       try {
         const uploaded = await uploadFileToServer(file, (pct) => {
-          setUploadProgressText(`Đang xử lý ảnh "${file.name}" (${pct}%)...`);
+          setUploadProgressText(`Đang xử lý ${isGif ? 'GIF' : 'ảnh'} "${file.name}" (${pct}%)...`);
         });
-        fileUrl = uploaded.url;
-        if (uploaded.thumbnail) {
+        fileUrl = isGif ? (uploaded.viewUrl || uploaded.url) : uploaded.url;
+        if (uploaded.thumbnail && !isGif) {
           serverThumb = uploaded.thumbnail;
         }
       } catch (err) {
@@ -809,22 +998,41 @@ const ChatRoomViewComponent: React.FC = () => {
       }
     }
 
-    let finalData = serverThumb || thumb || '';
+    // Never shadow an animated GIF with a static single-frame JPEG thumbnail
+    let finalData = isGif ? '' : (serverThumb || thumb || '');
+    if (isGif && !fileUrl && file.size <= 600 * 1024) {
+      finalData = await fileToBase64(file).catch(() => '');
+    }
     if (!finalData && !fileUrl) {
       // Smart direct fallback for mobile photos when server proxy is unavailable
-      finalData = await compressImageForDirectTransfer(file, 1080, 0.8);
+      finalData = isGif ? (thumb || '') : await compressImageForDirectTransfer(file, 1080, 0.8);
+    }
+
+    // Ensure HEIC / fallback / server-thumb / filename images in public rooms are ALWAYS AI checked before attaching
+    if (isPublicRoom && !imageVerified) {
+      setUploadProgressText(`🛡️ AI đang kiểm tra an toàn ảnh "${file.name}"...`);
+      const imgMod = await moderateUploadedImage(thumb || finalData || fileUrl || '', file.name);
+      if (!imgMod.safe) {
+        deleteServerUploadedFile(fileUrl);
+        playShieldAlertSound();
+        setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setTimeout(() => setModerationWarning(null), 9000);
+        return null;
+      }
+      imageVerified = true;
     }
 
     return {
       name: file.name,
       size: file.size,
-      type: isHeic ? 'image/heic' : (file.type || 'image/jpeg'),
+      type: isHeic ? 'image/heic' : (file.type || (isGif ? 'image/gif' : 'image/jpeg')),
       data: finalData,
-      url: fileUrl
+      url: fileUrl,
+      aiVerifiedSafe: imageVerified
     };
   };
 
-  // Convert and upload heavy non-image file with security extension checks
+  // Convert and upload heavy non-image file with security extension checks + AI video moderation in public rooms
   const processGeneralFile = async (file: File): Promise<ChatAttachment | null> => {
     // Security check: block dangerous executables, scripts, and double extensions
     const securityCheck = inspectFileSecurity(file);
@@ -841,18 +1049,66 @@ const ChatRoomViewComponent: React.FC = () => {
       return null;
     }
 
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+    const fileIsVideo = isVideoFile(file);
+    let videoVerified = !isPublicRoom || !fileIsVideo;
+
     try {
       setUploadProgressText(`Đang tải tệp "${file.name}"...`);
-      const uploaded = await uploadFileToServer(file, (pct) => {
+
+      const uploadPromise = uploadFileToServer(file, (pct) => {
         setUploadProgressText(`Đang tải tệp "${file.name}" (${pct}%)...`);
       });
+
+      const clientModPromise = (isPublicRoom && fileIsVideo)
+        ? (async (): Promise<{ blocked: boolean; reason?: string; verified: boolean }> => {
+            try {
+              const frames = await extractVideoModerationFrames(file, 4);
+              if (frames.length > 0) {
+                const vidMod = await moderateUploadedVideo(frames, file.name);
+                if (!vidMod.safe) {
+                  return { blocked: true, reason: vidMod.reason, verified: false };
+                }
+                return { blocked: false, verified: true };
+              }
+            } catch {}
+            return { blocked: false, verified: false };
+          })()
+        : Promise.resolve<{ blocked: boolean; reason?: string; verified: boolean }>({ blocked: false, verified: true });
+
+      const [uploaded, modResult] = await Promise.all([uploadPromise, clientModPromise]);
+      const uploadedUrl = uploaded.viewUrl || uploaded.url;
+
+      if (modResult.blocked) {
+        deleteServerUploadedFile(uploadedUrl);
+        playShieldAlertSound();
+        setModerationWarning(modResult.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setTimeout(() => setModerationWarning(null), 9000);
+        return null;
+      }
+      videoVerified = modResult.verified;
+
+      // Server-side ffmpeg frame check fallback if browser could not seek video frames (e.g. MKV/MOV/>250MB)
+      if (isPublicRoom && fileIsVideo && !videoVerified) {
+        setUploadProgressText(`🛡️ AI đang phân tích nội dung video "${file.name}"...`);
+        const vidMod = await moderateUploadedVideo([], file.name, uploadedUrl);
+        if (!vidMod.safe) {
+          deleteServerUploadedFile(uploadedUrl);
+          playShieldAlertSound();
+          setModerationWarning(vidMod.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setTimeout(() => setModerationWarning(null), 9000);
+          return null;
+        }
+        videoVerified = true;
+      }
 
       return {
         name: file.name,
         size: file.size,
         type: file.type || 'application/octet-stream',
         data: '',
-        url: uploaded.viewUrl || uploaded.url
+        url: uploadedUrl,
+        aiVerifiedSafe: videoVerified
       };
     } catch (err: any) {
       setModerationWarning(err?.message || 'Lỗi khi tải tệp lên máy chủ.');
@@ -908,31 +1164,74 @@ const ChatRoomViewComponent: React.FC = () => {
     setAttachments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  // Handle files selected from Cloud Drive (direct attach without re-upload)
-  const handleCloudFilesSelected = (chosen: CloudDriveFile[]) => {
+  // Handle files selected from Cloud Drive (direct attach with AI safety check in public rooms)
+  const handleCloudFilesSelected = async (chosen: CloudDriveFile[]) => {
     if (!chosen.length) return;
-    const newAttachments: ChatAttachment[] = chosen.map((cf) => ({
-      name: cf.name,
-      size: cf.size,
-      type: cf.type || 'application/octet-stream',
-      data: cf.thumbnail || '',
-      url: cf.viewUrl || cf.url
-    }));
-
-    setAttachments((prev) => {
-      const combined = [...prev];
-      for (const item of newAttachments) {
-        if (!combined.some(c => c.name === item.name && c.size === item.size)) {
-          combined.push(item);
-        }
-      }
-      return combined.slice(0, 10);
-    });
-
     setIsCloudPickerOpen(false);
-    setTimeout(() => {
-      richInputRef.current?.focus();
-    }, 50);
+
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+    const blockedNames: string[] = [];
+    const safeChosen: ChatAttachment[] = [];
+
+    if (isPublicRoom) {
+      setIsCompressing(true);
+      setUploadProgressText('🛡️ AI đang kiểm tra an toàn ảnh từ Kho Cloud...');
+    }
+
+    try {
+      for (const cf of chosen) {
+        const rawAtt: ChatAttachment = {
+          name: cf.name,
+          size: cf.size,
+          type: cf.type || 'application/octet-stream',
+          data: cf.thumbnail || '',
+          url: cf.viewUrl || cf.url,
+          aiVerifiedSafe: !isPublicRoom
+        };
+
+        if (isPublicRoom && isImageFile(rawAtt)) {
+          const checkSrc = cf.thumbnail || cf.viewUrl || cf.url || '';
+          const imgMod = await moderateUploadedImage(checkSrc, cf.name);
+          if (!imgMod.safe) {
+            blockedNames.push(cf.name);
+            continue;
+          }
+          rawAtt.aiVerifiedSafe = true;
+        } else if (isPublicRoom && isVideoFile(rawAtt)) {
+          const vidMod = await moderateUploadedVideo([], cf.name, cf.viewUrl || cf.url || '');
+          if (!vidMod.safe) {
+            blockedNames.push(cf.name);
+            continue;
+          }
+          rawAtt.aiVerifiedSafe = true;
+        }
+        safeChosen.push(rawAtt);
+      }
+
+      if (blockedNames.length > 0) {
+        playShieldAlertSound();
+        setModerationWarning(`🚫 Cảnh báo: AI đã phát hiện và xóa ngay ${blockedNames.length} ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") do vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu!`);
+        setTimeout(() => setModerationWarning(null), 9000);
+      }
+
+      if (safeChosen.length > 0) {
+        setAttachments((prev) => {
+          const combined = [...prev];
+          for (const item of safeChosen) {
+            if (!combined.some(c => c.name === item.name && c.size === item.size)) {
+              combined.push(item);
+            }
+          }
+          return combined.slice(0, 10);
+        });
+      }
+    } finally {
+      setIsCompressing(false);
+      setUploadProgressText(null);
+      setTimeout(() => {
+        richInputRef.current?.focus();
+      }, 50);
+    }
   };
 
   // Handle drag & drop over chat
@@ -982,13 +1281,21 @@ const ChatRoomViewComponent: React.FC = () => {
     }
   };
 
-  // Send message - Instant 0ms response like Discord / Zalo
+  // Send message - Instant 0ms response like Discord / Zalo, with strict public-room 18+ image guard
   const handleSendMessage = async (e?: React.FormEvent, customText?: string) => {
     if (e) e.preventDefault();
     if (!currentUser) return;
 
     const rawTextOriginal = typeof customText === 'string' ? customText : inputText;
     if (!rawTextOriginal.trim() && attachments.length === 0) return;
+
+    const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
+
+    if (isPublicRoom && isCompressing) {
+      setModerationWarning('⏳ AI đang kiểm tra an toàn hình ảnh trước khi gửi lên Đại Sảnh Toàn Cầu...');
+      setTimeout(() => setModerationWarning(null), 3000);
+      return;
+    }
 
     // Security & Anti-Flood: Max 5 messages per 3 seconds
     const now = Date.now();
@@ -1004,6 +1311,53 @@ const ChatRoomViewComponent: React.FC = () => {
       setModerationWarning('⚠️ Độ dài tin nhắn vượt quá giới hạn 5,000 ký tự cho phép.');
       setTimeout(() => setModerationWarning(null), 4000);
       return;
+    }
+
+    // Verify any unverified image or video attachments in public rooms BEFORE posting to Firestore
+    let attachmentsToSend = [...attachments];
+    if (isPublicRoom && attachmentsToSend.some(att => (isImageFile(att) || isVideoFile(att)) && !att.aiVerifiedSafe)) {
+      setIsCompressing(true);
+      setUploadProgressText('🛡️ AI đang kiểm tra ảnh/video 18+/khiêu dâm trước khi gửi...');
+      const verifiedAttachments: ChatAttachment[] = [];
+      const blockedNames: string[] = [];
+
+      try {
+        for (const att of attachmentsToSend) {
+          if (isImageFile(att) && !att.aiVerifiedSafe) {
+            const imgMod = await moderateUploadedImage(att.data || att.url || '', att.name);
+            if (!imgMod.safe) {
+              blockedNames.push(att.name);
+              deleteServerUploadedFile(att.url);
+              continue;
+            }
+          } else if (isVideoFile(att) && !att.aiVerifiedSafe) {
+            const vidMod = await moderateUploadedVideo(att.data ? [att.data] : [], att.name, att.url || '');
+            if (!vidMod.safe) {
+              blockedNames.push(att.name);
+              deleteServerUploadedFile(att.url);
+              continue;
+            }
+          }
+          verifiedAttachments.push({ ...att, aiVerifiedSafe: true });
+        }
+      } finally {
+        setIsCompressing(false);
+        setUploadProgressText(null);
+      }
+
+      if (blockedNames.length > 0) {
+        attachmentsToSend = verifiedAttachments;
+        setAttachments(verifiedAttachments);
+        playShieldAlertSound();
+        setModerationWarning(
+          `🚫 Cảnh báo: AI phát hiện ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") và đã xóa ngay lập tức khỏi Đại Sảnh Toàn Cầu!`
+        );
+        setTimeout(() => setModerationWarning(null), 9000);
+
+        if (!rawTextOriginal.trim() && verifiedAttachments.length === 0) {
+          return;
+        }
+      }
     }
 
     // 1. INSTANT CLEAR & UI FEEDBACK (Immediate Visual Reaction)
@@ -1025,7 +1379,9 @@ const ChatRoomViewComponent: React.FC = () => {
     await yieldToMain();
 
     const sanitizedInput = sanitizeDisplayText(rawTextOriginal);
-    const { cleanText, hasProfanity, detectedList } = censorProfanity(sanitizedInput);
+    const { cleanText, hasProfanity, detectedList } = isPublicRoom
+      ? censorProfanity(sanitizedInput)
+      : { cleanText: sanitizedInput, hasProfanity: false, detectedList: [] };
     const textToSend = cleanText;
 
     if (hasProfanity) {
@@ -1033,7 +1389,6 @@ const ChatRoomViewComponent: React.FC = () => {
       setTimeout(() => setModerationWarning(null), 4000);
     }
 
-    const attachmentsToSend = [...attachments];
     const isSelfDestruct = selfDestructMode !== 'off' && attachmentsToSend.length > 0;
     const selfDestructDuration = selfDestructMode === '10s' ? 10 : selfDestructMode === '30s' ? 30 : 0;
 
@@ -1066,6 +1421,7 @@ const ChatRoomViewComponent: React.FC = () => {
       createdAt: effectiveIso,
       timestamp: effectiveTimeMs,
       serverTimestamp: serverTimestamp(),
+      clientTempId: tempId,
       isDevMessage: isDev,
     };
 
@@ -1116,8 +1472,8 @@ const ChatRoomViewComponent: React.FC = () => {
       setTimeout(() => setModerationWarning(null), 4000);
     }
 
-    // 5. Background AI safety audit (non-blocking, doesn't delay user typing)
-    if (sanitizedInput && sanitizedInput.length >= 2) {
+    // 5. Background AI safety audit (only in public rooms to save tokens)
+    if (sanitizedInput && sanitizedInput.length >= 2 && isPublicRoom) {
       checkContentWithAI(sanitizedInput, currentUser?.email || undefined, currentUser?.uid)
         .then(aiCheck => {
           if (aiCheck?.isFlagged && (aiCheck.severity === 'high' || aiCheck.severity === 'critical')) {
@@ -1151,6 +1507,7 @@ const ChatRoomViewComponent: React.FC = () => {
       // 2. Update active room messages with soft-delete flag so client disappears instantly without breaking or losing data
       setRecentMessages(prev => prev.filter(m => m.id !== messageId));
       setOlderMessages(prev => prev.filter(m => m.id !== messageId));
+      removeCachedRoomMessage(activeRoomId, messageId);
 
       try {
         await updateDoc(doc(db, 'rooms', activeRoomId, 'messages', messageId), {
@@ -1495,7 +1852,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="room-report-btn"
                 type="button"
                 onClick={() => setShowRoomReportModal(true)}
-                title={currentLang === 'en' ? "Report room violation / Send report to DEV" : "Báo cáo vi phạm phòng chat / Gửi phản hồi tới DEV"}
+                title={pickLang(currentLang, "Báo cáo vi phạm phòng chat / Gửi phản hồi tới DEV", "Report room violation / Send report to DEV", "举报聊天室违规 / 向 DEV 发送反馈")}
                 className="w-9 h-9 rounded-full bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/80 hover:border-rose-500/40 flex items-center justify-center shadow-sm active:scale-95 transition-all group cursor-pointer"
               >
                 <Flag className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
@@ -1527,32 +1884,44 @@ const ChatRoomViewComponent: React.FC = () => {
 
             return (
               <>
-                {/* 10-message pagination controls at top */}
+                {/* Discord / Zalo / Messenger smooth history status bar */}
                 {isLoadingOlder ? (
-                  <div className="py-2.5 flex items-center justify-center text-xs text-slate-400 gap-2 select-none animate-pulse">
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                  <div className="py-2 flex items-center justify-center text-xs text-slate-400 gap-2 select-none">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
                     <span>{t('chat.loading_older')}</span>
                   </div>
                 ) : hasMoreOlder ? (
-                  <div className="py-2 flex items-center justify-center select-none">
+                  <div className="py-1.5 flex items-center justify-center select-none">
                     <button
                       type="button"
                       onClick={handleLoadOlderMessages}
-                      className="px-3.5 py-1.5 rounded-full bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/80 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-all active:scale-95 group cursor-pointer"
+                      className="px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700/70 text-[11px] font-medium text-slate-300 hover:text-emerald-300 shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
-                      <History className="w-3.5 h-3.5 text-emerald-400 group-hover:-rotate-45 transition-transform" />
+                      <History className="w-3.5 h-3.5 text-emerald-400" />
                       <span>{t('chat.load_older_10')}</span>
                     </button>
                   </div>
                 ) : visibleMessages.length > 0 ? (
-                  <div className="py-2.5 text-center text-xs text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1.5">
+                  <div className="py-2 text-center text-xs text-slate-500 font-medium select-none border-b border-slate-800/60 mb-2 flex items-center justify-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                     <span>{t('chat.reached_beginning')}</span>
                   </div>
                 ) : null}
 
-                {/* Empty State */}
-                {visibleMessages.length === 0 && (
+                {/* Shimmer Skeleton on Uncached Room Initial Fetch */}
+                {isInitialLoadingMessages && visibleMessages.length === 0 ? (
+                  <div className="py-4 space-y-4 animate-pulse">
+                    {[0, 1, 2, 3, 4].map((row) => (
+                      <div key={row} className={`flex flex-col ${row % 2 === 1 ? 'items-end' : 'items-start'} gap-1.5`}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-slate-800" />
+                          <div className="h-3 w-24 rounded bg-slate-800" />
+                        </div>
+                        <div className={`h-10 rounded-2xl bg-slate-800/70 ${row % 2 === 0 ? 'w-64' : 'w-48'}`} />
+                      </div>
+                    ))}
+                  </div>
+                ) : visibleMessages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-slate-800 text-emerald-400 flex items-center justify-center shadow-inner">
                       <MessagesSquare className="w-6 h-6" />
@@ -1562,11 +1931,11 @@ const ChatRoomViewComponent: React.FC = () => {
                         {t('chat.empty')}
                       </p>
                       <p className="text-xs text-slate-500 max-w-sm mt-1">
-                        {currentLang === 'en' ? 'Send a message or drop files below to start the conversation!' : 'Gửi tin nhắn hoặc đính kèm tệp tin bên dưới để bắt đầu cuộc trò chuyện!'}
+                        {pickLang(currentLang, 'Gửi tin nhắn hoặc đính kèm tệp tin bên dưới để bắt đầu cuộc trò chuyện!', 'Send a message or drop files below to start the conversation!', '在下方发送消息或拖放文件即可开始对话！')}
                       </p>
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Messages Map with Group Date Timeline Dividers */}
                 {visibleMessages.map((msg, index) => {
@@ -1598,7 +1967,7 @@ const ChatRoomViewComponent: React.FC = () => {
                   const otherAttachments = msgAttachments.filter(a => !isImageFile(a) && !isVideoFile(a));
 
                   return (
-                    <React.Fragment key={msg.id ? `${msg.id}_${index}` : index}>
+                    <React.Fragment key={msg.id || `msg_${index}`}>
                       {/* Group Date Timeline Divider */}
                       {showDateHeader && (
                         <div className="flex items-center justify-center my-3 select-none">
@@ -1833,24 +2202,70 @@ const ChatRoomViewComponent: React.FC = () => {
                               : 'grid-cols-2 sm:grid-cols-3'
                         }`}>
                           {imageAttachments.map((img, idx) => {
-                            const viewUrl = img.url ? img.url.replace('/api/files/download/', '/api/files/view/') : '';
-                            const imgSrc = img.data || viewUrl || img.url;
+                            const viewUrl = img.url
+                              ? (img.url.includes('/api/telegram/download')
+                                  ? (img.url.includes('inline=true') ? img.url : `${img.url}${img.url.includes('?') ? '&' : '?'}inline=true`)
+                                  : img.url.replace('/api/files/download/', '/api/files/view/'))
+                              : '';
+                            const isGif = isGifFile(img.name || img.url || '', img.type);
+                            const imgSrc = isGif
+                              ? (viewUrl || img.url || (img.data?.startsWith('data:image/gif') ? img.data : '') || img.data || '')
+                              : (img.data || viewUrl || img.url || '');
+                            const backupSrc = img.data && img.data !== imgSrc ? img.data : (viewUrl && viewUrl !== imgSrc ? viewUrl : undefined);
+                            const zoomUrl = viewUrl || imgSrc;
                             const imgDownload = img.url || img.data;
+                            const senderMeta = memberMetaMap[msg.senderId] || memberMetaMap[msg.senderDevice];
+                            const resolvedImgSenderName = isMe
+                              ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn')
+                              : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || 'Người dùng');
+                            const resolvedImgSenderAvatar = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
                             return (
-                            <div key={idx} className="relative group rounded-xl overflow-hidden bg-black/40 border border-white/10 shadow-sm">
-                              <img
+                            <div
+                              key={img.url || `${img.name}_${idx}`}
+                              onClick={() => {
+                                if (!zoomUrl) return;
+                                openMediaInLargeViewer({
+                                  source: 'chat',
+                                  roomId: activeRoomId,
+                                  roomMedia: roomMediaGallery.unifiedMedia,
+                                  activeItem: {
+                                    id: `${msg.id}_i_${idx}`,
+                                    name: img.name || 'Ảnh',
+                                    title: img.name || 'Ảnh',
+                                    src: zoomUrl,
+                                    downloadUrl: imgDownload,
+                                    thumbnail: (img.data && img.data.startsWith('data:image/') ? img.data : imgSrc) || null,
+                                    size: img.size,
+                                    type: 'image',
+                                    mimeType: isGif ? 'image/gif' : img.type || 'image/jpeg',
+                                    isGif,
+                                    senderName: resolvedImgSenderName,
+                                    senderAvatar: resolvedImgSenderAvatar || null,
+                                    createdAt: msg.createdAt,
+                                    roomId: activeRoomId,
+                                  },
+                                });
+                              }}
+                              className="relative group rounded-xl overflow-hidden bg-black/40 border border-white/10 shadow-sm cursor-pointer"
+                            >
+                              <ChatMediaImage
                                 src={imgSrc}
+                                backupSrc={backupSrc}
                                 alt={img.name}
-                                loading="lazy"
-                                decoding="async"
+                                isGif={isGif}
+                                minHeightClass={imageAttachments.length === 1 ? 'min-h-[120px] min-w-[180px]' : 'h-32 sm:h-36'}
                                 className={`w-full ${imageAttachments.length === 1 ? 'max-h-56 sm:max-h-64' : 'h-32 sm:h-36'} object-cover hover:opacity-95 transition-opacity cursor-pointer`}
-                                onClick={() => {
-                                  if (imgSrc) {
-                                    setViewingZoomImage({ url: imgSrc, name: img.name, size: img.size });
-                                  }
+                                onDownload={(e) => {
+                                  e.stopPropagation();
+                                  downloadFileSafely(imgDownload, img.name);
                                 }}
                               />
-                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-2 flex items-center justify-between opacity-90 group-hover:opacity-100 transition-opacity">
+                              {isGif && (
+                                <span className="absolute top-2 left-2 px-1.5 py-0.5 rounded bg-black/70 text-[10px] font-bold text-emerald-300 border border-emerald-500/40 pointer-events-none z-10">
+                                  GIF
+                                </span>
+                              )}
+                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-2 flex items-center justify-between opacity-90 group-hover:opacity-100 transition-opacity z-10">
                                 <span className="text-[11px] text-white truncate max-w-[130px] font-medium drop-shadow">
                                   {img.name}
                                 </span>
@@ -1879,42 +2294,56 @@ const ChatRoomViewComponent: React.FC = () => {
                         {videoAttachments.map((vid, idx) => {
                           const viewUrl = vid.url 
                             ? (vid.url.includes('/api/telegram/download') 
-                                ? (vid.url.includes('inline=true') ? vid.url : vid.url + '&inline=true') 
+                                ? (vid.url.includes('inline=true') ? vid.url : `${vid.url}${vid.url.includes('?') ? '&' : '?'}inline=true`) 
                                 : vid.url.replace('/api/files/download/', '/api/files/view/')) 
                             : '';
-                          const vidSrc = vid.data || viewUrl || vid.url;
+                          const vidPoster = vid.data && vid.data.startsWith('data:image/') ? vid.data : undefined;
+                          const vidSrc =
+                            viewUrl ||
+                            (vid.url && !vid.url.startsWith('data:image/') ? vid.url : '') ||
+                            (vid.data && vid.data.startsWith('data:video/') ? vid.data : '');
                           const vidDownload = vid.url 
-                            ? vid.url.replace('/api/files/view/', '/api/files/download/').replace('&inline=true', '') 
-                            : vid.data;
+                            ? vid.url.replace('/api/files/view/', '/api/files/download/').replace(/[?&]inline=true/g, '') 
+                            : vidSrc;
+                          const senderMeta = memberMetaMap[msg.senderId] || memberMetaMap[msg.senderDevice];
+                          const resolvedSenderName = isMe
+                            ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn')
+                            : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || 'Người dùng');
+                          const resolvedSenderAvatar = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
+                          const openVideoPlayer = () => {
+                            if (!vidSrc) return;
+                            openMediaInLargeViewer({
+                              source: 'chat',
+                              roomId: activeRoomId,
+                              roomMedia: roomMediaGallery.unifiedMedia,
+                              activeItem: {
+                                id: `${msg.id}_v_${idx}`,
+                                name: vid.name || 'Video',
+                                title: vid.name || 'Video',
+                                src: vidSrc,
+                                downloadUrl: vidDownload,
+                                thumbnail: vidPoster || null,
+                                size: vid.size,
+                                type: 'video',
+                                mimeType: vid.type || 'video/mp4',
+                                senderName: resolvedSenderName,
+                                senderAvatar: resolvedSenderAvatar || null,
+                                createdAt: msg.createdAt,
+                                roomId: activeRoomId,
+                              },
+                            });
+                          };
                           return (
-                            <div key={idx} className="rounded-xl overflow-hidden bg-black/75 border border-slate-700/80 shadow-md">
-                              <div className="relative group/vid bg-black max-h-80 w-full flex items-center justify-center">
-                                <video
-                                  src={vidSrc}
-                                  controls
-                                  preload="metadata"
-                                  playsInline
-                                  className="w-full max-h-80 object-contain rounded-t-xl"
-                                />
-                              </div>
-                              <div className="p-2 bg-slate-900/95 border-t border-slate-800 flex items-center justify-between gap-2">
-                                <div className="min-w-0 flex items-center gap-2">
-                                  <Film className="w-4 h-4 text-emerald-400 shrink-0" />
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-semibold text-white truncate max-w-[200px]">{vid.name}</p>
-                                    <p className="text-[10px] text-slate-400 font-mono">{formatFileSize(vid.size)} • Video</p>
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => downloadFileSafely(vidDownload, vid.name)}
-                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-white transition-colors shrink-0 cursor-pointer shadow-sm"
-                                  title="Tải video về máy"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
+                            <ChatInlineVideoPlayer
+                              key={vidSrc || `${vid.name}_${idx}`}
+                              src={vidSrc}
+                              downloadUrl={vidDownload}
+                              poster={vidPoster}
+                              fileName={vid.name || 'Video'}
+                              fileSize={vid.size}
+                              messageId={`${msg.id}_v_${idx}`}
+                              onOpenFullPlayer={openVideoPlayer}
+                            />
                           );
                         })}
                       </div>
@@ -1961,7 +2390,10 @@ const ChatRoomViewComponent: React.FC = () => {
                         className="text-xs sm:text-[13px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-w-full chat-message-text select-text cursor-text [user-select:text] selection:bg-emerald-500 selection:text-slate-950"
                         data-chat-message="true"
                       >
-                        {renderClickableText(getCachedCleanMessageText(msg.text), isMe)}
+                        {renderClickableText(
+                          getCachedCleanMessageText(msg.text, activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true)),
+                          isMe
+                        )}
                       </div>
                     )}
                   </div>
@@ -1974,17 +2406,27 @@ const ChatRoomViewComponent: React.FC = () => {
     })()}
           <div ref={messagesEndRef} />
 
-          {/* Quick Jump to Bottom Floating Button */}
-          {showScrollBottomBtn && (
+          {/* Discord / Zalo / Messenger Quick Jump to Bottom / New Message Pill */}
+          {(showScrollBottomBtn || isScrolledUpFar || unreadNewCount > 0) && (
             <button
               id="scroll-to-bottom-btn"
               type="button"
               onClick={() => scrollToBottom(true)}
-              className="sticky bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-800/95 hover:bg-emerald-600 text-slate-200 hover:text-white border border-slate-700 hover:border-emerald-500 shadow-xl shadow-black/40 text-xs font-semibold backdrop-blur-sm transition-all animate-in fade-in slide-in-from-bottom-2 duration-150 z-20 cursor-pointer"
+              className={`sticky bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3.5 py-2 rounded-full border shadow-xl shadow-black/40 text-xs font-semibold backdrop-blur-sm transition-all animate-in fade-in slide-in-from-bottom-2 duration-150 z-20 cursor-pointer ${
+                unreadNewCount > 0 || showScrollBottomBtn
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/60'
+                  : 'bg-slate-800/95 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700'
+              }`}
               title="Cuộn xuống tin nhắn mới nhất"
             >
-              <ChevronDown className="w-4 h-4 text-emerald-400 hover:text-white animate-bounce" />
-              <span>Tin nhắn mới nhất</span>
+              <ChevronDown className={`w-4 h-4 ${unreadNewCount > 0 || showScrollBottomBtn ? 'text-white animate-bounce' : 'text-emerald-400'}`} />
+              <span>
+                {unreadNewCount > 0
+                  ? `${unreadNewCount} tin nhắn mới`
+                  : showScrollBottomBtn
+                  ? 'Tin nhắn mới nhất'
+                  : 'Xuống cuối'}
+              </span>
             </button>
           )}
         </div>
@@ -2011,7 +2453,11 @@ const ChatRoomViewComponent: React.FC = () => {
               {attachments.map((att, idx) => {
                 const isImg = isImageFile(att);
                 const isVid = isVideoFile(att);
-                const viewUrl = att.url ? att.url.replace('/api/files/download/', '/api/files/view/') : '';
+                const viewUrl = att.url
+                  ? (att.url.includes('/api/telegram/download')
+                      ? (att.url.includes('inline=true') ? att.url : `${att.url}${att.url.includes('?') ? '&' : '?'}inline=true`)
+                      : att.url.replace('/api/files/download/', '/api/files/view/'))
+                  : '';
                 const displaySrc = att.data || viewUrl;
                 return (
                   <div 
@@ -2050,24 +2496,50 @@ const ChatRoomViewComponent: React.FC = () => {
           </div>
         )}
 
-        {/* Moderation Warning Toast/Banner (Roblox-styled cyan italic message box as in image) */}
-        {moderationWarning && (
-          <div className="mx-4 mb-2 p-3 rounded-xl bg-[#020712] border border-[#1e3a5f] text-cyan-300 italic text-xs sm:text-sm flex items-center justify-between gap-3 animate-in fade-in duration-200 shadow-xl">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-3.5 h-3.5 text-cyan-300" />
+        {/* Moderation Warning Toast/Banner */}
+        {moderationWarning && (() => {
+          const isSevereBlock = moderationWarning.includes('🚫') || moderationWarning.includes('18+') || moderationWarning.includes('khiêu dâm');
+          return (
+            <div className={`mx-4 mb-2 p-3 rounded-xl text-xs sm:text-sm flex items-center justify-between gap-3 animate-in fade-in duration-200 shadow-xl ${
+              isSevereBlock
+                ? 'bg-rose-950/95 border border-rose-500/80 text-rose-100'
+                : 'bg-[#020712] border border-[#1e3a5f] text-cyan-300 italic'
+            }`}>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                  isSevereBlock
+                    ? 'bg-rose-500/25 border border-rose-400/50 animate-pulse'
+                    : 'bg-cyan-500/20 border border-cyan-500/30'
+                }`}>
+                  {isSevereBlock ? (
+                    <ShieldAlert className="w-4 h-4 text-rose-300" />
+                  ) : (
+                    <AlertTriangle className="w-3.5 h-3.5 text-cyan-300" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  {isSevereBlock && (
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300 mb-0.5">
+                      Cảnh báo kiểm duyệt nội dung 18+ (Ảnh / Video)
+                    </div>
+                  )}
+                  <span className={`font-sans leading-relaxed break-words ${isSevereBlock ? 'text-rose-100 font-medium' : 'italic text-cyan-300'}`}>
+                    {moderationWarning}
+                  </span>
+                </div>
               </div>
-              <span className="font-sans italic text-cyan-300 leading-relaxed break-words">{moderationWarning}</span>
+              <button
+                type="button"
+                onClick={() => setModerationWarning(null)}
+                className={`p-1 rounded-lg shrink-0 transition-colors ${
+                  isSevereBlock ? 'hover:bg-rose-500/30 text-rose-300 hover:text-white' : 'hover:bg-cyan-500/20 text-slate-400 hover:text-white'
+                }`}
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setModerationWarning(null)}
-              className="p-1 rounded-lg hover:bg-cyan-500/20 text-slate-400 hover:text-white shrink-0 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Self-Destruct Active Indicator Banner */}
         {selfDestructMode !== 'off' && (
@@ -2184,7 +2656,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="attach-file-btn"
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                title={currentLang === 'en' ? "Attach files from computer / phone (up to 2GB)" : "Đính kèm tệp tin từ máy tính / điện thoại (tài liệu, ZIP, ứng dụng...)"}
+                title={pickLang(currentLang, "Đính kèm tệp tin từ máy tính / điện thoại (tài liệu, ZIP, ứng dụng...)", "Attach files from computer / phone (up to 2GB)", "从电脑/手机添加附件（最高 2GB）")}
                 className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 transition-colors shrink-0 cursor-pointer"
               >
                 <Paperclip className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2195,7 +2667,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="attach-cloud-btn"
                 type="button"
                 onClick={() => setIsCloudPickerOpen(true)}
-                title={currentLang === 'en' ? "Attach files from Cloud Drive (zero upload bandwidth)" : "Chọn tệp từ Kho Cloud (gửi ngay không tốn dung lượng upload)"}
+                title={pickLang(currentLang, "Chọn tệp từ Kho Cloud (gửi ngay không tốn dung lượng upload)", "Attach files from Cloud Drive (zero upload bandwidth)", "从云盘选择文件（免上传流量秒发）")}
                 className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-sky-400 border border-slate-700 hover:border-sky-500/40 transition-all shrink-0 cursor-pointer group"
               >
                 <Cloud className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400 group-hover:scale-110 transition-transform" />

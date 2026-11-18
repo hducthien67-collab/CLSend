@@ -56,6 +56,8 @@ export const MobileLayout: React.FC<MobileLayoutProps> = ({
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const pendingCount = snapshot.docs.filter(d => d.data()?.status === 'pending').length;
       setIncomingCount(pendingCount);
+    }, (err) => {
+      console.warn('MobileLayout transfers listener notice:', err);
     });
 
     return () => unsubscribe();

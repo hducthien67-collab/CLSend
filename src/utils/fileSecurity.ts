@@ -10,6 +10,8 @@
  * 7. Content-Disposition CRLF Header Injection defense
  */
 
+import { pickActiveLang } from '../context/LanguageContext';
+
 // Comprehensive blacklist of dangerous executable and script file extensions
 export const DANGEROUS_EXTENSIONS = new Set([
   'exe', 'bat', 'cmd', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'msc',
@@ -112,7 +114,11 @@ export function inspectFileSecurity(file: { name: string; size?: number; type?: 
       isSafe: false,
       sanitizedName,
       category: 'executable_blocked',
-      error: `Định dạng tệp .${lastExt} là tệp thực thi/mã lệnh nguy hiểm và đã bị ClSend từ chối tải lên để bảo vệ người dùng.`
+      error: pickActiveLang(
+        'Định dạng tệp .{ext} là tệp thực thi/mã lệnh nguy hiểm và đã bị ClSend từ chối tải lên để bảo vệ người dùng.',
+        'File format .{ext} is a dangerous executable/script and was blocked by ClSend to protect users.',
+        '文件格式 .{ext} 属于危险的可执行/脚本文件，已被 ClSend 拦截上传以保障安全。'
+      ).replace('{ext}', lastExt)
     };
   }
 
@@ -125,7 +131,11 @@ export function inspectFileSecurity(file: { name: string; size?: number; type?: 
           isSafe: false,
           sanitizedName,
           category: 'double_ext_blocked',
-          error: `Phát hiện dấu hiệu ngụy trang đuôi tệp kép độc hại (.${subExt}). Tệp đã bị từ chối tải lên.`
+          error: pickActiveLang(
+            'Phát hiện dấu hiệu ngụy trang đuôi tệp kép độc hại (.{ext}). Tệp đã bị từ chối tải lên.',
+            'Detected malicious double-extension spoofing (.{ext}). Upload was rejected.',
+            '检测到恶意双扩展名伪装 (.{ext})，文件已被拒绝上传。'
+          ).replace('{ext}', subExt)
         };
       }
     }
@@ -137,7 +147,11 @@ export function inspectFileSecurity(file: { name: string; size?: number; type?: 
       isSafe: false,
       sanitizedName,
       category: 'executable_blocked',
-      error: `Loại tệp (${file.type}) không được phép tải lên hệ thống.`
+      error: pickActiveLang(
+        'Loại tệp ({type}) không được phép tải lên hệ thống.',
+        'File type ({type}) is not allowed to be uploaded to the system.',
+        '系统不允许上传此文件类型 ({type})。'
+      ).replace('{type}', file.type)
     };
   }
 

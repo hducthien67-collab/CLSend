@@ -40,101 +40,40 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const categories = isEn ? [
+  const categories = [
     {
       id: 'profanity_bypass',
-      title: 'Profanity Filter Bypass / Personal Insults',
-      desc: 'Using symbols, dots, or disguised slang to curse or insult users'
+      title: pick('Lách luật chửi bậy / Xúc phạm danh dự', 'Profanity Filter Bypass / Personal Insults', '绕过脏话过滤 / 人身侮辱'),
+      desc: pick('Dùng ký tự đặc biệt, dấu chấm hoặc từ ngữ lách luật để thô tục, hạ nhục', 'Using symbols, dots, or disguised slang to curse or insult users', '使用特殊符号、句号或谐音伪装粗俗辱骂他人')
     },
     {
       id: 'nsfw_18',
-      title: 'Explicit 18+ or Pornographic Media',
-      desc: 'Sending explicit images, adult videos, or inappropriate content'
+      title: pick('Nội dung hoặc ảnh 18+ khiêu dâm', 'Explicit 18+ or Pornographic Media', '18+ 成人色情或低俗内容'),
+      desc: pick('Hình ảnh, video hoặc văn bản gợi dục, đồi trụy không phù hợp', 'Sending explicit images, adult videos, or inappropriate content', '发送不雅露骨图片、成人视频或低俗诱导文字')
     },
     {
       id: 'harassment',
-      title: 'Harassment / Threats / Hate Speech',
-      desc: 'Bullying, intimidating, or discriminating against room members'
+      title: pick('Quấy rối / Đe dọa / Công kích', 'Harassment / Threats / Hate Speech', '骚扰 / 威胁 / 恶意攻击'),
+      desc: pick('Có hành vi bắt nạt, đe dọa, kỳ thị hoặc quấy phá thành viên khác', 'Bullying, intimidating, or discriminating against room members', '存在霸凌、恐吓、地域/群体歧视或干扰他人行为')
     },
     {
       id: 'spam',
-      title: 'Spamming / Flooding / Bandwidth Abuse',
-      desc: 'Rapidly blasting identical messages or overloading the room'
+      title: pick('Spam tin nhắn / Phá hoại phòng chat', 'Spamming / Flooding / Bandwidth Abuse', '刷屏骚扰 / 破坏聊天室秩序'),
+      desc: pick('Gửi dồn dập, dùng script phá rối hoặc làm nghẽn kênh truyền', 'Rapidly blasting identical messages or overloading the room', '连续刷屏、使用脚本恶意捣乱或拥堵传输通道')
     },
     {
       id: 'impersonation',
-      title: 'Admin / Developer Impersonation & Scams',
-      desc: 'Claiming to be staff or asking for personal credentials'
+      title: pick('Mạo danh Admin (Quản trị viên) & Lừa đảo', 'Admin / Developer Impersonation & Scams', '冒充管理员 (Admin/Dev) 及诈骗'),
+      desc: pick('Giả danh lập trình viên, ban quản trị để đòi mã PIN hoặc lừa đảo', 'Claiming to be staff or asking for personal credentials', '假冒开发人员或管理团队索要 PIN 码或实施欺诈')
     },
     {
       id: 'other',
-      title: 'Other Community Violations',
-      desc: 'Any behavior that disrupts the chat experience'
-    }
-  ] : isZh ? [
-    {
-      id: 'profanity_bypass',
-      title: '绕过脏话过滤 / 人身侮辱',
-      desc: '使用特殊符号、句号或谐音伪装粗俗辱骂他人'
-    },
-    {
-      id: 'nsfw_18',
-      title: '18+ 成人色情或低俗内容',
-      desc: '发送不雅露骨图片、成人视频或低俗诱导文字'
-    },
-    {
-      id: 'harassment',
-      title: '骚扰 / 威胁 / 恶意攻击',
-      desc: '存在霸凌、恐吓、地域/群体歧视或干扰他人行为'
-    },
-    {
-      id: 'spam',
-      title: '刷屏骚扰 / 破坏聊天室秩序',
-      desc: '连续刷屏、使用脚本恶意捣乱或拥堵传输通道'
-    },
-    {
-      id: 'impersonation',
-      title: '冒充管理员 (Admin/Dev) 及诈骗',
-      desc: '假冒开发人员或管理团队索要 PIN 码或实施欺诈'
-    },
-    {
-      id: 'other',
-      title: '其他违规行为',
-      desc: '任何影响聊天室安全与良好氛围的不当行为'
-    }
-  ] : [
-    {
-      id: 'profanity_bypass',
-      title: 'Lách luật chửi bậy / Xúc phạm danh dự',
-      desc: 'Dùng ký tự đặc biệt, dấu chấm hoặc từ ngữ lách luật để thô tục, hạ nhục'
-    },
-    {
-      id: 'nsfw_18',
-      title: 'Nội dung hoặc ảnh 18+ khiêu dâm',
-      desc: 'Hình ảnh, video hoặc văn bản gợi dục, đồi trụy không phù hợp'
-    },
-    {
-      id: 'harassment',
-      title: 'Quấy rối / Đe dọa / Công kích',
-      desc: 'Có hành vi bắt nạt, đe dọa, kỳ thị hoặc quấy phá thành viên khác'
-    },
-    {
-      id: 'spam',
-      title: 'Spam tin nhắn / Phá hoại phòng chat',
-      desc: 'Gửi dồn dập, dùng script phá rối hoặc làm nghẽn kênh truyền'
-    },
-    {
-      id: 'impersonation',
-      title: 'Mạo danh Admin (Quản trị viên) & Lừa đảo',
-      desc: 'Giả danh lập trình viên, ban quản trị để đòi mã PIN hoặc lừa đảo'
-    },
-    {
-      id: 'other',
-      title: 'Hành vi vi phạm khác',
-      desc: 'Bất kỳ hành vi không lành mạnh nào ảnh hưởng đến an toàn phòng chat'
+      title: pick('Hành vi vi phạm khác', 'Other Community Violations', '其他违规行为'),
+      desc: pick('Bất kỳ hành vi không lành mạnh nào ảnh hưởng đến an toàn phòng chat', 'Any behavior that disrupts the chat experience', '任何影响聊天室安全与良好氛围的不当行为')
     }
   ];
 
@@ -171,7 +110,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
       }, 2000);
     } catch (err) {
       console.error('Submit report error:', err);
-      alert(pick('Không thể gửi báo cáo, vui lòng thử lại sau.', 'Failed to submit report. Please try again.', '无法提交举报，请稍后重试。'));
+      setErrorMsg(pick('Không thể gửi báo cáo, vui lòng thử lại sau.', 'Failed to submit report. Please try again.', '无法提交举报，请稍后重试。'));
       setSubmitting(false);
     }
   };
@@ -194,7 +133,7 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
                 {pick('Báo Cáo Vi Phạm Tới DEV / Admin', 'Report Violation to DEV / Admin', '向开发者 / 管理员举报违规')}
               </h3>
               <p className="text-xs text-slate-400 truncate max-w-xs">
-                {pick(`Phòng: ${roomName}`, `Room: ${roomName}`, `房间：${roomName}`)}
+                {`${pick('Phòng:', 'Room:', '房间：')} ${roomName}`}
               </p>
             </div>
           </div>
@@ -288,6 +227,12 @@ export const ReportIncidentModal: React.FC<ReportIncidentModalProps> = ({
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 focus:border-rose-500/60 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none resize-none transition-colors [scrollbar-width:thin] [scrollbar-color:rgba(100,116,139,0.5)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-slate-700/80 [&::-webkit-scrollbar-thumb]:rounded-full"
               />
             </div>
+
+            {errorMsg && (
+              <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
+                {errorMsg}
+              </div>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage, pickLang } from '../../context/LanguageContext';
 import { db } from '../../firebase/config';
 import { doc, setDoc } from 'firebase/firestore';
 import { 
@@ -18,8 +19,10 @@ interface GoogleDisplayNameModalProps {
 
 export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ isOpen, onClose }) => {
   const { currentUser, userProfile, updateDisplayName, updateSettings } = useAuth();
+  const { currentLang } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh?: T) => pickLang(currentLang, vi, en, zh);
   
-  const initialName = currentUser?.displayName || userProfile?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : 'Người dùng CloudSend');
+  const initialName = currentUser?.displayName || userProfile?.displayName || (currentUser?.email ? currentUser.email.split('@')[0] : pick('Người dùng CloudSend', 'CloudSend User', 'CloudSend 用户'));
   const [displayNameInput, setDisplayNameInput] = useState(initialName);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -30,7 +33,7 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
     if (e) e.preventDefault();
     const cleanName = displayNameInput.trim();
     if (!cleanName) {
-      setErrorMsg('Vui lòng nhập tên hiển thị.');
+      setErrorMsg(pick('Vui lòng nhập tên hiển thị.', 'Please enter a display name.', '请输入显示名称。'));
       return;
     }
 
@@ -47,7 +50,7 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
       }
       onClose();
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Không thể lưu tên hiển thị. Vui lòng thử lại.');
+      setErrorMsg(err?.message || pick('Không thể lưu tên hiển thị. Vui lòng thử lại.', 'Unable to save display name. Please try again.', '无法保存显示名称，请重试。'));
     } finally {
       setIsSaving(false);
     }
@@ -84,20 +87,22 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
             <UserCheck className="w-8 h-8 text-emerald-400" />
           </div>
           <h2 className="text-xl font-black text-white tracking-tight">
-            Thiết Lập Tên Hiển Thị
+            {pick('Thiết Lập Tên Hiển Thị', 'Set Up Display Name', '设置显示名称')}
           </h2>
           <p className="text-xs text-slate-300">
-            Chào mừng bạn gia nhập <strong className="text-emerald-400 font-semibold">CloudSend Relay</strong> qua tài khoản Google!
+            {pick('Chào mừng bạn gia nhập', 'Welcome to', '欢迎使用')}{' '}
+            <strong className="text-emerald-400 font-semibold">CloudSend Relay</strong>{' '}
+            {pick('qua tài khoản Google!', 'via your Google account!', '（通过 Google 账号）！')}
           </p>
         </div>
 
         {/* Google Account Summary Card (Read-only) */}
         <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
           <div className="flex items-center justify-between text-[11px] text-slate-400">
-            <span>Tài khoản Google (Tên đăng nhập):</span>
+            <span>{pick('Tài khoản Google (Tên đăng nhập):', 'Google Account (Sign-in ID):', 'Google 账号（登录名）：')}</span>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 font-bold border border-emerald-500/30 flex items-center gap-1">
               <ShieldCheck className="w-3 h-3 text-emerald-400" />
-              Chính chủ
+              {pick('Chính chủ', 'Verified', '已认证')}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -117,7 +122,7 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
                 {currentUser.email}
               </div>
               <div className="text-[11px] text-slate-400 truncate">
-                Đăng nhập an toàn qua Google OAuth 2.0
+                {pick('Đăng nhập an toàn qua Google OAuth 2.0', 'Signed in securely via Google OAuth 2.0', '通过 Google OAuth 2.0 安全登录')}
               </div>
             </div>
           </div>
@@ -129,10 +134,10 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Nhập Tên Hiển Thị & Tên Thiết Bị:</span>
+                <span>{pick('Nhập Tên Hiển Thị & Tên Thiết Bị:', 'Enter Display & Device Name:', '输入显示名称与设备名称：')}</span>
               </label>
               <span className="text-[10px] text-emerald-400 font-bold">
-                Chỉ tên này mới được chỉnh
+                {pick('Chỉ tên này mới được chỉnh', 'Editable display name', '仅可修改此名称')}
               </span>
             </div>
             
@@ -142,12 +147,12 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
               autoFocus
               value={displayNameInput}
               onChange={(e) => setDisplayNameInput(e.target.value)}
-              placeholder="Ví dụ: Hoàng Đức Thiện, Laptop Pro..."
+              placeholder={pick('Ví dụ: Alex, Laptop Pro...', 'e.g. Alex, Laptop Pro...', '例如：Alex, Laptop Pro...')}
               className="w-full px-4 py-3 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded-xl text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-all shadow-inner"
             />
             
             <p className="text-[11px] text-slate-400 italic">
-              * Tên này sẽ hiển thị với bạn bè khi gửi tệp và tham gia phòng trò chuyện. Bạn có thể đổi lại bất cứ lúc nào trong Cài Đặt.
+              {pick('* Tên này sẽ hiển thị với bạn bè khi gửi tệp và tham gia phòng trò chuyện. Bạn có thể đổi lại bất cứ lúc nào trong Cài Đặt.', '* This name will appear to friends when sending files and joining chat rooms. You can change it anytime in Settings.', '* 此名称将在发送文件及聊天室中向好友展示，可随时在设置中更改。')}
             </p>
           </div>
 
@@ -164,7 +169,7 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
               onClick={handleSkip}
               className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold transition-colors order-2 sm:order-1"
             >
-              Dùng tên mặc định
+              {pick('Dùng tên mặc định', 'Use Default Name', '使用默认名称')}
             </button>
 
             <button
@@ -173,10 +178,10 @@ export const GoogleDisplayNameModal: React.FC<GoogleDisplayNameModalProps> = ({ 
               className="w-full sm:flex-1 py-2.5 px-5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 disabled:opacity-50 order-1 sm:order-2 cursor-pointer"
             >
               {isSaving ? (
-                <span>Đang lưu...</span>
+                <span>{pick('Đang lưu...', 'Saving...', '保存中...')}</span>
               ) : (
                 <>
-                  <span>Lưu & Bắt Đầu</span>
+                  <span>{pick('Lưu & Bắt Đầu', 'Save & Get Started', '保存并开始')}</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}

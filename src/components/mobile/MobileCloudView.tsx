@@ -44,7 +44,7 @@ import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { MobileBottomSheet } from './MobileBottomSheet';
 import { openMediaInLargeViewer } from '../../utils/mediaViewerSession';
-import { useLanguage } from '../../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../../context/LanguageContext';
 import { getVideoWebWatchUrl, openVideoInWebTab } from '../../utils/videoWatch';
 import { PersistentVideoPlayerModal } from '../PersistentVideoPlayerModal';
 import { saveVideoToIndexedDB } from '../AllInOneVideoPlayer';
@@ -55,7 +55,8 @@ const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
 
 export const MobileCloudView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [files, setFiles] = useState<CloudDriveFile[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'image' | 'video' | 'audio' | 'document' | 'favorite'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -102,6 +103,9 @@ export const MobileCloudView: React.FC = () => {
     setUploadPercent(10);
     setIsUploadSheetOpen(false);
 
+    let savedCount = 0;
+    let failedCount = 0;
+
     try {
       for (let i = 0; i < fileList.length; i++) {
         const file = fileList[i];
@@ -125,15 +129,20 @@ export const MobileCloudView: React.FC = () => {
             new Promise<null>((res) => setTimeout(() => res(null), 800))
           ]);
         } catch {
-          const fallback = await createClientFallbackFileInfo(file);
-          fileUrl = fallback.url;
-          fileViewUrl = fallback.viewUrl || fallback.url;
-          thumb = fallback.thumbnail || await thumbPromise;
+          try {
+            const fallback = await createClientFallbackFileInfo(file);
+            fileUrl = fallback.url;
+            fileViewUrl = fallback.viewUrl || fallback.url;
+            thumb = fallback.thumbnail || await thumbPromise;
+          } catch {
+            fileUrl = '';
+          }
         }
 
         // Safety check: Never save empty URL docs to Firestore
         if (!fileUrl || !fileUrl.trim()) {
           console.warn(`Không thể tải tệp "${file.name}" lên Cloud, bỏ qua lưu trữ rỗng`);
+          failedCount++;
           continue;
         }
 
@@ -150,6 +159,7 @@ export const MobileCloudView: React.FC = () => {
 
         if (!safeUrl || !safeUrl.trim()) {
           console.warn(`Không thể tải tệp "${file.name}" lên Cloud do liên kết rỗng`);
+          failedCount++;
           continue;
         }
 
@@ -159,7 +169,7 @@ export const MobileCloudView: React.FC = () => {
           id: docId,
           userId: currentUser.uid,
           userEmail: (currentUser.email || '').trim().toLowerCase(),
-          userName: currentUser.displayName || settings?.deviceName || 'Người dùng',
+          userName: currentUser.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户'),
           name: file.name,
           size: file.size,
           type: file.type || 'application/octet-stream',
@@ -182,12 +192,23 @@ export const MobileCloudView: React.FC = () => {
           storeFileBlobLocally(docId, file).catch(() => {});
           storeFileBlobLocally(file.name, file).catch(() => {});
         }
+        savedCount++;
       }
 
-      showToast(`Đã lưu ${fileList.length} tệp vào Kho Cloud!`);
+      if (savedCount === 0) {
+        showToast(pick('Không thể lưu tệp lên Cloud. Vui lòng kiểm tra kết nối và thử lại.', 'Could not save files to Cloud. Please check connection and try again.', '无法将文件保存到云盘，请检查网络连接后重试。'));
+      } else if (failedCount > 0) {
+        showToast(
+          pick('Đã lưu {saved}/{total} tệp vào Kho Cloud.', 'Saved {saved}/{total} file(s) to Cloud Drive.', '已将 {saved}/{total} 个文件保存到云盘。')
+            .replace('{saved}', String(savedCount))
+            .replace('{total}', String(fileList.length))
+        );
+      } else {
+        showToast(pick('Đã lưu {count} tệp vào Kho Cloud!', 'Saved {count} file(s) to Cloud Drive!', '已保存 {count} 个文件到云盘！').replace('{count}', String(savedCount)));
+      }
     } catch (err) {
       console.error('Upload error:', err);
-      showToast('Lỗi khi tải tệp lên Cloud.');
+      showToast(pick('Lỗi khi tải tệp lên Cloud.', 'Error uploading files to Cloud.', '上传文件到云盘时出错。'));
     } finally {
       setIsUploading(false);
       setUploadPercent(null);
@@ -201,7 +222,7 @@ export const MobileCloudView: React.FC = () => {
       await updateDoc(doc(db, 'cloud_files', file.id), {
         isFavorite: !file.isFavorite
       });
-      showToast(file.isFavorite ? 'Đã bỏ yêu thích' : 'Đã thêm vào yêu thích');
+      showToast(file.isFavorite ? pick('Đã bỏ yêu thích', 'Removed from favorites', '已取消收藏') : pick('Đã thêm vào yêu thích', 'Added to favorites', '已添加到收藏'));
     } catch {}
   };
 
@@ -209,9 +230,9 @@ export const MobileCloudView: React.FC = () => {
     try {
       await deleteDoc(doc(db, 'cloud_files', file.id));
       setSelectedFileAction(null);
-      showToast(`Đã xóa "${file.name}" khỏi Cloud`);
+      showToast(pick('Đã xóa "{name}" khỏi Cloud', 'Removed "{name}" from Cloud', '已从云盘删除 "{name}"').replace('{name}', file.name));
     } catch {
-      showToast('Không thể xóa tệp');
+      showToast(pick('Không thể xóa tệp', 'Unable to delete file', '无法删除文件'));
     }
   };
 
@@ -330,10 +351,10 @@ export const MobileCloudView: React.FC = () => {
           type="button"
           onClick={() => setIsPersistentVideoModalOpen(true)}
           className="px-2.5 py-1 rounded-lg font-medium text-[11px] whitespace-nowrap bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shrink-0 cursor-pointer"
-          title="Khung xem Video (F5 không mất)"
+          title={pick('Khung xem Video (F5 không mất)', 'Video Frame (Persists on reload)', '视频播放器（刷新不丢失）')}
         >
           <Film className="w-3 h-3 text-emerald-400" />
-          <span>Khung Video</span>
+          <span>{pick('Khung Video', 'Video Frame', '视频框架')}</span>
         </button>
       </div>
 
@@ -343,7 +364,7 @@ export const MobileCloudView: React.FC = () => {
           <div className="flex items-center justify-between text-xs">
             <span className="text-emerald-400 font-bold flex items-center gap-1 text-[11px]">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Đang lưu tệp lên Cloud...
+              {pick('Đang lưu tệp lên Cloud...', 'Saving file to Cloud...', '正在保存文件到云盘...')}
             </span>
             <span className="font-mono text-white font-bold text-[11px]">{uploadPercent || 10}%</span>
           </div>
@@ -357,8 +378,8 @@ export const MobileCloudView: React.FC = () => {
       {filteredFiles.length === 0 ? (
         <div className="flex-1 min-h-[160px] rounded-xl border border-dashed border-slate-800 bg-slate-900/30 flex flex-col items-center justify-center p-5 text-center space-y-1.5">
           <HardDrive className="w-7 h-7 text-slate-600" />
-          <p className="text-[11px] font-bold text-slate-300">Chưa có tệp tin nào trong mục này</p>
-          <p className="text-[10px] text-slate-500">Bấm dấu (+) bên dưới để tải ảnh hoặc tệp lên Cloud.</p>
+          <p className="text-[11px] font-bold text-slate-300">{pick('Chưa có tệp tin nào trong mục này', 'No files in this category yet', '此分类中暂无文件')}</p>
+          <p className="text-[10px] text-slate-500">{pick('Bấm dấu (+) bên dưới để tải ảnh hoặc tệp lên Cloud.', 'Tap (+) below to upload photos or files to Cloud.', '点击下方 (+) 按钮上传图片或文件到云盘。')}</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
@@ -411,7 +432,7 @@ export const MobileCloudView: React.FC = () => {
                       setSelectedFileAction(file);
                     }}
                     className="p-1 rounded text-slate-400 hover:text-white shrink-0"
-                    title="Tùy chọn tệp"
+                    title={pick('Tùy chọn tệp', 'File options', '文件选项')}
                   >
                     <MoreVertical className="w-3 h-3" />
                   </button>
@@ -431,7 +452,7 @@ export const MobileCloudView: React.FC = () => {
         type="button"
         onClick={() => setIsUploadSheetOpen(true)}
         className="fixed right-4 bottom-20 z-40 w-13 h-13 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 flex items-center justify-center shadow-xl shadow-emerald-500/25 active:scale-90 transition-all cursor-pointer"
-        title="Tải tệp lên Cloud"
+        title={pick('Tải tệp lên Cloud', 'Upload to Cloud', '上传到云盘')}
       >
         <Plus className="w-7 h-7 stroke-[2.5]" />
       </button>
@@ -440,8 +461,8 @@ export const MobileCloudView: React.FC = () => {
       <MobileBottomSheet
         isOpen={isUploadSheetOpen}
         onClose={() => setIsUploadSheetOpen(false)}
-        title="Tải Lên Kho Cloud"
-        subtitle="Chọn nguồn tệp bạn muốn lưu trữ:"
+        title={pick('Tải Lên Kho Cloud', 'Upload to Cloud Drive', '上传到云盘')}
+        subtitle={pick('Chọn nguồn tệp bạn muốn lưu trữ:', 'Choose a file source to store:', '选择要存储的文件来源：')}
         icon={<Upload className="w-5 h-5 text-emerald-400" />}
       >
         <div className="grid grid-cols-2 gap-2.5 pt-1">
@@ -456,7 +477,7 @@ export const MobileCloudView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
               <Camera className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Chụp ảnh / Quay video</span>
+            <span className="text-xs font-bold text-white">{pick('Chụp ảnh / Quay video', 'Take Photo / Video', '拍照 / 录像')}</span>
           </button>
 
           <button
@@ -470,7 +491,7 @@ export const MobileCloudView: React.FC = () => {
             <div className="w-10 h-10 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center">
               <FolderPlus className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white">Chọn tệp từ máy</span>
+            <span className="text-xs font-bold text-white">{pick('Chọn tệp từ máy', 'Choose from device', '从设备选择文件')}</span>
           </button>
         </div>
       </MobileBottomSheet>
@@ -479,8 +500,8 @@ export const MobileCloudView: React.FC = () => {
       <MobileBottomSheet
         isOpen={Boolean(selectedFileAction)}
         onClose={() => setSelectedFileAction(null)}
-        title={selectedFileAction?.name || 'Chi tiết tệp'}
-        subtitle={selectedFileAction ? `${formatFileSize(selectedFileAction.size)} • ${new Date(selectedFileAction.createdAt).toLocaleDateString('vi-VN')}` : ''}
+        title={selectedFileAction?.name || pick('Chi tiết tệp', 'File details', '文件详情')}
+        subtitle={selectedFileAction ? `${formatFileSize(selectedFileAction.size)} • ${new Date(selectedFileAction.createdAt).toLocaleDateString(getLocaleTag(currentLang))}` : ''}
         icon={<FileText className="w-5 h-5 text-emerald-400" />}
       >
         {selectedFileAction && (
@@ -490,17 +511,17 @@ export const MobileCloudView: React.FC = () => {
               type="button"
               onClick={() => {
                 if (!selectedFileAction.url || !selectedFileAction.url.trim()) {
-                  showToast(`Tệp "${selectedFileAction.name}" không có dữ liệu do bị gián đoạn khi tải lên.`);
+                  showToast(pick('Tệp "{name}" không có dữ liệu do bị gián đoạn khi tải lên.', 'File "{name}" has no data because upload was interrupted.', '文件 "{name}" 因上传中断而没有数据。').replace('{name}', selectedFileAction.name));
                   setSelectedFileAction(null);
                   return;
                 }
-                downloadFileSafely(selectedFileAction.url, selectedFileAction.name);
+                downloadFileSafely(selectedFileAction.url, selectedFileAction.name, undefined, [selectedFileAction.id]);
                 setSelectedFileAction(null);
               }}
               className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all"
             >
               <Download className="w-4 h-4" />
-              <span>Tải về máy tính / điện thoại</span>
+              <span>{pick('Tải về máy tính / điện thoại', 'Download to device', '下载到设备')}</span>
             </button>
 
             {/* Watch Video on Dedicated Web Tab */}
@@ -516,7 +537,7 @@ export const MobileCloudView: React.FC = () => {
                   className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold text-xs flex items-center justify-center gap-2 border border-slate-700 active:scale-98 transition-all cursor-pointer"
                 >
                   <Film className="w-4 h-4 text-emerald-400" />
-                  <span>Xem video trực tiếp (Khung xem All-in-One)</span>
+                  <span>{pick('Xem video trực tiếp (Khung xem All-in-One)', 'Watch video directly (All-in-One Player)', '直接观看视频（全能播放器）')}</span>
                 </button>
 
                 <button
@@ -542,7 +563,7 @@ export const MobileCloudView: React.FC = () => {
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md active:scale-98 transition-all cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-white" />
-                  <span>Xem trên Trang Riêng (0% Lag)</span>
+                  <span>{pick('Xem trên Trang Riêng (0% Lag)', 'Watch on Dedicated Page (0% Lag)', '在独立页面观看（0% 延迟）')}</span>
                 </button>
               </>
             )}
@@ -572,7 +593,7 @@ export const MobileCloudView: React.FC = () => {
                 className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 border border-slate-700 active:scale-98 transition-all"
               >
                 <Eye className="w-4 h-4 text-sky-400" />
-                <span>Xem ảnh phóng to</span>
+                <span>{pick('Xem ảnh phóng to', 'View enlarged image', '查看大图')}</span>
               </button>
             )}
 
@@ -586,7 +607,7 @@ export const MobileCloudView: React.FC = () => {
               className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 border border-slate-700 active:scale-98 transition-all"
             >
               <Star className={`w-4 h-4 ${selectedFileAction.isFavorite ? 'text-yellow-400 fill-yellow-400' : 'text-slate-400'}`} />
-              <span>{selectedFileAction.isFavorite ? 'Bỏ yêu thích' : 'Đánh dấu yêu thích'}</span>
+              <span>{selectedFileAction.isFavorite ? pick('Bỏ yêu thích', 'Remove favorite', '取消收藏') : pick('Đánh dấu yêu thích', 'Add to favorites', '添加到收藏')}</span>
             </button>
 
             {/* Delete */}
@@ -596,7 +617,7 @@ export const MobileCloudView: React.FC = () => {
               className="w-full py-2.5 px-4 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 font-semibold text-xs flex items-center justify-center gap-2 border border-rose-500/30 active:scale-98 transition-all"
             >
               <Trash2 className="w-4 h-4 text-rose-400" />
-              <span>Xóa tệp khỏi Cloud</span>
+              <span>{pick('Xóa tệp khỏi Cloud', 'Delete file from Cloud', '从云盘删除文件')}</span>
             </button>
           </div>
         )}
@@ -620,18 +641,18 @@ export const MobileCloudView: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                onClick={() => downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id])}
                 className="p-2 rounded-xl bg-slate-800/90 text-emerald-400 hover:text-white flex items-center gap-1 text-xs font-semibold border border-slate-700 shadow-md active:scale-95"
-                title="Tải về máy"
+                title={pick('Tải về máy', 'Download', '下载')}
               >
                 <Download className="w-4 h-4" />
-                <span className="hidden sm:inline">Tải về</span>
+                <span className="hidden sm:inline">{pick('Tải về', 'Download', '下载')}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setPreviewFile(null)}
                 className="p-2 rounded-xl bg-slate-800/90 text-slate-300 hover:text-white border border-slate-700 shadow-md active:scale-95"
-                title="Đóng"
+                title={pick('Đóng', 'Close', '关闭')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -647,7 +668,7 @@ export const MobileCloudView: React.FC = () => {
                 fileId={previewFile.id}
                 fileName={previewFile.name}
                 fileSize={previewFile.size}
-                onDownload={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                onDownload={() => downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id])}
               />
             ) : previewFile.category === 'audio' || (previewFile.type && previewFile.type.startsWith('audio/')) || previewFile.name.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/i) ? (
               <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col items-center gap-4 w-full max-w-sm shadow-2xl">
@@ -673,11 +694,11 @@ export const MobileCloudView: React.FC = () => {
                 <p className="text-xs text-slate-400">{formatFileSize(previewFile.size)}</p>
                 <button
                   type="button"
-                  onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                  onClick={() => downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id])}
                   className="mt-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-2 shadow-lg"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Tải tệp về máy</span>
+                  <span>{pick('Tải tệp về máy', 'Download file', '下载文件')}</span>
                 </button>
               </div>
             )}

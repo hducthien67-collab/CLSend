@@ -30,6 +30,12 @@ export interface UserDevice {
   isPhoneVerified?: boolean;
   linkedUids?: string[];
   googleUid?: string;
+  facebookUid?: string;
+  githubUid?: string;
+  authProvider?: AuthProviderType;
+  lastBrowser?: string;
+  lastLocation?: string;
+  lastActive?: string;
   emailVerifiedAt?: string;
   acceptedRules?: boolean;
   hasSetName?: boolean;
@@ -205,12 +211,14 @@ export interface AppSettings {
   customDesignData?: string;
 }
 
+export type AuthProviderType = 'account' | 'google' | 'facebook' | 'phone' | 'github' | 'guest' | 'sync';
+
 export interface AppUser {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL?: string | null;
-  authProvider?: 'account' | 'google' | 'guest' | 'sync';
+  authProvider?: AuthProviderType;
   linkedEmail?: string | null;
   phone?: string | null;
   linkedPhone?: string | null;

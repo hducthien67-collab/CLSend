@@ -20,10 +20,10 @@ import {
   Download,
   RefreshCw
 } from 'lucide-react';
-import { downloadFileSafely } from '../utils/fileDownload';
+import { downloadFileSafely, fetchVerifiedBlobFromUrl } from '../utils/fileDownload';
 import { getFileBlobLocally, storeFileBlobLocally } from '../utils/idbStorage';
 import { useOptionalAuth } from '../context/AuthContext';
-import { useLanguage, pickLang } from '../context/LanguageContext';
+import { useLanguage, pickLang, pickActiveLang } from '../context/LanguageContext';
 import { subscribeUserCloudFiles, syncVideoFileToCloud } from '../utils/cloudSync';
 
 /* 1. TYPES NỘI BỘ (Không cần file types riêng) */
@@ -44,6 +44,7 @@ export interface AllInOneVideoPlayerProps {
   isEmbedded?: boolean;
   framelessStage?: boolean;
   disableCloudPlaylist?: boolean;
+  initialId?: string;
   initialSrc?: string;
   initialTitle?: string;
   initialFile?: File | Blob;
@@ -57,7 +58,7 @@ const STORE_NAME = 'saved_videos';
 
 export function openVideoDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB không được hỗ trợ'));
+    if (typeof indexedDB === 'undefined') return reject(new Error(pickActiveLang('IndexedDB không được hỗ trợ', 'IndexedDB is not supported', '不支持 IndexedDB')));
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -114,6 +115,7 @@ export default function AllInOneVideoPlayer({
   isEmbedded = false,
   framelessStage = false,
   disableCloudPlaylist = false,
+  initialId = '',
   initialSrc = '',
   initialTitle = '',
   initialFile,
@@ -307,12 +309,13 @@ export default function AllInOneVideoPlayer({
         urlFileId = new URL(initialSrc, 'http://localhost').searchParams.get('fileId') || undefined;
       } catch {}
 
-      const lookupKeys = [
+      const lookupKeys = Array.from(new Set([
+        initialId,
         urlFileId,
         initialSrc.split('/api/files/view/')[1]?.split('?')[0],
         initialSrc.split('/api/files/download/')[1]?.split('?')[0],
         titleStr,
-      ].filter(Boolean) as string[];
+      ].filter(Boolean) as string[]));
 
       const tryQuickIdbLookup = async (): Promise<Blob | null> => {
         if (initialSrc.startsWith('blob:') || initialSrc.startsWith('data:')) return null;
@@ -326,10 +329,10 @@ export default function AllInOneVideoPlayer({
       };
 
       (async () => {
-        // Race IDB vs 60ms so cached blobs mount ONCE directly without ever swapping <video key> mid-playback
+        // Allow up to 450ms so heavy cached blobs (>100MB) in IndexedDB resolve locally before touching network
         const foundBlob = await Promise.race([
           tryQuickIdbLookup(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 60)),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 450)),
         ]);
 
         if (isCancelled) return;
@@ -963,12 +966,14 @@ export default function AllInOneVideoPlayer({
                 clearTimeout(waitingTimerRef.current);
                 waitingTimerRef.current = null;
               }
-              // Fallback check IDB cache before displaying playback error
+              // 1. Full IndexedDB fallback check before displaying playback error
               if (currentVideo?.src && !currentVideo.src.startsWith('blob:')) {
                 try {
                   let fid: string | undefined;
                   try { fid = new URL(currentVideo.src, 'http://localhost').searchParams.get('fileId') || undefined; } catch {}
-                  const candidates = [fid, currentVideo.title].filter(Boolean) as string[];
+                  const viewId = currentVideo.src.split('/api/files/view/')[1]?.split('?')[0];
+                  const dlId = currentVideo.src.split('/api/files/download/')[1]?.split('?')[0];
+                  const candidates = Array.from(new Set([initialId, fid, viewId, dlId, currentVideo.title].filter(Boolean) as string[]));
                   for (const k of candidates) {
                     const blob = await getFileBlobLocally(k);
                     if (blob && blob.size > 0) {
@@ -982,6 +987,30 @@ export default function AllInOneVideoPlayer({
                     }
                   }
                 } catch {}
+
+                // 2. If streaming failed on a moderate network file (<= 60MB), attempt clean multi-range Blob assembly once
+                const numericHint = typeof initialSize === 'number' ? initialSize : 0;
+                if (
+                  numericHint <= 60 * 1024 * 1024 &&
+                  (currentVideo.src.includes('/api/telegram/download') || currentVideo.src.includes('/api/files/view/'))
+                ) {
+                  try {
+                    const assembledBlob = await fetchVerifiedBlobFromUrl(
+                      currentVideo.src,
+                      currentVideo.title || 'video.mp4',
+                      numericHint || undefined
+                    );
+                    if (assembledBlob.size > 0 && assembledBlob.size <= 60 * 1024 * 1024) {
+                      if (activeBlobUrlRef.current) URL.revokeObjectURL(activeBlobUrlRef.current);
+                      const blobUrl = URL.createObjectURL(assembledBlob);
+                      activeBlobUrlRef.current = blobUrl;
+                      setCurrentVideo((prev) => prev ? { ...prev, src: blobUrl, isLocal: true, blob: assembledBlob } : prev);
+                      setPlaybackError(null);
+                      setIsBuffering(false);
+                      return;
+                    }
+                  } catch {}
+                }
               }
               setPlaybackError(tRef.current('player.cannot_play_default'));
               setIsBuffering(false);

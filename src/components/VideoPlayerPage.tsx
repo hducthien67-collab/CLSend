@@ -23,11 +23,13 @@ import {
   Link2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, LanguageCode, pickLang } from '../context/LanguageContext';
 import AllInOneVideoPlayer from './AllInOneVideoPlayer';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { formatFileSize, isGifFile } from '../utils/fileUpload';
 import { subscribeUserCloudFiles } from '../utils/cloudSync';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase/config';
 import {
   MediaViewerSource,
   UnifiedMediaItem,
@@ -54,10 +56,11 @@ interface VideoPlayerPageProps {
 const isImageFileExt = (nameOrSrc: string) =>
   /\.(jpg|jpeg|png|webp|gif|svg|bmp|heic|heif|avif)([?#&]|$)/i.test(nameOrSrc);
 
-function getDateGroupInfo(iso?: string): { key: string; label: string } {
-  if (!iso) return { key: 'unknown', label: 'Trước đó' };
+function getDateGroupInfo(iso: string | undefined, lang: LanguageCode): { key: string; label: string } {
+  const prevLabel = pickLang(lang, 'Trước đó', 'Earlier', '更早');
+  if (!iso) return { key: 'unknown', label: prevLabel };
   const d = new Date(iso);
-  if (isNaN(d.getTime()) || d.getTime() <= 0) return { key: 'unknown', label: 'Trước đó' };
+  if (isNaN(d.getTime()) || d.getTime() <= 0) return { key: 'unknown', label: prevLabel };
 
   const yyyy = d.getFullYear();
   const mmNum = d.getMonth() + 1;
@@ -71,8 +74,8 @@ function getDateGroupInfo(iso?: string): { key: string; label: string } {
   const targetStart = new Date(yyyy, d.getMonth(), ddNum).getTime();
   const dayDiff = Math.round((todayStart - targetStart) / 86400000);
 
-  if (dayDiff === 0) return { key, label: `Hôm nay (${dd}/${mm}/${yyyy})` };
-  if (dayDiff === 1) return { key, label: `Hôm qua (${dd}/${mm}/${yyyy})` };
+  if (dayDiff === 0) return { key, label: `${pickLang(lang, 'Hôm nay', 'Today', '今天')} (${dd}/${mm}/${yyyy})` };
+  if (dayDiff === 1) return { key, label: `${pickLang(lang, 'Hôm qua', 'Yesterday', '昨天')} (${dd}/${mm}/${yyyy})` };
   return { key, label: `${dd}/${mm}/${yyyy}` };
 }
 
@@ -213,6 +216,40 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
 
     return () => unsubscribe();
   }, [viewerSource, currentUser?.uid, currentUser?.email, currentUser?.linkedEmail, (currentUser?.linkedUids || []).join(','), userProfile?.linkedEmail, (userProfile?.linkedUids || []).join(',')]);
+
+  // Direct Firestore lookup fallback when opened via ?page=player&source=cloud&id=cf_... without src in URL
+  useEffect(() => {
+    if (viewerSource !== 'cloud') return;
+    const targetId = activeItem?.id;
+    if (!targetId || !targetId.startsWith('cf_')) return;
+    if (activeItem?.src && !activeItem.src.startsWith('/api/files/view/cf_')) return;
+
+    let cancelled = false;
+    getDoc(doc(db, 'cloud_files', targetId))
+      .then((snap) => {
+        if (cancelled || !snap.exists()) return;
+        const d: any = snap.data();
+        const resolvedUrl = d.viewUrl || d.url || '';
+        if (!resolvedUrl) return;
+        const patch: Partial<UnifiedMediaItem> = {
+          src: resolvedUrl,
+          downloadUrl: d.url || resolvedUrl,
+          name: d.name || activeItem.name,
+          title: d.name || activeItem.title,
+          size: d.size || activeItem.size,
+          thumbnail: d.thumbnail || activeItem.thumbnail || null,
+          mimeType: d.type || activeItem.mimeType,
+          createdAt: d.createdAt || activeItem.createdAt,
+        };
+        setPriorityItem((prev) => (prev && prev.id === targetId ? { ...prev, ...patch } : prev));
+        setActiveItem((prev) => (prev && prev.id === targetId ? { ...prev, ...patch } : prev));
+      })
+      .catch((err) => console.warn('VideoPlayerPage direct doc lookup notice:', err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewerSource, activeItem?.id, activeItem?.src]);
 
   const sourceMediaPool = viewerSource === 'chat' ? chatRoomMedia : cloudMedia;
 
@@ -355,14 +392,15 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
         const storedActive = storedSession?.activeItem;
 
         if (urlSrc || urlId) {
+          const isCloudFirestoreId = Boolean(urlId && urlId.startsWith('cf_'));
           const finalSrc =
             urlSrc ||
             (storedActive && (!urlId || storedActive.id === urlId) ? storedActive.src : '') ||
-            `/api/files/view/${encodeURIComponent(urlId || '')}`;
+            (isCloudFirestoreId ? '' : `/api/files/view/${encodeURIComponent(urlId || '')}`);
           const finalName =
             urlName ||
             (storedActive && (!urlId || storedActive.id === urlId) ? storedActive.name : '') ||
-            finalSrc.split('/').pop()?.split('?')[0] ||
+            (finalSrc ? finalSrc.split('/').pop()?.split('?')[0] : '') ||
             tRef.current('player.media_file_label');
           const isImg =
             urlType === 'image' ||
@@ -442,6 +480,24 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
     if (allMediaItems.length === 0) return;
     if (!activeItem && !hasExplicitSelectionRef.current) {
       setActiveItem(allMediaItems[allMediaItems.length - 1]);
+      return;
+    }
+    if (activeItem) {
+      const resolved = allMediaItems.find(
+        (m) =>
+          m.id === activeItem.id ||
+          (!activeItem.src && activeItem.name && m.name === activeItem.name)
+      );
+      const activeHasBrokenSrc =
+        !activeItem.src || activeItem.src.startsWith('/api/files/view/cf_');
+      if (resolved && resolved.src && (activeHasBrokenSrc || (!activeItem.size && resolved.size))) {
+        setPriorityItem((prev) =>
+          prev && prev.id === resolved.id ? { ...prev, ...resolved } : resolved
+        );
+        setActiveItem((prev) =>
+          prev && prev.id === activeItem.id ? { ...prev, ...resolved } : prev
+        );
+      }
     }
   }, [allMediaItems, activeItem]);
 
@@ -485,7 +541,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
     const groups: Array<{ dateKey: string; dateLabel: string; items: UnifiedMediaItem[] }> = [];
     const map = new Map<string, UnifiedMediaItem[]>();
     filteredMediaList.forEach((item) => {
-      const { key, label } = getDateGroupInfo(item.createdAt);
+      const { key, label } = getDateGroupInfo(item.createdAt, currentLang);
       if (!map.has(key)) {
         const arr: UnifiedMediaItem[] = [];
         map.set(key, arr);
@@ -494,7 +550,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
       map.get(key)!.push(item);
     });
     return groups;
-  }, [filteredMediaList]);
+  }, [filteredMediaList, currentLang]);
 
   const handlePickLocalFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -551,7 +607,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
       if (dlUrl.includes('/api/files/view/')) {
         dlUrl = dlUrl.replace('/api/files/view/', '/api/files/download/');
       }
-      downloadFileSafely(dlUrl, itemToDl.name);
+      downloadFileSafely(dlUrl, itemToDl.name, undefined, [itemToDl.id].filter(Boolean));
       showToast(t('player.downloading_toast', 'Đang tải "{name}"...').replace('{name}', itemToDl.name));
     }
   };
@@ -820,7 +876,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
       : `${window.location.origin}${activeItem.src}`;
     try {
       await navigator.clipboard.writeText(absoluteUrl);
-      showToast('Đã sao chép liên kết media');
+      showToast(pickLang(currentLang, 'Đã sao chép liên kết media', 'Copied media link', '已复制媒体链接'));
     } catch {
       showToast(activeItem.name);
     }
@@ -985,14 +1041,20 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
         {/* MAIN MEDIA CANVAS */}
         <main className="flex-1 min-w-0 min-h-0 h-full relative flex items-center justify-center overflow-hidden">
           {activeItem ? (
-            activeItem.type === 'video' ? (
+            !activeItem.src && !activeItem.file ? (
+              <div className="flex flex-col items-center justify-center gap-3 text-slate-300 p-6">
+                <RefreshCw className="w-7 h-7 animate-spin text-emerald-400" />
+                <span className="text-xs font-medium">{t('common.loading', 'Đang tải...')}</span>
+              </div>
+            ) : activeItem.type === 'video' ? (
               <div className="w-full h-full flex items-center justify-center p-1 sm:p-3">
                 <AllInOneVideoPlayer
-                  key={activeItem.id}
+                  key={`${activeItem.id}::${activeItem.src}`}
                   isOpen={true}
                   isEmbedded={true}
                   framelessStage={true}
                   disableCloudPlaylist={true}
+                  initialId={activeItem.id}
                   initialSrc={activeItem.src}
                   initialTitle={activeItem.name}
                   initialFile={activeItem.file}
@@ -1145,7 +1207,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
             {/* Compact Filter + Active Date Header */}
             <div className="px-3 py-1.5 border-b border-white/[0.06] flex items-center justify-between gap-2">
               <span className="text-[10px] font-medium text-slate-400 tabular-nums truncate">
-                {getDateGroupInfo(activeItem?.createdAt).label}
+                {getDateGroupInfo(activeItem?.createdAt, currentLang).label}
               </span>
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -1155,7 +1217,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                     mediaFilter === 'all' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  All ({allMediaItems.length})
+                  {pickLang(currentLang, 'Tất cả', 'All', '全部')} ({allMediaItems.length})
                 </button>
                 <button
                   type="button"
@@ -1165,7 +1227,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                   }`}
                 >
                   <Film className="w-3 h-3" />
-                  <span>Video</span>
+                  <span>{t('player.video_label')}</span>
                 </button>
                 <button
                   type="button"
@@ -1175,7 +1237,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                   }`}
                 >
                   <ImageIcon className="w-3 h-3" />
-                  <span>Ảnh</span>
+                  <span>{t('player.image_label')}</span>
                 </button>
               </div>
             </div>
@@ -1289,9 +1351,9 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                 className={`px-1.5 py-1 rounded text-[10px] font-medium cursor-pointer transition-colors ${
                   mediaFilter === 'all' ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-white'
                 }`}
-                title="Tất cả"
+                title={pickLang(currentLang, 'Tất cả', 'All', '全部')}
               >
-                All
+                {pickLang(currentLang, 'Tất cả', 'All', '全部')}
               </button>
               <button
                 type="button"
@@ -1299,7 +1361,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                 className={`p-1 rounded cursor-pointer transition-colors ${
                   mediaFilter === 'video' ? 'bg-white/15 text-emerald-300' : 'text-slate-400 hover:text-white'
                 }`}
-                title="Video"
+                title={t('player.video_label')}
               >
                 <Film className="w-3.5 h-3.5" />
               </button>
@@ -1309,7 +1371,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                 className={`p-1 rounded cursor-pointer transition-colors ${
                   mediaFilter === 'image' ? 'bg-white/15 text-sky-300' : 'text-slate-400 hover:text-white'
                 }`}
-                title="Ảnh / GIF"
+                title={pickLang(currentLang, 'Ảnh / GIF', 'Images / GIFs', '图片 / GIF')}
               >
                 <ImageIcon className="w-3.5 h-3.5" />
               </button>
@@ -1442,7 +1504,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
             onClick={handleCopyOrOpenLink}
             disabled={!activeItem?.src}
             className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white disabled:opacity-40 flex items-center justify-center transition-colors cursor-pointer"
-            title="Sao chép liên kết"
+            title={pickLang(currentLang, 'Sao chép liên kết', 'Copy link', '复制链接')}
           >
             <Link2 className="w-4 h-4" />
           </button>
@@ -1458,7 +1520,7 @@ export const VideoPlayerPage: React.FC<VideoPlayerPageProps> = ({
                 a.click();
               }}
               className="hidden sm:flex w-9 h-9 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white items-center justify-center transition-colors cursor-pointer"
-              title="Mở liên kết gốc"
+              title={pickLang(currentLang, 'Mở liên kết gốc', 'Open original link', '打开原始链接')}
             >
               <ExternalLink className="w-4 h-4" />
             </button>

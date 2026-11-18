@@ -1,5 +1,6 @@
 import { ChatMessage } from '../components/types';
 import { isGifFile } from './fileUpload';
+import { pickActiveLang } from '../context/LanguageContext';
 
 export type MediaViewerSource = 'chat' | 'cloud';
 
@@ -170,12 +171,12 @@ export function extractRoomMediaFromMessages(
     const senderMeta =
       options?.memberMetaMap?.[msg.senderId] || options?.memberMetaMap?.[msg.senderDevice];
     const senderName = isMe
-      ? options?.currentUserName || msg.senderName || 'Bạn'
+      ? options?.currentUserName || msg.senderName || pickActiveLang('Bạn', 'You', '我')
       : options?.memberNamesMap?.[msg.senderId] ||
         options?.memberNamesMap?.[msg.senderDevice] ||
         senderMeta?.displayName ||
         msg.senderName ||
-        'Người dùng';
+        pickActiveLang('Người dùng', 'User', '用户');
     const senderAvatar =
       msg.senderAvatar ||
       (isMe ? options?.currentUserAvatar || null : senderMeta?.avatarUrl || null);
@@ -256,7 +257,7 @@ export function extractRoomMediaFromMessages(
           url: imgSrc || viewerSrc,
           backupSrc,
           downloadUrl,
-          name: attName || 'Ảnh',
+          name: attName || pickActiveLang('Ảnh', 'Image', '图片'),
           isGif: attIsGif,
           size: attSize,
           sender: senderName,
@@ -266,8 +267,8 @@ export function extractRoomMediaFromMessages(
 
         unifiedMedia.push({
           id,
-          name: attName || 'Ảnh',
-          title: attName || 'Ảnh',
+          name: attName || pickActiveLang('Ảnh', 'Image', '图片'),
+          title: attName || pickActiveLang('Ảnh', 'Image', '图片'),
           src: viewerSrc || imgSrc,
           downloadUrl,
           thumbnail: (attData && attData.startsWith('data:image/') ? attData : imgSrc) || null,

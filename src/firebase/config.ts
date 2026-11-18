@@ -1,5 +1,10 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  FacebookAuthProvider,
+  GithubAuthProvider
+} from 'firebase/auth';
 import { 
   initializeFirestore,
   doc, 
@@ -31,6 +36,18 @@ export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
   prompt: 'select_account'
 });
+
+// Facebook Auth Provider (keep default public_profile scope to avoid Meta Invalid Scopes: email on new apps)
+export const facebookProvider = new FacebookAuthProvider();
+facebookProvider.addScope('public_profile');
+facebookProvider.setCustomParameters({
+  display: 'popup'
+});
+
+// GitHub Auth Provider
+export const githubProvider = new GithubAuthProvider();
+githubProvider.addScope('read:user');
+githubProvider.addScope('user:email');
 
 // OperationType enum as required by Firebase skill
 export enum OperationType {

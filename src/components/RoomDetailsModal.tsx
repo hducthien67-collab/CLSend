@@ -33,7 +33,7 @@ import { ZoomableImageViewerModal } from './ZoomableImageViewerModal';
 import { ResetServerModal } from './ResetServerModal';
 import { ChatMediaImage } from './ChatMediaImage';
 import { cleanFirestoreObject } from '../utils/firestoreClean';
-import { useLanguage, pickLang } from '../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../context/LanguageContext';
 import { downloadFileSafely } from '../utils/fileDownload';
 import { formatFileSize } from '../utils/fileUpload';
 import { extractRoomMediaFromMessages, openMediaInLargeViewer } from '../utils/mediaViewerSession';
@@ -97,10 +97,17 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
   const isDissolvingRef = useRef(false);
   const [showDissolveModal, setShowDissolveModal] = useState(false);
   const [showResetServerModal, setShowResetServerModal] = useState(false);
-  const [finalMessage, setFinalMessage] = useState('Cảm ơn mọi người đã cùng tham gia nhóm. Chúc các bạn luôn may mắn và thành công!');
+  const [finalMessage, setFinalMessage] = useState(() => pickLang(currentLang, 'Cảm ơn mọi người đã cùng tham gia nhóm. Chúc các bạn luôn may mắn và thành công!', 'Thank you everyone for joining the group. Wishing you all luck and success!', '感谢大家一起加入群组，祝大家一切顺利！'));
   const [isDeleting, setIsDeleting] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [viewingZoomImage, setViewingZoomImage] = useState<{ url: string; name?: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+
+  const showRoomError = (msg: string) => {
+    setActionError(msg);
+    setTimeout(() => setActionError(null), 5000);
+  };
 
   const handleCloseModal = () => {
     setRoomName(room.name || '');
@@ -190,7 +197,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP, GIF).');
+      showRoomError(pick('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WEBP, GIF).', 'Please select a valid image file (PNG, JPG, WEBP, GIF).', '请选择有效的图片文件 (PNG, JPG, WEBP, GIF)。'));
       return;
     }
 
@@ -201,7 +208,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
       setTimeout(() => setAvatarSaveSuccess(false), 2500);
     } catch (err) {
       console.error('Update avatar error:', err);
-      alert('Có lỗi khi xử lý ảnh đại diện nhóm.');
+      showRoomError(pick('Có lỗi khi xử lý ảnh đại diện nhóm.', 'Error processing group avatar image.', '处理群组头像时出错。'));
     } finally {
       if (e.target) e.target.value = '';
     }
@@ -241,26 +248,30 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err) {
       console.error('Update room error:', err);
-      alert('Có lỗi xảy ra khi cập nhật thông tin phòng.');
+      showRoomError(pick('Có lỗi xảy ra khi cập nhật thông tin phòng.', 'An error occurred while updating room info.', '更新房间信息时出错。'));
     } finally {
       setIsSaving(false);
     }
   };
 
   // Member leaves the room
-  const handleLeaveRoom = async () => {
-    if (!confirm(`Bạn có chắc chắn muốn rời khỏi phòng "${room.name}"?`)) return;
+  const handleLeaveRoom = () => {
+    setShowLeaveConfirm(true);
+  };
 
+  const executeLeaveRoom = async () => {
     try {
       const updatedMembers = (room.members || []).filter((m) => m.uid !== currentUserUid);
       await updateDoc(doc(db, 'rooms', room.id), {
         members: updatedMembers,
       });
+      setShowLeaveConfirm(false);
       onRoomLeft();
       onClose();
     } catch (err) {
       console.error('Leave room error:', err);
-      alert('Không thể rời phòng vào lúc này.');
+      setShowLeaveConfirm(false);
+      showRoomError(pick('Không thể rời phòng vào lúc này.', 'Unable to leave room at this time.', '暂时无法退出房间。'));
     }
   };
 
@@ -272,7 +283,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
 
     try {
       const nowIso = new Date().toISOString();
-      const messageText = finalMessage.trim() || 'Phòng chat đã được Trưởng phòng giải tán.';
+      const messageText = finalMessage.trim() || pick('Phòng chat đã được Trưởng phòng giải tán.', 'The chat room was dissolved by the Room Owner.', '聊天室已被房主解散。');
 
       // Send the parting notification to the Receive tab (transfers) of each UNIQUE member (excluding the owner)
       const seenUids = new Set<string>();
@@ -286,14 +297,24 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
       const notifyPromises = recipients.map(async (member) => {
         try {
           const notifId = `dissolve_${room.id}_${member.uid}`;
+          const localeTag = getLocaleTag(currentLang);
           await setDoc(doc(db, 'transfers', notifId), cleanFirestoreObject({
             id: notifId,
             senderId: currentUserUid,
-            senderName: `[Trưởng phòng] ${currentUserName}`,
+            senderName: `[${pick('Trưởng phòng', 'Owner', '房主')}] ${currentUserName}`,
             senderDevice: currentDeviceName,
             receiverId: member.uid,
-            receiverName: member.displayName || 'Thành viên',
-            textContent: `📢 [THÔNG BÁO GIẢI TÁN PHÒNG: "${room.name}"]\n\n"${messageText}"\n\n— Trưởng phòng ${currentUserName} đã chính thức giải tán phòng chat vào lúc ${new Date().toLocaleTimeString('vi-VN')} ngày ${new Date().toLocaleDateString('vi-VN')}.`,
+            receiverName: member.displayName || pick('Thành viên', 'Member', '成员'),
+            textContent: pick(
+              '📢 [THÔNG BÁO GIẢI TÁN PHÒNG: "{room}"]\n\n"{msg}"\n\n— Trưởng phòng {owner} đã chính thức giải tán phòng chat vào lúc {time} ngày {date}.',
+              '📢 [ROOM DISSOLVED NOTICE: "{room}"]\n\n"{msg}"\n\n— Room Owner {owner} officially dissolved the chat room at {time} on {date}.',
+              '📢 [房间解散通知：“{room}”]\n\n“{msg}”\n\n— 房主 {owner} 已于 {date} {time} 正式解散该聊天室。'
+            )
+              .replace('{room}', room.name)
+              .replace('{msg}', messageText)
+              .replace('{owner}', currentUserName)
+              .replace('{time}', new Date().toLocaleTimeString(localeTag))
+              .replace('{date}', new Date().toLocaleDateString(localeTag)),
             status: 'completed',
             createdAt: nowIso,
           }), { merge: true });
@@ -312,7 +333,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
       handleCloseModal();
     } catch (err) {
       console.error('Dissolve room error:', err);
-      alert('Không thể giải tán phòng vào lúc này.');
+      showRoomError(pick('Không thể giải tán phòng vào lúc này.', 'Unable to dissolve room at this time.', '暂时无法解散房间。'));
     } finally {
       isDissolvingRef.current = false;
       setIsDeleting(false);
@@ -407,6 +428,16 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
             </button>
           </div>
 
+          {/* Error banner */}
+          {actionError && (
+            <div className="px-3 py-2 bg-rose-500/15 border-b border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-2 shrink-0">
+              <span>{actionError}</span>
+              <button type="button" onClick={() => setActionError(null)} className="text-rose-300 hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Navigation Tabs - Compact single-row bar */}
           <div className="flex border-b border-slate-800 bg-slate-950/40 px-1.5 pt-0.5 shrink-0 overflow-x-auto no-scrollbar">
             <button
@@ -431,7 +462,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               }`}
             >
               <Users className="w-3 h-3 shrink-0" />
-              <span>{pick(`Thành viên (${membersList.length})`, `Members (${membersList.length})`, `成员 (${membersList.length})`)}</span>
+              <span>{pick('Thành viên ({count})', 'Members ({count})', '成员 ({count})').replace('{count}', String(membersList.length))}</span>
             </button>
             <button
               type="button"
@@ -443,7 +474,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               }`}
             >
               <ImageIcon className="w-3 h-3 shrink-0" />
-              <span>{pick(`Hình ảnh (${allImages.length})`, `Images (${allImages.length})`, `图片 (${allImages.length})`)}</span>
+              <span>{pick('Hình ảnh ({count})', 'Images ({count})', '图片 ({count})').replace('{count}', String(allImages.length))}</span>
             </button>
             <button
               type="button"
@@ -548,7 +579,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                           style={{ backgroundColor: selectedColor }}
                           onClick={() => {
                             if (customAvatar) {
-                              setViewingZoomImage({ url: customAvatar, name: `Ảnh đại diện phòng ${roomName}` });
+                              setViewingZoomImage({ url: customAvatar, name: `${pick('Ảnh đại diện phòng', 'Room avatar', '房间头像')} ${roomName}` });
                             } else {
                               fileInputRef.current?.click();
                             }
@@ -600,7 +631,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
                                   selectedColor === col ? 'scale-110 ring-2 ring-white' : 'hover:scale-105 opacity-80 hover:opacity-100'
                                 }`}
                                 style={{ backgroundColor: col }}
-                                title={pick(`Chọn màu ${col}`, `Select color ${col}`, `选择颜色 ${col}`)}
+                                title={`${pick('Chọn màu', 'Select color', '选择颜色')} ${col}`}
                               />
                             ))}
                           </div>
@@ -758,7 +789,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {pick(`DANH SÁCH THÀNH VIÊN (${membersList.length})`, `MEMBERS LIST (${membersList.length})`, `成员列表 (${membersList.length})`)}
+                    {pick('DANH SÁCH THÀNH VIÊN ({count})', 'MEMBERS LIST ({count})', '成员列表 ({count})').replace('{count}', String(membersList.length))}
                   </h4>
                   <span className="text-[10px] text-slate-500">
                     {pick('Trưởng phòng đứng đầu', 'Host at the top', '房主置顶')}
@@ -849,7 +880,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {pick(`HÌNH ẢNH TRONG NHÓM (${allImages.length})`, `IMAGES IN ROOM (${allImages.length})`, `群内图片 (${allImages.length})`)}
+                    {pick('HÌNH ẢNH TRONG NHÓM ({count})', 'IMAGES IN ROOM ({count})', '群内图片 ({count})').replace('{count}', String(allImages.length))}
                   </h4>
                   <span className="text-[10px] text-slate-500">
                     {pick('Kho ảnh', 'Gallery', '图库')}
@@ -939,7 +970,7 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    {pick(`VIDEO TRONG NHÓM (${allVideos.length})`, `VIDEOS IN ROOM (${allVideos.length})`, `群内视频 (${allVideos.length})`)}
+                    {pick('VIDEO TRONG NHÓM ({count})', 'VIDEOS IN ROOM ({count})', '群内视频 ({count})').replace('{count}', String(allVideos.length))}
                   </h4>
                   <span className="text-[10px] text-slate-500">
                     {pick('Kho video', 'Videos', '视频库')}
@@ -1102,6 +1133,34 @@ export const RoomDetailsModal: React.FC<RoomDetailsModalProps> = ({
               >
                 {isDeleting ? pick('Đang xóa...', 'Deleting...', '删除中...') : pick('Giải tán nhóm', 'Dissolve Group', '解散群组')}
                 <Send className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Leave Room Modal */}
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-3 bg-black/85 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-4 w-full max-w-sm shadow-2xl space-y-3">
+            <h3 className="text-sm font-bold text-white">{pick('Rời khỏi phòng', 'Leave Room', '退出房间')}</h3>
+            <p className="text-xs text-slate-300">
+              {pick('Bạn có chắc chắn muốn rời khỏi phòng "{name}"?', 'Are you sure you want to leave room "{name}"?', '您确定要退出房间“{name}”吗？').replace('{name}', room.name)}
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirm(false)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                {pick('Hủy bỏ', 'Cancel', '取消')}
+              </button>
+              <button
+                type="button"
+                onClick={executeLeaveRoom}
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-md transition-all"
+              >
+                {pick('Rời phòng', 'Leave', '退出')}
               </button>
             </div>
           </div>

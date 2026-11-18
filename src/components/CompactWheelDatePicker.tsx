@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { X, Calendar as CalendarIcon, Check, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface CompactWheelDatePickerProps {
   value: string; // YYYY-MM-DD
@@ -15,6 +16,8 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
   onSave,
   onClose
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
   const currentYear = new Date().getFullYear();
 
   // Parse initial value (default to 18 years ago)
@@ -37,21 +40,14 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
   const monthListRef = useRef<HTMLDivElement>(null);
   const yearListRef = useRef<HTMLDivElement>(null);
 
-  const isUserScrollingRef = useRef(false);
-  const scrollTimeoutRef = useRef<Record<string, any>>({});
-  const lastWheelTimestampRef = useRef<Record<string, number>>({ day: 0, month: 0, year: 0 });
+  const programmaticUntilRef = useRef<Record<'day' | 'month' | 'year', number>>({ day: 0, month: 0, year: 0 });
+  const scrollTimeoutRef = useRef<Record<string, ReturnType<typeof setTimeout> | undefined>>({});
+  const lastWheelTimestampRef = useRef<Record<'day' | 'month' | 'year', number>>({ day: 0, month: 0, year: 0 });
 
   // Maximum days in the selected month & year
   const maxDays = useMemo(() => {
     return new Date(selectedYear, selectedMonth, 0).getDate();
   }, [selectedYear, selectedMonth]);
-
-  // Adjust day if selectedDay > maxDays (e.g., Feb 30 -> Feb 28/29)
-  useEffect(() => {
-    if (selectedDay > maxDays) {
-      setSelectedDay(maxDays);
-    }
-  }, [maxDays, selectedDay]);
 
   const days = useMemo(() => {
     return Array.from({ length: maxDays }, (_, i) => i + 1);
@@ -71,16 +67,50 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
     return list;
   }, [currentYear]);
 
+  // Keep live refs so native wheel listeners always read latest values & lists
+  const stateRef = useRef({
+    day: selectedDay,
+    month: selectedMonth,
+    year: selectedYear,
+    days,
+    months,
+    years
+  });
+  stateRef.current = {
+    day: selectedDay,
+    month: selectedMonth,
+    year: selectedYear,
+    days,
+    months,
+    years
+  };
+
   // Scroll a specific column to its selected value
-  const scrollColumnToValue = useCallback((colRef: React.RefObject<HTMLDivElement | null>, index: number, smooth = true) => {
+  const scrollColumnToValue = useCallback((
+    colRef: React.RefObject<HTMLDivElement | null>,
+    index: number,
+    smooth = true,
+    type?: 'day' | 'month' | 'year'
+  ) => {
     const el = colRef.current;
     if (!el) return;
+    if (type) {
+      programmaticUntilRef.current[type] = Date.now() + (smooth ? 280 : 100);
+    }
     const targetTop = index * ITEM_HEIGHT;
     el.scrollTo({
       top: targetTop,
       behavior: smooth ? 'smooth' : 'auto'
     });
   }, []);
+
+  // Adjust day if selectedDay > maxDays (e.g., Feb 30 -> Feb 28/29)
+  useEffect(() => {
+    if (selectedDay > maxDays) {
+      setSelectedDay(maxDays);
+      scrollColumnToValue(dayListRef, maxDays - 1, true, 'day');
+    }
+  }, [maxDays, selectedDay, scrollColumnToValue]);
 
   // Initial scroll to current selection on mount
   useEffect(() => {
@@ -89,13 +119,91 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
       const monthIdx = Math.max(0, selectedMonth - 1);
       const yearIdx = Math.max(0, years.indexOf(selectedYear));
 
-      scrollColumnToValue(dayListRef, dayIdx, false);
-      scrollColumnToValue(monthListRef, monthIdx, false);
-      scrollColumnToValue(yearListRef, yearIdx, false);
+      scrollColumnToValue(dayListRef, dayIdx, false, 'day');
+      scrollColumnToValue(monthListRef, monthIdx, false, 'month');
+      scrollColumnToValue(yearListRef, yearIdx, false, 'year');
     }, 60);
 
     return () => clearTimeout(timer);
   }, []);
+
+  // Attach non-passive wheel listeners so e.preventDefault() blocks native multi-row scroll
+  useEffect(() => {
+    const stepByOne = (type: 'day' | 'month' | 'year', deltaY: number) => {
+      if (Math.abs(deltaY) < 1) return;
+      const now = Date.now();
+      // Cooldown prevents 1 physical wheel notch / trackpad tick burst from jumping multiple rows
+      if (now - lastWheelTimestampRef.current[type] < 115) {
+        return;
+      }
+      lastWheelTimestampRef.current[type] = now;
+
+      const direction = deltaY > 0 ? 1 : -1;
+      const current = stateRef.current;
+
+      if (type === 'day') {
+        const list = current.days;
+        const idx = Math.max(0, list.indexOf(current.day));
+        const nextIdx = Math.max(0, Math.min(idx + direction, list.length - 1));
+        const nextVal = list[nextIdx];
+        if (nextVal !== undefined && nextIdx !== idx) {
+          current.day = nextVal;
+          setSelectedDay(nextVal);
+          scrollColumnToValue(dayListRef, nextIdx, true, 'day');
+        }
+      } else if (type === 'month') {
+        const list = current.months;
+        const idx = Math.max(0, list.indexOf(current.month));
+        const nextIdx = Math.max(0, Math.min(idx + direction, list.length - 1));
+        const nextVal = list[nextIdx];
+        if (nextVal !== undefined && nextIdx !== idx) {
+          current.month = nextVal;
+          setSelectedMonth(nextVal);
+          scrollColumnToValue(monthListRef, nextIdx, true, 'month');
+        }
+      } else {
+        const list = current.years;
+        const idx = Math.max(0, list.indexOf(current.year));
+        const nextIdx = Math.max(0, Math.min(idx + direction, list.length - 1));
+        const nextVal = list[nextIdx];
+        if (nextVal !== undefined && nextIdx !== idx) {
+          current.year = nextVal;
+          setSelectedYear(nextVal);
+          scrollColumnToValue(yearListRef, nextIdx, true, 'year');
+        }
+      }
+    };
+
+    const onDayWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      stepByOne('day', e.deltaY);
+    };
+    const onMonthWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      stepByOne('month', e.deltaY);
+    };
+    const onYearWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      stepByOne('year', e.deltaY);
+    };
+
+    const dayEl = dayListRef.current;
+    const monthEl = monthListRef.current;
+    const yearEl = yearListRef.current;
+
+    dayEl?.addEventListener('wheel', onDayWheel, { passive: false });
+    monthEl?.addEventListener('wheel', onMonthWheel, { passive: false });
+    yearEl?.addEventListener('wheel', onYearWheel, { passive: false });
+
+    return () => {
+      dayEl?.removeEventListener('wheel', onDayWheel);
+      monthEl?.removeEventListener('wheel', onMonthWheel);
+      yearEl?.removeEventListener('wheel', onYearWheel);
+    };
+  }, [scrollColumnToValue]);
 
   // Click outside listener to close automatically
   useEffect(() => {
@@ -113,45 +221,16 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
     };
   }, [onClose]);
 
-  // Smooth mouse wheel handlers per column: exactly 1 unit (+1 or -1) per wheel notch/gesture
-  const handleWheel = (
-    e: React.WheelEvent,
-    type: 'day' | 'month' | 'year',
-    colRef: React.RefObject<HTMLDivElement | null>,
-    currentVal: number,
-    list: number[],
-    setter: (val: number) => void
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const el = colRef.current;
-    if (!el) return;
-
-    const now = Date.now();
-    // Throttle wheel events by 130ms so 1 physical wheel notch strictly advances 1 single unit
-    if (now - (lastWheelTimestampRef.current[type] || 0) < 130) {
-      return;
-    }
-    lastWheelTimestampRef.current[type] = now;
-
-    const direction = e.deltaY > 0 ? 1 : -1;
-    const currentIdx = list.indexOf(currentVal);
-    const nextIdx = Math.max(0, Math.min(currentIdx + direction, list.length - 1));
-    const nextVal = list[nextIdx];
-
-    if (nextVal !== undefined) {
-      setter(nextVal);
-      scrollColumnToValue(colRef, nextIdx, true);
-    }
-  };
-
-  // Scroll event listeners with debounce for touch/drag
+  // Scroll event listeners with debounce for touch swipe / drag
   const handleScroll = (
     type: 'day' | 'month' | 'year',
     colRef: React.RefObject<HTMLDivElement | null>,
     list: number[],
     setter: (val: number) => void
   ) => {
+    if (Date.now() < programmaticUntilRef.current[type]) {
+      return;
+    }
     const el = colRef.current;
     if (!el) return;
 
@@ -160,20 +239,21 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
     }
 
     scrollTimeoutRef.current[type] = setTimeout(() => {
+      if (Date.now() < programmaticUntilRef.current[type]) return;
       const idx = Math.round(el.scrollTop / ITEM_HEIGHT);
       const validIdx = Math.max(0, Math.min(idx, list.length - 1));
       const val = list[validIdx];
       if (val !== undefined) {
         setter(val);
       }
-    }, 80);
+    }, 90);
   };
 
   // Age calculation
   const calculatedAge = useMemo(() => {
     const age = currentYear - selectedYear;
-    return age >= 0 ? `${age} tuổi` : '';
-  }, [selectedYear, currentYear]);
+    return age >= 0 ? pick('{n} tuổi', '{n} yrs', '{n} 岁').replace('{n}', String(age)) : '';
+  }, [selectedYear, currentYear, currentLang]);
 
   // Confirm and apply
   const handleApply = () => {
@@ -190,10 +270,14 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
 
   return (
     <div
-      ref={containerRef}
-      className="absolute top-full left-0 mt-2 z-50 w-full max-w-[340px] sm:max-w-[360px] bg-slate-900/98 border border-emerald-500/50 rounded-2xl shadow-2xl shadow-slate-950/80 p-3.5 space-y-3 backdrop-blur-2xl animate-in fade-in slide-in-from-top-2 duration-200 text-slate-100 select-none ring-1 ring-emerald-500/20"
-      onClick={(e) => e.stopPropagation()}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4"
+      onClick={onClose}
     >
+      <div
+        ref={containerRef}
+        className="relative w-full max-w-[340px] sm:max-w-[360px] bg-slate-900/98 border border-emerald-500/50 rounded-2xl shadow-2xl shadow-slate-950/80 p-3.5 space-y-3 backdrop-blur-2xl animate-tab-switch text-slate-100 select-none ring-1 ring-emerald-500/20"
+        onClick={(e) => e.stopPropagation()}
+      >
       {/* Header bar: Compact title & Preview */}
       <div className="flex items-center justify-between pb-2 border-b border-slate-800">
         <div className="flex items-center gap-2">
@@ -202,14 +286,14 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           </div>
           <div>
             <div className="text-xs font-bold text-white flex items-center gap-1.5">
-              <span>Cuộn chọn ngày sinh</span>
+              <span>{pick('Cuộn chọn ngày sinh', 'Scroll to pick date', '滑动选择日期')}</span>
               {calculatedAge && (
                 <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-500/20 text-emerald-300 font-mono font-semibold">
                   {calculatedAge}
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-slate-400">Lăn chuột hoặc vuốt ngón tay để cuộn</p>
+            <p className="text-[10px] text-slate-400">{pick('Lăn chuột hoặc vuốt ngón tay để cuộn', 'Scroll mouse wheel or swipe', '使用鼠标滚轮或滑动手势')}</p>
           </div>
         </div>
 
@@ -217,7 +301,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           type="button"
           onClick={onClose}
           className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-          title="Đóng bảng"
+          title={pick('Đóng bảng', 'Close', '关闭')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -225,7 +309,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
 
       {/* Date Preview Display */}
       <div className="py-1.5 px-3 rounded-xl bg-slate-950/90 border border-slate-800 flex items-center justify-between">
-        <span className="text-[11px] text-slate-400 font-medium">Ngày đang chọn:</span>
+        <span className="text-[11px] text-slate-400 font-medium">{pick('Ngày đang chọn:', 'Selected date:', '已选日期：')}</span>
         <span className="text-sm font-bold font-mono text-emerald-400 tracking-wider">
           {String(selectedDay).padStart(2, '0')} / {String(selectedMonth).padStart(2, '0')} / {selectedYear}
         </span>
@@ -235,9 +319,9 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
       <div className="relative bg-slate-950/90 rounded-xl border border-slate-800/90 p-1.5 overflow-hidden">
         {/* Column labels */}
         <div className="grid grid-cols-3 text-center pb-1 border-b border-slate-800/70 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-          <span>Ngày</span>
-          <span>Tháng</span>
-          <span>Năm</span>
+          <span>{pick('Ngày', 'Day', '日')}</span>
+          <span>{pick('Tháng', 'Month', '月')}</span>
+          <span>{pick('Năm', 'Year', '年')}</span>
         </div>
 
         {/* Scroll area container */}
@@ -261,9 +345,8 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           {/* COLUMN 1: NGÀY */}
           <div
             ref={dayListRef}
-            onWheel={(e) => handleWheel(e, 'day', dayListRef, selectedDay, days, setSelectedDay)}
             onScroll={() => handleScroll('day', dayListRef, days, setSelectedDay)}
-            className="h-full overflow-y-auto snap-y snap-mandatory scrollbar-none text-center relative z-20 touch-pan-y"
+            className="h-full overflow-y-auto snap-y snap-proximity scrollbar-none text-center relative z-20 touch-pan-y overscroll-contain"
           >
             <div style={{ height: `${ITEM_HEIGHT * 2}px` }} />
             {days.map((d) => {
@@ -274,7 +357,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
                   onClick={() => {
                     setSelectedDay(d);
                     const idx = days.indexOf(d);
-                    scrollColumnToValue(dayListRef, idx, true);
+                    scrollColumnToValue(dayListRef, idx, true, 'day');
                   }}
                   style={{ height: `${ITEM_HEIGHT}px` }}
                   className={`snap-center flex items-center justify-center cursor-pointer transition-all duration-100 font-mono text-sm ${
@@ -293,9 +376,8 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           {/* COLUMN 2: THÁNG */}
           <div
             ref={monthListRef}
-            onWheel={(e) => handleWheel(e, 'month', monthListRef, selectedMonth, months, setSelectedMonth)}
             onScroll={() => handleScroll('month', monthListRef, months, setSelectedMonth)}
-            className="h-full overflow-y-auto snap-y snap-mandatory scrollbar-none text-center relative z-20 touch-pan-y border-x border-slate-800/60"
+            className="h-full overflow-y-auto snap-y snap-proximity scrollbar-none text-center relative z-20 touch-pan-y overscroll-contain border-x border-slate-800/60"
           >
             <div style={{ height: `${ITEM_HEIGHT * 2}px` }} />
             {months.map((m) => {
@@ -306,7 +388,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
                   onClick={() => {
                     setSelectedMonth(m);
                     const idx = months.indexOf(m);
-                    scrollColumnToValue(monthListRef, idx, true);
+                    scrollColumnToValue(monthListRef, idx, true, 'month');
                   }}
                   style={{ height: `${ITEM_HEIGHT}px` }}
                   className={`snap-center flex items-center justify-center cursor-pointer transition-all duration-100 font-mono text-xs sm:text-sm ${
@@ -315,7 +397,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
                       : 'text-slate-500 hover:text-slate-300 font-medium'
                   }`}
                 >
-                  Tháng {m}
+                  {pick('Tháng {m}', 'Month {m}', '{m}月').replace('{m}', String(m))}
                 </div>
               );
             })}
@@ -325,9 +407,8 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           {/* COLUMN 3: NĂM */}
           <div
             ref={yearListRef}
-            onWheel={(e) => handleWheel(e, 'year', yearListRef, selectedYear, years, setSelectedYear)}
             onScroll={() => handleScroll('year', yearListRef, years, setSelectedYear)}
-            className="h-full overflow-y-auto snap-y snap-mandatory scrollbar-none text-center relative z-20 touch-pan-y"
+            className="h-full overflow-y-auto snap-y snap-proximity scrollbar-none text-center relative z-20 touch-pan-y overscroll-contain"
           >
             <div style={{ height: `${ITEM_HEIGHT * 2}px` }} />
             {years.map((y) => {
@@ -338,7 +419,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
                   onClick={() => {
                     setSelectedYear(y);
                     const idx = years.indexOf(y);
-                    scrollColumnToValue(yearListRef, idx, true);
+                    scrollColumnToValue(yearListRef, idx, true, 'year');
                   }}
                   style={{ height: `${ITEM_HEIGHT}px` }}
                   className={`snap-center flex items-center justify-center cursor-pointer transition-all duration-100 font-mono text-sm ${
@@ -363,7 +444,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
           onClick={handleClear}
           className="px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 text-xs font-medium transition-colors cursor-pointer"
         >
-          Xóa
+          {pick('Xóa', 'Clear', '清除')}
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -372,7 +453,7 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-medium transition-colors cursor-pointer"
           >
-            Hủy
+            {pick('Hủy', 'Cancel', '取消')}
           </button>
           <button
             type="button"
@@ -380,9 +461,10 @@ export const CompactWheelDatePicker: React.FC<CompactWheelDatePickerProps> = ({
             className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950/40 transition-all cursor-pointer active:scale-95"
           >
             <Check className="w-3.5 h-3.5 stroke-[3]" />
-            <span>Xong</span>
+            <span>{pick('Xong', 'Done', '完成')}</span>
           </button>
         </div>
+      </div>
       </div>
     </div>
   );

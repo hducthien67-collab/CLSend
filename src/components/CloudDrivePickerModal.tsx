@@ -231,7 +231,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               }`}
             >
               <HardDrive className="w-3.5 h-3.5" />
-              <span>{pick(`Tất cả (${cloudFiles.length})`, `All (${cloudFiles.length})`, `全部 (${cloudFiles.length})`)}</span>
+              <span>{pick('Tất cả ({count})', 'All ({count})', '全部 ({count})').replace('{count}', String(cloudFiles.length))}</span>
             </button>
 
             <button
@@ -352,7 +352,7 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
                 const isSelected = selectedIds.has(file.id);
                 const isAlreadyInSendList = alreadySelectedUrls.includes(file.url);
                 const isImg = isImageFile(file);
-                const fileTypeMeta = getDocumentTypeInfo(file.name, file.type);
+                const fileTypeMeta = getDocumentTypeInfo(file.name, file.type, currentLang);
 
                 return (
                   <div
@@ -459,10 +459,10 @@ export const CloudDrivePickerModal: React.FC<CloudDrivePickerModalProps> = ({
               <Check className="w-4 h-4" />
               <span>
                 {pick(
-                  `Thêm vào gửi (${selectedIds.size})`,
-                  `Attach selected (${selectedIds.size})`,
-                  `添加到发送 (${selectedIds.size})`
-                )}
+                  'Thêm vào gửi ({count})',
+                  'Attach selected ({count})',
+                  '添加到发送 ({count})'
+                ).replace('{count}', String(selectedIds.size))}
               </span>
             </button>
           </div>

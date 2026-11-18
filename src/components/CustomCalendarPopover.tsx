@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, X, Calendar as CalendarIcon, RotateCcw, Check, Sparkles } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface CustomCalendarPopoverProps {
   value: string; // YYYY-MM-DD
@@ -18,6 +19,8 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
   onChange,
   onClose
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
   const initialDate = useMemo(() => {
     if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
       const d = new Date(value);
@@ -76,20 +79,18 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
   };
 
   const weekDays = [
-    { label: 'T2', name: 'Thứ 2' },
-    { label: 'T3', name: 'Thứ 3' },
-    { label: 'T4', name: 'Thứ 4' },
-    { label: 'T5', name: 'Thứ 5' },
-    { label: 'T6', name: 'Thứ 6' },
-    { label: 'T7', name: 'Thứ 7' },
-    { label: 'CN', name: 'Chủ Nhật', highlight: true },
+    { label: pick('T2', 'Mon', '一'), name: pick('Thứ 2', 'Monday', '星期一') },
+    { label: pick('T3', 'Tue', '二'), name: pick('Thứ 3', 'Tuesday', '星期二') },
+    { label: pick('T4', 'Wed', '三'), name: pick('Thứ 4', 'Wednesday', '星期三') },
+    { label: pick('T5', 'Thu', '四'), name: pick('Thứ 5', 'Thursday', '星期四') },
+    { label: pick('T6', 'Fri', '五'), name: pick('Thứ 6', 'Friday', '星期五') },
+    { label: pick('T7', 'Sat', '六'), name: pick('Thứ 7', 'Saturday', '星期六') },
+    { label: pick('CN', 'Sun', '日'), name: pick('Chủ Nhật', 'Sunday', '星期日'), highlight: true },
   ];
 
-  const monthNames = [
-    'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4',
-    'Tháng 5', 'Tháng 6', 'Tháng 7', 'Tháng 8',
-    'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
-  ];
+  const monthNames = Array.from({ length: 12 }, (_, i) =>
+    pick('Tháng {m}', 'Month {m}', '{m}月').replace('{m}', String(i + 1))
+  );
 
   return (
     <div 
@@ -114,7 +115,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
                 <span>{monthNames[viewMonth]}</span>
                 <span className="text-emerald-400 font-mono">/ {viewYear}</span>
               </h3>
-              <p className="text-[11px] text-slate-400">Bảng lịch tự thiết kế • Chạm để chọn ngày</p>
+              <p className="text-[11px] text-slate-400">{pick('Bảng lịch tự thiết kế • Chạm để chọn ngày', 'Custom calendar • Tap to pick date', '自定义日历 • 点击选择日期')}</p>
             </div>
           </div>
 
@@ -123,7 +124,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700/60 transition-colors"
-            title="Đóng bảng lịch"
+            title={pick('Đóng bảng lịch', 'Close calendar', '关闭日历')}
           >
             <X className="w-4 h-4" />
           </button>
@@ -137,7 +138,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
               type="button"
               onClick={handlePrevMonth}
               className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 active:scale-90 transition-all"
-              title="Tháng trước"
+              title={pick('Tháng trước', 'Previous month', '上个月')}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -148,7 +149,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
               type="button"
               onClick={handleNextMonth}
               className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 active:scale-90 transition-all"
-              title="Tháng sau"
+              title={pick('Tháng sau', 'Next month', '下个月')}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -160,7 +161,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
               type="button"
               onClick={handlePrevYear}
               className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 active:scale-90 transition-all"
-              title="Năm trước"
+              title={pick('Năm trước', 'Previous year', '上一年')}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -171,7 +172,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
               type="button"
               onClick={handleNextYear}
               className="p-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 active:scale-90 transition-all"
-              title="Năm sau"
+              title={pick('Năm sau', 'Next year', '下一年')}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -247,7 +248,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
             className="px-3.5 py-2 rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-200 hover:text-white font-medium transition-colors flex items-center gap-1.5 border border-slate-700/60 active:scale-95"
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Hôm nay</span>
+            <span>{pick('Hôm nay', 'Today', '今天')}</span>
           </button>
           
           <button
@@ -259,7 +260,7 @@ export const CustomCalendarPopover: React.FC<CustomCalendarPopoverProps> = ({
             className="px-3.5 py-2 rounded-xl text-rose-400 hover:bg-rose-500/15 font-medium transition-colors border border-transparent hover:border-rose-500/30 active:scale-95 flex items-center gap-1"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Xóa ngày</span>
+            <span>{pick('Xóa ngày', 'Clear date', '清除日期')}</span>
           </button>
         </div>
       </div>

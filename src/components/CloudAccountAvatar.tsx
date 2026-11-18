@@ -1,5 +1,6 @@
 import React from 'react';
 import { Cloud, ShieldCheck, Sparkles, HardDrive, Upload, Lock, Clock, Zap } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface CloudAccountAvatarProps {
   size?: number; // pixel size, e.g. 36, 40, 48, 64
@@ -22,18 +23,21 @@ export const CloudAccountAvatar: React.FC<CloudAccountAvatarProps> = ({
   size = 40,
   className = '',
   avatarUrl,
-  name = 'Tài khoản Cloud',
+  name,
   showBadge = true,
   showStatusDot = true,
   isOnline = true,
 }) => {
-  const initial = (name.trim().charAt(0) || 'C').toUpperCase();
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
+  const resolvedName = name || pick('Tài khoản Cloud', 'Cloud Account', '云盘账户');
+  const initial = (resolvedName.trim().charAt(0) || 'C').toUpperCase();
 
   return (
     <div
       style={{ width: size, height: size }}
       className={`relative rounded-2xl shrink-0 select-none group isolate ${className}`}
-      title={`${name} - Tài khoản Cloud an toàn (Bảo vệ dữ liệu & Quota cá nhân)`}
+      title={`${resolvedName} - ${pick('Tài khoản Cloud an toàn (Bảo vệ dữ liệu & Quota cá nhân)', 'Secure Cloud Account (Data protection & Personal quota)', '安全云账户（数据保护与个人配额）')}`}
     >
       {/* Vòng hào quang lưu trữ Cloud (Glow Pulse) */}
       <div 
@@ -54,7 +58,7 @@ export const CloudAccountAvatar: React.FC<CloudAccountAvatarProps> = ({
         {avatarUrl ? (
           <img
             src={avatarUrl}
-            alt={name}
+            alt={resolvedName}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
           />
         ) : (
@@ -79,7 +83,7 @@ export const CloudAccountAvatar: React.FC<CloudAccountAvatarProps> = ({
       {showBadge && (
         <div 
           className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-cyan-500 border-2 border-slate-950 text-slate-950 flex items-center justify-center shadow-md shadow-cyan-500/30 ring-1 ring-cyan-300/50"
-          title="Tài khoản Cloud đã bảo vệ & mã hóa"
+          title={pick('Tài khoản Cloud đã bảo vệ & mã hóa', 'Protected & encrypted Cloud account', '已受保护并加密的云账户')}
         >
           <ShieldCheck className="w-2.5 h-2.5 text-slate-950 stroke-[3]" />
         </div>
@@ -114,6 +118,8 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
   maxBytes = 5 * 1024 * 1024 * 1024, // 5 GB
   className = '',
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const percent = Math.min(100, Math.round((usedBytes / maxBytes) * 100));
 
   const formatSize = (bytes: number): string => {
@@ -134,12 +140,12 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
           </div>
           <div>
             <div className="font-bold text-white flex items-center gap-1.5">
-              <span>Đặc quyền & Giới hạn Tài khoản Cloud</span>
+              <span>{pick('Đặc quyền & Giới hạn Tài khoản Cloud', 'Cloud Account Perks & Limits', '云账户特权与限额')}</span>
               <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-mono font-bold">
                 Cloud Tier
               </span>
             </div>
-            <p className="text-[10.5px] text-slate-400">Không gian lưu trữ cá nhân được mã hóa độc lập</p>
+            <p className="text-[10.5px] text-slate-400">{pick('Không gian lưu trữ cá nhân được mã hóa độc lập', 'Independently encrypted personal cloud storage', '独立加密的个人云存储空间')}</p>
           </div>
         </div>
 
@@ -153,10 +159,10 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
         <div className="flex items-center justify-between text-[11px] text-slate-300 font-medium">
           <span className="flex items-center gap-1">
             <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Dung lượng đã dùng:</span>
+            <span>{pick('Dung lượng đã dùng:', 'Used storage:', '已用空间：')}</span>
             <strong className="text-white font-bold">{formatSize(usedBytes)}</strong>
           </span>
-          <span className="text-slate-400">Hạn mức: 5 GB</span>
+          <span className="text-slate-400">{pick('Hạn mức: 5 GB', 'Limit: 5 GB', '限额：5 GB')}</span>
         </div>
         <div className="w-full h-2 rounded-full bg-slate-950 border border-slate-800 overflow-hidden">
           <div
@@ -173,15 +179,15 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
         <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2">
           <Upload className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
           <div className="min-w-0">
-            <div className="text-[9.5px] text-slate-400">Giới hạn tệp/lần:</div>
-            <div className="text-[11px] font-bold text-white font-mono">Tối đa 100 MB</div>
+            <div className="text-[9.5px] text-slate-400">{pick('Giới hạn tệp/lần:', 'File size limit:', '单文件限制：')}</div>
+            <div className="text-[11px] font-bold text-white font-mono">{pick('Tối đa 100 MB', 'Up to 100 MB', '最高 100 MB')}</div>
           </div>
         </div>
 
         <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           <div className="min-w-0">
-            <div className="text-[9.5px] text-slate-400">Bảo mật mã hóa:</div>
+            <div className="text-[9.5px] text-slate-400">{pick('Bảo mật mã hóa:', 'Encryption:', '加密安全：')}</div>
             <div className="text-[11px] font-bold text-emerald-300 font-mono">E2E TLS 1.3</div>
           </div>
         </div>
@@ -189,8 +195,8 @@ export const CloudLimitsCard: React.FC<CloudLimitsCardProps> = ({
         <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center gap-2">
           <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
           <div className="min-w-0">
-            <div className="text-[9.5px] text-slate-400">Thời gian lưu:</div>
-            <div className="text-[11px] font-bold text-amber-300 font-mono">Vĩnh viễn</div>
+            <div className="text-[9.5px] text-slate-400">{pick('Thời gian lưu:', 'Retention:', '保存时长：')}</div>
+            <div className="text-[11px] font-bold text-amber-300 font-mono">{pick('Vĩnh viễn', 'Permanent', '永久保存')}</div>
           </div>
         </div>
       </div>

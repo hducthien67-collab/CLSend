@@ -1136,7 +1136,7 @@ async function startServer() {
     }
   });
 
-  // File Download Endpoint (Forces download with sanitized original filename and header injection defense)
+  // File Download Endpoint (Forces download with sanitized original filename, HEAD & Range 206 support)
   app.get('/api/files/download/:id', (req, res) => {
     try {
       const rawId = path.basename(req.params.id);
@@ -1151,21 +1151,57 @@ async function startServer() {
         return res.status(404).send('Tệp không tồn tại hoặc đã hết hạn.');
       }
 
+      const stat = fs.statSync(filePath);
+      const fileSize = stat.size;
       const meta = fileMetaMap[rawId];
       const customName = sanitizeServerFilename((req.query.name as string) || meta?.originalName || rawId);
-      const mimeType = meta?.mimeType || 'application/octet-stream';
+      const mimeType = resolveMimeFromFilename(customName, meta?.mimeType || 'application/octet-stream');
 
       const safeAscii = customName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
 
       res.setHeader('Content-Type', mimeType);
+      res.setHeader('Accept-Ranges', 'bytes');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
       res.setHeader(
         'Content-Disposition',
         `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(customName)}`
       );
 
+      if (req.method === 'HEAD') {
+        res.setHeader('Content-Length', fileSize);
+        return res.status(200).end();
+      }
+
+      const rangeHeader = req.headers.range;
+      if (rangeHeader && fileSize > 0) {
+        const parsedRange = parseByteRange(rangeHeader, fileSize, 8 * 1024 * 1024);
+        if (!parsedRange.valid) {
+          res.status(416).setHeader('Content-Range', `bytes */${fileSize}`);
+          return res.end();
+        }
+        const chunksize = (parsedRange.end - parsedRange.start) + 1;
+        const stream = fs.createReadStream(filePath, {
+          start: parsedRange.start,
+          end: parsedRange.end,
+          highWaterMark: 256 * 1024
+        });
+        res.writeHead(206, {
+          'Content-Range': `bytes ${parsedRange.start}-${parsedRange.end}/${fileSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': mimeType,
+          'Content-Disposition': `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(customName)}`,
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type'
+        });
+        req.on('close', () => { try { stream.destroy(); } catch {} });
+        stream.on('error', () => { try { if (!res.headersSent) res.status(500).end(); else res.destroy(); } catch {} });
+        return stream.pipe(res);
+      }
+
+      res.setHeader('Content-Length', fileSize);
       return res.sendFile(filePath);
     } catch (err: any) {
       console.error('Download error:', err);
@@ -1547,90 +1583,117 @@ async function startServer() {
           return res.status(400).json({ success: false, error: 'URL Telegram không hợp lệ hoặc thiếu fileId/botToken.' });
         }
 
-        // If Telegram metadata says the file is tiny (<= 256 KB), inspect once (even if req.headers.range is present!)
-        // so sharded video manifests are automatically detected and cached on the very first <video> probe.
-        if ((resolvedFileSize !== undefined && resolvedFileSize <= 256 * 1024) || originalName.includes('.clsend_manifest')) {
-          let probeRes = await fetch(fileUrl);
-          if (!probeRes.ok && (probeRes.status === 404 || probeRes.status === 403 || probeRes.status === 400) && fileId && effectiveBotToken) {
+        // Probe tiny or unknown-size Telegram payloads via Range=0-65535 so sharded video manifests are ALWAYS detected
+        // even when file_size metadata is absent or Range headers are present on <video>.
+        if (
+          resolvedFileSize === undefined ||
+          resolvedFileSize <= 256 * 1024 ||
+          originalName.includes('.clsend_manifest')
+        ) {
+          let probeRes = await fetch(fileUrl, { headers: { Range: 'bytes=0-65535' } });
+          if (!probeRes.ok && probeRes.status !== 206 && (probeRes.status === 404 || probeRes.status === 403 || probeRes.status === 400) && fileId && effectiveBotToken) {
             const refreshed = await resolveTelegramFileUrl(fileId, effectiveBotToken, '', true);
             if (refreshed.fileUrl) {
               fileUrl = refreshed.fileUrl;
-              probeRes = await fetch(fileUrl);
+              probeRes = await fetch(fileUrl, { headers: { Range: 'bytes=0-65535' } });
             }
           }
-          if (probeRes.ok) {
-            const probeBuf = Buffer.from(await probeRes.arrayBuffer());
-            if (probeBuf.length > 0 && probeBuf.length <= 256 * 1024) {
-              const firstByte = probeBuf.toString('utf-8', 0, Math.min(32, probeBuf.length)).trimStart();
-              if (firstByte.startsWith('{')) {
-                try {
-                  const parsed = JSON.parse(probeBuf.toString('utf-8'));
-                  if (parsed && (parsed.schema === 'clsend_tg_manifest_v2' || (parsed.totalParts && Array.isArray(parsed.parts)))) {
-                    manifest = parsed;
-                    if (fileId) saveCachedManifest(fileId, manifest);
-                  }
-                } catch {}
-              }
-            }
+          if (probeRes.ok || probeRes.status === 206) {
+            const contentRangeHdr = probeRes.headers.get('content-range') || '';
+            const totalFromRange = contentRangeHdr.match(/\/(\d+)/)?.[1];
+            const totalKnownSize = totalFromRange
+              ? Number(totalFromRange)
+              : Number(probeRes.headers.get('content-length') || resolvedFileSize || 0);
 
-            // If it was NOT a manifest, serve this small payload directly (auto-restoring GIF if Telegram converted it to MP4)
-            if (!manifest) {
-              let outBuf = probeBuf;
-              let magicMime = detectMagicMime(outBuf);
-              if (
-                isInline &&
-                originalName.toLowerCase().endsWith('.gif') &&
-                (magicMime === 'video/mp4' || magicMime === 'video/webm')
-              ) {
-                const tempSrc = path.join(TG_CACHE_DIR, `small_${(fileId || 'tmp').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)}.mp4`);
-                try {
-                  if (!fs.existsSync(tempSrc) || fs.statSync(tempSrc).size === 0) {
-                    fs.writeFileSync(tempSrc, probeBuf);
-                  }
-                  const convertedGif = await ensureGifFromCachedMedia(tempSrc);
-                  if (convertedGif && fs.existsSync(convertedGif)) {
-                    outBuf = fs.readFileSync(convertedGif);
-                    magicMime = 'image/gif';
-                  }
-                } catch {}
-              }
-
-              const smallSize = outBuf.length;
-              const smallMime = magicMime || resolveMimeFromFilename(originalName, probeRes.headers.get('content-type') || 'application/octet-stream');
-              const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
-              const dispositionType = isInline ? 'inline' : 'attachment';
-
-              res.setHeader('Content-Type', smallMime);
-              res.setHeader('Accept-Ranges', 'bytes');
-              res.setHeader('Cache-Control', 'public, max-age=3600');
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
-              res.setHeader(
-                'Content-Disposition',
-                `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
-              );
-
-              if (req.method === 'HEAD') {
-                res.setHeader('Content-Length', smallSize);
-                return res.status(200).end();
-              }
-
-              const rangeHeader = req.headers.range;
-              if (rangeHeader && smallSize > 0) {
-                const parsedRange = parseByteRange(rangeHeader, smallSize, smallSize);
-                if (!parsedRange.valid) {
-                  res.status(416).setHeader('Content-Range', `bytes */${smallSize}`);
-                  return res.end();
+            if (totalKnownSize === 0 || totalKnownSize <= 256 * 1024 || originalName.includes('.clsend_manifest')) {
+              let probeBuf = Buffer.from(await probeRes.arrayBuffer());
+              // If upstream returned a partial 206 slice of a small JSON (>64KB up to 256KB), fetch full JSON
+              if (probeRes.status === 206 && totalKnownSize > probeBuf.length && totalKnownSize <= 256 * 1024) {
+                const fullProbeRes = await fetch(fileUrl);
+                if (fullProbeRes.ok) {
+                  probeBuf = Buffer.from(await fullProbeRes.arrayBuffer());
                 }
-                const slice = outBuf.subarray(parsedRange.start, parsedRange.end + 1);
-                res.status(206);
-                res.setHeader('Content-Range', `bytes ${parsedRange.start}-${parsedRange.end}/${smallSize}`);
-                res.setHeader('Content-Length', slice.length);
-                return res.send(slice);
               }
 
-              res.setHeader('Content-Length', smallSize);
-              return res.status(200).send(outBuf);
+              if (probeBuf.length > 0 && probeBuf.length <= 256 * 1024) {
+                const firstByte = probeBuf.toString('utf-8', 0, Math.min(32, probeBuf.length)).trimStart();
+                if (firstByte.startsWith('{')) {
+                  try {
+                    const parsed = JSON.parse(probeBuf.toString('utf-8'));
+                    if (
+                      parsed &&
+                      (parsed.schema === 'clsend_tg_manifest_v2' ||
+                        (Array.isArray(parsed.shards) && parsed.shards.length > 0) ||
+                        (parsed.totalParts && Array.isArray(parsed.parts)))
+                    ) {
+                      manifest = parsed;
+                      if (fileId) saveCachedManifest(fileId, manifest);
+                    }
+                  } catch {}
+                }
+              }
+
+              // If it was NOT a manifest and we already have the full payload (<= 256KB), serve directly
+              const isCompleteSmallPayload =
+                probeRes.status === 200 || (totalKnownSize > 0 && probeBuf.length >= totalKnownSize);
+              if (!manifest && isCompleteSmallPayload && probeBuf.length > 0 && probeBuf.length <= 256 * 1024) {
+                let outBuf = probeBuf;
+                let magicMime = detectMagicMime(outBuf);
+                if (
+                  isInline &&
+                  originalName.toLowerCase().endsWith('.gif') &&
+                  (magicMime === 'video/mp4' || magicMime === 'video/webm')
+                ) {
+                  const tempSrc = path.join(TG_CACHE_DIR, `small_${(fileId || 'tmp').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)}.mp4`);
+                  try {
+                    if (!fs.existsSync(tempSrc) || fs.statSync(tempSrc).size === 0) {
+                      fs.writeFileSync(tempSrc, probeBuf);
+                    }
+                    const convertedGif = await ensureGifFromCachedMedia(tempSrc);
+                    if (convertedGif && fs.existsSync(convertedGif)) {
+                      outBuf = fs.readFileSync(convertedGif);
+                      magicMime = 'image/gif';
+                    }
+                  } catch {}
+                }
+
+                const smallSize = outBuf.length;
+                const smallMime = magicMime || resolveMimeFromFilename(originalName, probeRes.headers.get('content-type') || 'application/octet-stream');
+                const safeAscii = originalName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+                const dispositionType = isInline ? 'inline' : 'attachment';
+
+                res.setHeader('Content-Type', smallMime);
+                res.setHeader('Accept-Ranges', 'bytes');
+                res.setHeader('Cache-Control', 'public, max-age=3600');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+                res.setHeader(
+                  'Content-Disposition',
+                  `${dispositionType}; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(originalName)}`
+                );
+
+                if (req.method === 'HEAD') {
+                  res.setHeader('Content-Length', smallSize);
+                  return res.status(200).end();
+                }
+
+                const rangeHeader = req.headers.range;
+                if (rangeHeader && smallSize > 0) {
+                  const parsedRange = parseByteRange(rangeHeader, smallSize, smallSize);
+                  if (!parsedRange.valid) {
+                    res.status(416).setHeader('Content-Range', `bytes */${smallSize}`);
+                    return res.end();
+                  }
+                  const slice = outBuf.subarray(parsedRange.start, parsedRange.end + 1);
+                  res.status(206);
+                  res.setHeader('Content-Range', `bytes ${parsedRange.start}-${parsedRange.end}/${smallSize}`);
+                  res.setHeader('Content-Length', slice.length);
+                  return res.send(slice);
+                }
+
+                res.setHeader('Content-Length', smallSize);
+                return res.status(200).send(outBuf);
+              }
             }
           }
         }
@@ -1786,7 +1849,10 @@ async function startServer() {
             shard.fileId,
             shard.botToken
           );
-          if (!cachedPath) break;
+          if (!cachedPath) {
+            try { res.destroy(new Error('Không thể tải mảnh tệp từ Telegram.')); } catch {}
+            return;
+          }
           await new Promise<void>((resolve, reject) => {
             const stream = fs.createReadStream(cachedPath, { highWaterMark: 256 * 1024 });
             const onClose = () => {
@@ -1832,6 +1898,27 @@ async function startServer() {
 
         if (cachedSinglePath && fs.existsSync(cachedSinglePath)) {
           let servePath = cachedSinglePath;
+          const initialStat = fs.statSync(servePath);
+          if (initialStat.size > 0 && initialStat.size <= 256 * 1024 && !req.query._manifest_recheck) {
+            try {
+              const rawText = fs.readFileSync(servePath, 'utf-8').trimStart();
+              if (rawText.startsWith('{')) {
+                const parsed = JSON.parse(rawText);
+                if (
+                  parsed &&
+                  (parsed.schema === 'clsend_tg_manifest_v2' ||
+                    (Array.isArray(parsed.shards) && parsed.shards.length > 0) ||
+                    (parsed.totalParts && Array.isArray(parsed.parts)))
+                ) {
+                  saveCachedManifest(fileId, parsed);
+                  try { fs.unlinkSync(servePath); } catch {}
+                  const sep = req.originalUrl.includes('?') ? '&' : '?';
+                  return res.redirect(307, `${req.originalUrl}${sep}_manifest_recheck=1`);
+                }
+              }
+            } catch {}
+          }
+
           let actualMagicMime = readHeaderMagicMime(servePath);
 
           if (
@@ -1973,6 +2060,96 @@ async function startServer() {
   app.head('/api/telegram/download', handleTelegramDownload);
   app.get('/api/telegram/download-dynamic', handleTelegramDownload);
   app.head('/api/telegram/download-dynamic', handleTelegramDownload);
+
+  // SSRF-Safe External File Proxy Download (for CORS-restricted hosts like Catbox/Litterbox/Pomf/Custom URLs)
+  app.get('/api/proxy-download', async (req, res) => {
+    try {
+      const targetUrlRaw = String(req.query.url || '').trim();
+      const customName = sanitizeServerFilename(String(req.query.name || 'clsend-file'));
+      if (!targetUrlRaw) {
+        return res.status(400).json({ success: false, error: 'Missing url parameter' });
+      }
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(targetUrlRaw);
+      } catch {
+        return res.status(400).json({ success: false, error: 'Invalid url parameter' });
+      }
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        return res.status(400).json({ success: false, error: 'Unsupported protocol' });
+      }
+      const host = parsedUrl.hostname.toLowerCase();
+      const isBlockedHost =
+        host === 'localhost' ||
+        host === '0.0.0.0' ||
+        host === '[::1]' ||
+        host.endsWith('.local') ||
+        host.endsWith('.internal') ||
+        /^127\./.test(host) ||
+        /^10\./.test(host) ||
+        /^192\.168\./.test(host) ||
+        /^169\.254\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+      if (isBlockedHost) {
+        return res.status(403).json({ success: false, error: 'Blocked internal host' });
+      }
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 120000);
+      const upstreamHeaders: Record<string, string> = {};
+      if (req.headers.range) upstreamHeaders['range'] = String(req.headers.range);
+
+      let upstreamRes: globalThis.Response;
+      try {
+        upstreamRes = await fetch(parsedUrl.toString(), {
+          method: 'GET',
+          headers: upstreamHeaders,
+          redirect: 'follow',
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!upstreamRes.ok && upstreamRes.status !== 206) {
+        return res.status(upstreamRes.status).json({ success: false, error: `Upstream HTTP ${upstreamRes.status}` });
+      }
+
+      const upstreamCt = (upstreamRes.headers.get('content-type') || '').toLowerCase();
+      if (upstreamCt.includes('text/html') && !customName.toLowerCase().endsWith('.html') && !customName.toLowerCase().endsWith('.htm')) {
+        return res.status(404).json({ success: false, error: 'Upstream returned HTML instead of downloadable file' });
+      }
+
+      const mimeType = resolveMimeFromFilename(customName, upstreamCt || 'application/octet-stream');
+      const safeAscii = customName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+      res.status(upstreamRes.status);
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Range, Accept-Ranges, Content-Type');
+      const contentLen = upstreamRes.headers.get('content-length');
+      const contentRng = upstreamRes.headers.get('content-range');
+      if (contentLen) res.setHeader('Content-Length', contentLen);
+      if (contentRng) res.setHeader('Content-Range', contentRng);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeAscii || 'file'}"; filename*=UTF-8''${encodeURIComponent(customName)}`
+      );
+
+      if (upstreamRes.body) {
+        const readable = Readable.fromWeb(upstreamRes.body as any);
+        res.on('close', () => { try { readable.destroy(); } catch {} });
+        readable.on('error', () => { try { if (!res.headersSent) res.status(502).end(); else res.end(); } catch {} });
+        return readable.pipe(res);
+      }
+      return res.end();
+    } catch (err: any) {
+      if (!res.headersSent) {
+        return res.status(502).json({ success: false, error: err?.message || 'Proxy download failed' });
+      }
+      try { res.end(); } catch {}
+    }
+  });
 
   // File Inline View Endpoint (For image/video/GIF preview in browser with faststart Range streaming & caching)
   app.get('/api/files/view/:id', async (req, res) => {

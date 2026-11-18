@@ -33,13 +33,16 @@ import {
   Database,
   Scale,
   AlertCircle,
-  CheckCircle2
+  CheckCircle2,
+  Code2
 } from 'lucide-react';
 import { LoginSession } from '../types';
 import { AVATAR_COLORS, getDeviceTypeInfo, generateDefaultDeviceName } from '../../utils/device';
 import { playReceiveSound } from '../../utils/sound';
 import { getPwaStorageEstimate, cleanAllPwaCachesAndBloat, StorageEstimateInfo } from '../../utils/pwaStorageCleaner';
 import { isDevUser } from '../../utils/devModeration';
+import { useLocalDevMode } from '../../utils/localDevMode';
+import { DeveloperModePanel } from '../DeveloperModePanel';
 
 export interface MobileSettingsViewProps {
   isOpen: boolean;
@@ -55,7 +58,8 @@ type MobileSettingsScreen =
   | 'profile'
   | 'language'
   | 'security'
-  | 'sessions';
+  | 'sessions'
+  | 'developer';
 
 export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
   isOpen,
@@ -81,16 +85,24 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
   } = useAuth();
   const { t, currentLang, setLanguage, languages } = useLanguage();
   const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
+  const isDev = isDevUser(currentUser?.email);
+  const { canAccessDevTab } = useLocalDevMode(isDev);
 
   const [screen, setScreen] = useState<MobileSettingsScreen>('hub');
+
+  useEffect(() => {
+    if (screen === 'developer' && !canAccessDevTab) {
+      setScreen('hub');
+    }
+  }, [screen, canAccessDevTab]);
 
   // Form states
   const [deviceName, setDeviceName] = useState(settings.deviceName);
   const [autoAccept, setAutoAccept] = useState(settings.autoAccept);
   const [soundEnabled, setSoundEnabled] = useState(settings.soundEnabled);
   const [avatarColor, setAvatarColor] = useState(settings.avatarColor);
-  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || 'Thành viên ClSend');
-  const [customBio, setCustomBio] = useState<string>(settings.customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.');
+  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || pick('Thành viên ClSend', 'ClSend Member', 'ClSend 成员'));
+  const [customBio, setCustomBio] = useState<string>(settings.customBio || pick('Sẵn sàng truyền nhận dữ liệu tốc độ cao.', 'Ready for high-speed data transfer.', '随时准备高速收发数据。'));
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | undefined>(settings.customAvatarUrl);
   const [customBannerUrl, setCustomBannerUrl] = useState<string | undefined>(settings.bannerUrl);
 
@@ -173,8 +185,8 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
       setAvatarColor(settings.avatarColor);
       setAutoAccept(settings.autoAccept);
       setSoundEnabled(settings.soundEnabled);
-      setCustomBadgeText(settings.customBadgeText || 'Thành viên ClSend');
-      setCustomBio(settings.customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.');
+      setCustomBadgeText(settings.customBadgeText || pick('Thành viên ClSend', 'ClSend Member', 'ClSend 成员'));
+      setCustomBio(settings.customBio || pick('Sẵn sàng truyền nhận dữ liệu tốc độ cao.', 'Ready for high-speed data transfer.', '随时准备高速收发数据。'));
       setCustomAvatarUrl(settings.customAvatarUrl);
       setCustomBannerUrl(settings.bannerUrl);
       setEditDisplayName(currentUser?.displayName || userProfile?.displayName || '');
@@ -320,10 +332,10 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
       setStorageInfo(updated);
       showQuickToast(
         pick(
-          `Đã dọn ${freedMb > 0 ? freedMb + ' MB' : 'bộ nhớ đệm'}`,
-          `Freed ${freedMb > 0 ? freedMb + ' MB' : 'cache'}`,
-          `已清理 ${freedMb > 0 ? freedMb + ' MB' : '缓存'}`
-        )
+          'Đã dọn {amount}',
+          'Freed {amount}',
+          '已清理 {amount}'
+        ).replace('{amount}', freedMb > 0 ? `${freedMb} MB` : pick('bộ nhớ đệm', 'cache', '缓存'))
       );
     } catch {
       // ignore
@@ -361,7 +373,7 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
     try {
       const saved = await linkPhoneNumber(phoneInput);
       setPhoneInput(saved);
-      setPhoneLinkSuccess(pick(`Đã liên kết ${saved}!`, `Linked ${saved}!`, `已绑定 ${saved}！`));
+      setPhoneLinkSuccess(pick('Đã liên kết {val}!', 'Linked {val}!', '已绑定 {val}！').replace('{val}', saved));
     } catch (err: any) {
       setPhoneLinkError(err?.message || pick('Không thể liên kết SĐT.', 'Unable to link phone.', '无法绑定手机号。'));
     } finally {
@@ -377,11 +389,7 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
     try {
       await linkEmail(linkEmailInput);
       setLinkEmailSuccess(
-        pick(
-          `Đã liên kết ${linkEmailInput.trim().toLowerCase()}!`,
-          `Linked ${linkEmailInput.trim().toLowerCase()}!`,
-          `已绑定 ${linkEmailInput.trim().toLowerCase()}！`
-        )
+        pick('Đã liên kết {val}!', 'Linked {val}!', '已绑定 {val}！').replace('{val}', linkEmailInput.trim().toLowerCase())
       );
     } catch (err: any) {
       setLinkEmailError(err?.message || pick('Không thể liên kết Email.', 'Unable to link email.', '无法绑定邮箱。'));
@@ -398,7 +406,7 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
       const res = await linkWithGoogleAccount();
       if (res?.email) {
         setLinkEmailInput(res.email);
-        setLinkEmailSuccess(pick(`Đã đồng bộ ${res.email}!`, `Synced ${res.email}!`, `已同步 ${res.email}！`));
+        setLinkEmailSuccess(pick('Đã đồng bộ {val}!', 'Synced {val}!', '已同步 {val}！').replace('{val}', res.email));
       }
     } catch (err: any) {
       setLinkEmailError(err?.message || pick('Không thể đồng bộ Google.', 'Unable to sync Google.', '无法同步 Google。'));
@@ -463,7 +471,6 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
     currentUser?.photoURL ||
     `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName)}`;
   const activeLanguageObj = languages.find((l) => l.code === currentLang) || languages[0];
-  const isDev = isDevUser(currentUser?.email);
 
   const renderDeviceIcon = (type: string, sizeClass = 'w-5 h-5') => {
     switch (type) {
@@ -501,7 +508,8 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
     profile: t('settings.tab_design', 'Hồ Sơ & Giao Diện'),
     language: t('settings.language', 'Ngôn ngữ giao diện'),
     security: t('settings.tab_account', 'Tài Khoản & Bảo Mật'),
-    sessions: t('settings.sessions_title', 'Thiết bị đang đăng nhập').replace(/^\d+\.\s*/, '')
+    sessions: t('settings.sessions_title', 'Thiết bị đang đăng nhập').replace(/^\d+\.\s*/, ''),
+    developer: pick('Chế độ Nhà phát triển', 'Developer Mode', '开发者模式')
   };
 
   return (
@@ -912,6 +920,33 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-amber-400 shrink-0" />
+                  </button>
+                )}
+
+                {canAccessDevTab && (
+                  <button
+                    id="mobile-settings-dev-mode-btn"
+                    type="button"
+                    onClick={() => setScreen('developer')}
+                    className="w-full min-h-[56px] px-4 py-2.5 flex items-center justify-between gap-3 text-left active:bg-slate-800/70 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                        <Code2 className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-emerald-300 flex items-center gap-1.5">
+                          <span>{pick('Chế độ Nhà phát triển', 'Developer Mode', '开发者模式')}</span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">
+                            {isDev ? 'DEV' : 'LOCAL'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {pick('Debug Log, hiệu năng & cài đặt máy cục bộ', 'Debug Log, performance & local device tweaks', '调试日志、性能与本地设备设置')}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-emerald-400 shrink-0" />
                   </button>
                 )}
               </div>
@@ -1404,7 +1439,7 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {pick(`Thiết bị (${sessions.length})`, `Devices (${sessions.length})`, `设备 (${sessions.length})`)}
+                  {pick('Thiết bị ({count})', 'Devices ({count})', '设备 ({count})').replace('{count}', String(sessions.length))}
                 </div>
                 <button
                   type="button"
@@ -1434,7 +1469,7 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
                         <div className="min-w-0">
                           <div className="text-sm font-bold text-white truncate">{sess.deviceName}</div>
                           <div className="text-xs text-slate-400 truncate">
-                            {sess.location || 'Việt Nam'} · {formatSessionTime(sess.loginAt)}
+                            {sess.location || pick('Không rõ vị trí', 'Unknown location', '未知位置')} · {formatSessionTime(sess.loginAt)}
                           </div>
                         </div>
                       </div>
@@ -1496,6 +1531,15 @@ export const MobileSettingsView: React.FC<MobileSettingsViewProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* ======================= DEVELOPER MODE SUB-PAGE ======================= */}
+          {screen === 'developer' && canAccessDevTab && (
+            <DeveloperModePanel
+              isDev={isDev}
+              compact
+              onAfterLock={() => setScreen('hub')}
+            />
           )}
         </div>
       </div>

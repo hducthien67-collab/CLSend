@@ -10,13 +10,13 @@ import {
   CheckCircle2,
   Info
 } from 'lucide-react';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 export interface RuleClause {
   id: string;
   ruleNumber: string; // "Luật 1" or "Rule 1"
   title: string;
-  category: 'all' | 'speech' | 'file' | 'system' | 'sanctions';
+  category: 'all' | 'speech' | 'file' | 'system' | 'sanctions' | 'dev';
   severity: 'low' | 'medium' | 'high' | 'critical';
   severityLabel: string;
   description: string;
@@ -246,6 +246,62 @@ export const COMMUNITY_RULES_VI: RuleClause[] = [
     penalties: [
       'Người dùng bị khóa có thể gửi phản hồi cho Quản trị viên kèm bằng chứng để được xem xét gỡ chặn nếu vi phạm do nhầm lẫn.'
     ]
+  },
+  {
+    id: '13',
+    ruleNumber: 'Luật 13',
+    title: 'Bảo vệ Dữ liệu Cá nhân (NĐ 13/2023/NĐ-CP VN & GDPR/CCPA Quốc tế)',
+    category: 'system',
+    severity: 'high',
+    severityLabel: 'Mức độ: Pháp luật Dữ liệu',
+    description: 'Tuân thủ chọn lọc Nghị định 13/2023/NĐ-CP Việt Nam, Luật An ninh mạng cùng GDPR & CCPA quốc tế: Mọi dữ liệu người dùng (Email, SĐT OTP, hồ sơ Google/Facebook/GitHub, tệp Cloud) được thu thập tối thiểu theo sự đồng ý rõ ràng và nghiêm cấm tuyệt đối hành vi thu thập ngầm hay rao bán dữ liệu.',
+    actions: [
+      'Cấm chạy công cụ quét trộm (Crawler/Scraper) thu thập Email, SĐT, UID hoặc hồ sơ người dùng khác.',
+      'Cấm mua bán, trao đổi thông tin tài khoản hoặc ép buộc người dùng cung cấp dữ liệu nhạy cảm.',
+      'Người dùng có toàn quyền xem, chỉnh sửa, rút lại đồng ý và xóa dữ liệu Cloud/phiên đăng nhập bất kỳ lúc nào (Right to Erasure).'
+    ],
+    penalties: [
+      'Khóa vĩnh viễn tài khoản/IP vi phạm quyền bảo vệ dữ liệu cá nhân.',
+      'Thông báo sự cố dữ liệu trong 72h và hỗ trợ xóa dữ liệu cá nhân theo yêu cầu hợp lệ.'
+    ]
+  },
+
+  // --- NHÓM LUẬT DÀNH CHO DEV & QUẢN TRỊ VIÊN ---
+  {
+    id: '14',
+    ruleNumber: 'Luật 14',
+    title: 'Giới Hạn Quyền Lực & Cấm Lạm Quyền Dành Cho DEV / Admin',
+    category: 'dev',
+    severity: 'high',
+    severityLabel: 'Mức độ: Ràng buộc DEV',
+    description: 'Người dùng có nội quy thì DEV và Quản trị viên cũng phải chịu luật nghiêm ngặt: Chỉ được khóa/hạn chế tài khoản (Ban thủ công) khi có vi phạm thực tế đối chiếu đúng điều khoản hoặc mối đe dọa an ninh khẩn cấp.',
+    actions: [
+      'Nghiêm cấm Ban người dùng theo cảm tính, mâu thuẫn cá nhân hoặc trả thù riêng.',
+      'Mọi thao tác Ban/Mở khóa (Unban) trong Datastore đều phải ghi nhận lý do minh bạch.',
+      'Tài khoản DEV khi giao tiếp cộng đồng vẫn phải giữ chuẩn mực văn minh và không dùng huy hiệu DEV để đe dọa hay trục lợi.'
+    ],
+    penalties: [
+      'Mọi lệnh khóa tài khoản sai quy định phải được thu hồi và mở khóa ngay lập tức.',
+      'Cá nhân lạm quyền bị tước bỏ quyền hạn DEV/Quản trị viên khỏi hệ thống.'
+    ]
+  },
+  {
+    id: '15',
+    ruleNumber: 'Luật 15',
+    title: 'Bảo Mật Dữ Liệu (Zero Snooping) & Trách Nhiệm Sửa Sai Của DEV',
+    category: 'dev',
+    severity: 'critical',
+    severityLabel: 'Mức độ: Đạo đức & Pháp lý DEV',
+    description: 'DEV bị nghiêm cấm lợi dụng quyền truy cập kỹ thuật để xem trộm, sao chép hoặc phát tán tệp tin, tin nhắn riêng tư và dữ liệu cá nhân (Email, SĐT, ngày sinh) của người dùng; đồng thời có trách nhiệm rà soát kháng cáo công tâm.',
+    actions: [
+      'Cấm tự ý đọc trộm nội dung riêng tư hoặc trích xuất thông tin người dùng ngoài phạm vi sửa lỗi kỹ thuật hợp lệ.',
+      'Phải tiếp nhận và kiểm tra lại các trường hợp bị AI hoặc DEV khóa nhầm trong vòng 24 - 48 giờ làm việc.',
+      'Mở khóa (Unban) ngay lập tức và xóa điểm vi phạm oan nếu xác minh là xử lý nhầm.'
+    ],
+    penalties: [
+      'Thu hồi vĩnh viễn quyền truy cập Datastore đối với bất kỳ hành vi xâm phạm riêng tư nào.',
+      'Bắt buộc khắc phục lỗi kiểm duyệt và khôi phục đầy đủ quyền lợi cho người dùng bị ảnh hưởng.'
+    ]
   }
 ];
 
@@ -470,6 +526,62 @@ export const COMMUNITY_RULES_EN: RuleClause[] = [
     ],
     penalties: [
       'Suspended users may submit an appeal with supporting evidence to Administrators for review in cases of mistaken identification.'
+    ]
+  },
+  {
+    id: '13',
+    ruleNumber: 'Rule 13',
+    title: 'Personal Data Protection (VN Decree 13/2023 & Global GDPR/CCPA)',
+    category: 'system',
+    severity: 'high',
+    severityLabel: 'Severity: Data Law Compliance',
+    description: 'Aligned with Vietnam Decree 13/2023/ND-CP, Cybersecurity Law, EU GDPR & CCPA: Personal data (Email, Phone OTP, Google/Facebook/GitHub profile, Cloud files) is minimally collected with explicit consent; unauthorized harvesting or data selling is strictly forbidden.',
+    actions: [
+      'Strictly prohibits scraping or harvesting Email addresses, phone numbers, UIDs, or member profiles.',
+      'Strictly prohibits selling, trading, or coercing disclosure of sensitive personal information.',
+      'Users retain full rights to access, rectify, withdraw consent, and erase their Cloud files/sessions anytime (GDPR Right to Erasure).'
+    ],
+    penalties: [
+      'Permanent ban on accounts or bots harvesting user data without consent.',
+      '72-hour breach notification policy and verified data deletion support upon request.'
+    ]
+  },
+
+  // --- DEVELOPER & ADMINISTRATOR RULES ---
+  {
+    id: '14',
+    ruleNumber: 'Rule 14',
+    title: 'Authority Limits & Anti-Abuse Code for DEV / Administrators',
+    category: 'dev',
+    severity: 'high',
+    severityLabel: 'Severity: DEV Constraint',
+    description: 'Just as users abide by community rules, Developers (DEV) and Administrators are strictly bound: Manual account bans/restrictions may only be issued for verifiable rule violations or urgent security threats.',
+    actions: [
+      'Strictly prohibits banning users over personal grudges, emotions, or personal retaliation.',
+      'Every manual Ban/Unban performed in Datastore must include a clear, factual reason.',
+      'DEV accounts must uphold civil communication standards and never exploit DEV badges to intimidate or coerce users.'
+    ],
+    penalties: [
+      'Any wrongful or arbitrary ban must be lifted and reverted immediately.',
+      'Personnel who abuse moderation power have their DEV/Admin privileges permanently revoked.'
+    ]
+  },
+  {
+    id: '15',
+    ruleNumber: 'Rule 15',
+    title: 'Zero Snooping Privacy Duty & Fair Remediation by DEV',
+    category: 'dev',
+    severity: 'critical',
+    severityLabel: 'Severity: DEV Ethics & Law',
+    description: 'DEVs are strictly forbidden from exploiting technical access to peek at, copy, or leak user files, private messages, or personal info (Email, Phone, DOB), and must review appeals impartially.',
+    actions: [
+      'Never snoop on private content or extract user personal data outside legitimate bug-fixing or legal compliance.',
+      'Review AI false-positive flags or manual ban appeals fairly within 24 - 48 business hours.',
+      'Unban immediately and erase wrongful violation marks whenever a mistake is verified.'
+    ],
+    penalties: [
+      'Permanent revocation of Datastore access for any privacy or data confidentiality breach.',
+      'Mandatory restoration of affected user accounts and prompt remediation of moderation defects.'
     ]
   }
 ];
@@ -696,6 +808,62 @@ export const COMMUNITY_RULES_ZH: RuleClause[] = [
     penalties: [
       '如认为系统误判，被封禁用户可附带证明材料向管理员提交申诉以申请人工复核解封。'
     ]
+  },
+  {
+    id: '13',
+    ruleNumber: '规则 13',
+    title: '个人数据保护合规（越南第 13/2023 号法令及国际 GDPR/CCPA）',
+    category: 'system',
+    severity: 'high',
+    severityLabel: '严重程度：数据保护法规',
+    description: '遵循越南第 13/2023/NĐ-CP 号法令、《网络安全法》及欧盟 GDPR、美国 CCPA 核心标准：平台遵循最小化与明示同意原则处理个人数据（邮箱、手机 OTP、Google/Facebook/GitHub 登录信息及云盘文件），严禁任何未经授权的数据抓取或倒卖行为。',
+    actions: [
+      '严禁运行爬虫或脚本批量采集其他用户的邮箱、手机号、UID 或个人资料。',
+      '严禁出售、交换用户个人数据或强迫他人提供敏感隐私信息。',
+      '用户随时享有查阅、更正、撤回同意以及删除云盘文件和登录会话的权利（被遗忘权）。'
+    ],
+    penalties: [
+      '永久封禁侵犯个人数据保护条款的账号及自动化工具。',
+      '承诺履行 72 小时数据安全事件通报机制并支持合法的数据删除申请。'
+    ]
+  },
+
+  // --- 开发者与管理员规范 ---
+  {
+    id: '14',
+    ruleNumber: '规则 14',
+    title: '开发者 (DEV) 与管理员权限边界及严禁滥用职权',
+    category: 'dev',
+    severity: 'high',
+    severityLabel: '严重程度：DEV 约束',
+    description: '正如用户须遵守社区规范，开发者 (DEV) 与管理员同样受严格规则约束：仅可在存在真实违规证据或紧急安全威胁时执行手动封禁 (Ban) 或功能限制。',
+    actions: [
+      '严禁因个人恩怨、情绪化或私人报复随意封禁用户账号。',
+      '在后台执行的每一项手动封禁/解封 (Ban/Unban) 操作均须填写清晰真实的理由。',
+      'DEV 账号在社区发言时须保持文明礼貌，严禁借 DEV 徽章恐吓或强迫用户。'
+    ],
+    penalties: [
+      '任何违规或误判封禁必须立即撤销并恢复账号。',
+      '滥用审核权限者将被永久撤销 DEV 与管理员权限。'
+    ]
+  },
+  {
+    id: '15',
+    ruleNumber: '规则 15',
+    title: '开发者严守数据隐私 (Zero Snooping) 与公正纠错义务',
+    category: 'dev',
+    severity: 'critical',
+    severityLabel: '严重程度：DEV 道德与法规',
+    description: '严禁 DEV 利用技术访问权限偷窥、复制或泄露用户的云盘文件、私密聊天记录及个人资料（邮箱、手机、生日），并须公正审核用户申诉。',
+    actions: [
+      '不得在正当故障排查或法定合规之外擅自查阅私人内容或导出用户个人信息。',
+      '在 24 至 48 个工作小时内公正复核 AI 误判或手动封禁申诉。',
+      '确认误判后须立即解除封禁 (Unban) 并清除错误违规记录。'
+    ],
+    penalties: [
+      '任何侵犯用户隐私的行为将导致后台访问权限被永久吊销。',
+      '必须及时修复审核缺陷并恢复受影响用户的完整权益。'
+    ]
   }
 ];
 
@@ -707,7 +875,7 @@ interface RulesModalProps {
   onClose: () => void;
   isMandatory?: boolean;
   onAccept?: () => void;
-  initialCategory?: 'all' | 'speech' | 'file' | 'system' | 'sanctions';
+  initialCategory?: 'all' | 'speech' | 'file' | 'system' | 'sanctions' | 'dev';
 }
 
 export const RulesModal: React.FC<RulesModalProps> = ({ 
@@ -718,11 +886,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   initialCategory = 'all'
 }) => {
   const { currentLang, setLanguage } = useLanguage();
-  const isVi = currentLang === 'vi';
   const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
-  const isEn = !isVi && !isZh;
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
 
-  const [activeCategory, setActiveCategory] = useState<'all' | 'speech' | 'file' | 'system' | 'sanctions'>(initialCategory);
+  const [activeCategory, setActiveCategory] = useState<'all' | 'speech' | 'file' | 'system' | 'sanctions' | 'dev'>(initialCategory);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [hasAgreed, setHasAgreed] = useState(false);
@@ -753,12 +920,29 @@ export const RulesModal: React.FC<RulesModalProps> = ({
     };
   }, [isOpen, isMandatory]);
 
-  // Select localized rules set
+  // Select localized rules set across all 33 languages
   const currentRules = useMemo(() => {
-    if (isEn) return COMMUNITY_RULES_EN;
-    if (isZh) return COMMUNITY_RULES_ZH;
-    return COMMUNITY_RULES_VI;
-  }, [isEn, isZh]);
+    if (currentLang === 'vi') return COMMUNITY_RULES_VI;
+    if (currentLang === 'zh-CN') return COMMUNITY_RULES_ZH;
+    if (currentLang === 'en') return COMMUNITY_RULES_EN;
+    return COMMUNITY_RULES_EN.map((enRule, i) => {
+      const viRule = COMMUNITY_RULES_VI[i] || enRule;
+      const zhRule = COMMUNITY_RULES_ZH[i] || enRule;
+      return {
+        ...enRule,
+        ruleNumber: pickLang(currentLang, viRule.ruleNumber, enRule.ruleNumber, zhRule.ruleNumber),
+        title: pickLang(currentLang, viRule.title, enRule.title, zhRule.title),
+        severityLabel: pickLang(currentLang, viRule.severityLabel, enRule.severityLabel, zhRule.severityLabel),
+        description: pickLang(currentLang, viRule.description, enRule.description, zhRule.description),
+        actions: enRule.actions.map((act, j) =>
+          pickLang(currentLang, viRule.actions[j] ?? act, act, zhRule.actions[j] ?? act)
+        ),
+        penalties: enRule.penalties.map((pen, j) =>
+          pickLang(currentLang, viRule.penalties[j] ?? pen, pen, zhRule.penalties[j] ?? pen)
+        ),
+      };
+    });
+  }, [currentLang]);
 
   // When mandatory (first login), always display all 12 rules without search or category filtering
   const displayedRules = useMemo(() => {
@@ -785,11 +969,10 @@ export const RulesModal: React.FC<RulesModalProps> = ({
   if (!isOpen) return null;
 
   const handleCopyRule = (rule: RuleClause) => {
-    const textToCopy = isEn
-      ? `[Basis: ${rule.ruleNumber}: ${rule.title}]\n- Specific Prohibited Actions:\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- Sanctions & Penalties:\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`
-      : isZh
-      ? `[依据 ${rule.ruleNumber}: ${rule.title}]\n- 具体违规行为：\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- 处罚标准与措施：\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`
-      : `[Căn cứ ${rule.ruleNumber}: ${rule.title}]\n- Các Hành Vi Cụ Thể:\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n- Căn Cứ Xử Phạt:\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`;
+    const basisHeader = `[${pick('Căn cứ', 'Basis:', '依据')} ${rule.ruleNumber}: ${rule.title}]`;
+    const actionsHeader = pick('- Các Hành Vi Cụ Thể:', '- Specific Prohibited Actions:', '- 具体违规行为：');
+    const penaltiesHeader = pick('- Căn Cứ Xử Phạt:', '- Sanctions & Penalties:', '- 处罚标准与措施：');
+    const textToCopy = `${basisHeader}\n${actionsHeader}\n${rule.actions.map(a => `+ ${a}`).join('\n')}\n${penaltiesHeader}\n${rule.penalties.map(p => `+ ${p}`).join('\n')}`;
 
     navigator.clipboard.writeText(textToCopy);
     setCopiedId(rule.id);
@@ -802,21 +985,21 @@ export const RulesModal: React.FC<RulesModalProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
             <Flame className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: Critical' : isZh ? '严重程度：极其严重' : rule.severityLabel}
+            {pick('Mức độ: CỰC KỲ NGHIÊM TRỌNG', 'Severity: Critical', '严重程度：极其严重')}
           </span>
         );
       case 'high':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
             <AlertTriangle className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: High' : isZh ? '严重程度：高' : rule.severityLabel}
+            {pick('Mức độ: Cao', 'Severity: High', '严重程度：高')}
           </span>
         );
       case 'medium':
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
             <Info className="w-3.5 h-3.5" />
-            {isEn ? 'Severity: Medium' : isZh ? '严重程度：中' : rule.severityLabel}
+            {pick('Mức độ: Trung bình', 'Severity: Medium', '严重程度：中')}
           </span>
         );
       case 'low':
@@ -824,11 +1007,9 @@ export const RulesModal: React.FC<RulesModalProps> = ({
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            {isEn
-              ? (rule.category === 'sanctions' ? 'Severity: General Rule' : 'Severity: Low')
-              : isZh
-              ? (rule.category === 'sanctions' ? '严重程度：通用条款' : '严重程度：一般规范')
-              : rule.severityLabel}
+            {rule.category === 'sanctions'
+              ? pick('Mức độ: Quy định chung', 'Severity: General Rule', '严重程度：通用条款')
+              : pick('Mức độ: Thấp', 'Severity: Low', '严重程度：一般规范')}
           </span>
         );
     }
@@ -843,85 +1024,43 @@ export const RulesModal: React.FC<RulesModalProps> = ({
     }
   };
 
-  // Localized text dictionary for modal UI
-  const labels = isEn ? {
-    title: 'Web Terms of Use & Community Guidelines',
-    mandatoryBadge: 'Required Confirmation',
-    subtitle: '(Filtered in accordance with cybersecurity laws of Vietnam, international regulations, and web policies)',
-    close: 'Close',
-    all: `All (${currentRules.length})`,
-    speech: 'Language & Communication',
-    file: 'Files & Media',
-    system: 'System & Chat Rooms',
-    sanctions: 'Penalties & Sanctions',
-    searchPlaceholder: 'Search rules (e.g. Rule 1, 18+, bypass)...',
-    mandatoryNotice: 'Welcome to CloudSend! Please review the 12 rules below, check the confirmation box at the bottom, and click Start using.',
-    mandatoryCounter: '12 / 12 Rules',
-    actionsLabel: '- Specific Prohibited Actions:',
-    penaltiesLabel: '- Sanctions & Penalties:',
-    appliesToAll: 'Applies to all users across the system',
-    copyBtn: 'Copy',
-    copiedBtn: 'Rule copied!',
-    copyTooltip: 'Copy rule to cite for moderation',
-    confirmTitle: 'Confirm Acceptance of CloudSend Web Rules',
-    confirmDesc: 'By confirming acceptance, you commit to fully comply with all 12 rules above to maintain safety and a positive experience for all members.',
-    agreeCheckbox: 'I have read and agree to comply with CloudSend web rules',
-    startUsing: 'Start using',
-    footerMandatoryHint: '* Scroll to the bottom to confirm acceptance and get started.',
-    footerNotice: 'Users can copy rules to remind violating members in chat rooms.',
-    footerClose: 'Understood & Close',
-  } : isZh ? {
-    title: '平台使用条款与社区规范',
-    mandatoryBadge: '必须确认',
-    subtitle: '（依据网络安全法规、国际标准及平台管理规范制定）',
-    close: '关闭',
-    all: `全部 (${currentRules.length})`,
-    speech: '言语与交流',
-    file: '文件与媒体',
-    system: '系统与聊天室',
-    sanctions: '处罚与申诉',
-    searchPlaceholder: '搜索规则（例如：规则 1、18+、绕过）...',
-    mandatoryNotice: '欢迎来到 CloudSend！请阅读下方 12 条社区规则，勾选底部确认框后点击“开始使用”。',
-    mandatoryCounter: '12 / 12 条规则',
-    actionsLabel: '- 具体违规行为：',
-    penaltiesLabel: '- 处罚依据与措施：',
-    appliesToAll: '适用于平台全体用户',
-    copyBtn: '复制',
-    copiedBtn: '已复制规则！',
-    copyTooltip: '复制规则以作为处理违规行为的依据',
-    confirmTitle: '确认同意 CloudSend 平台社区规范',
-    confirmDesc: '确认同意即表示您承诺严格遵守以上 12 条规则，共同维护安全、友好的交流环境。',
-    agreeCheckbox: '我已阅读并同意遵守 CloudSend 平台使用规则',
-    startUsing: '开始使用',
-    footerMandatoryHint: '* 请滚动至底部勾选确认并开始使用。',
-    footerNotice: '用户可复制规则条款以在聊天室中提醒违规成员。',
-    footerClose: '我已了解并关闭',
-  } : {
-    title: 'Nội Quy & Điều Khoản Sử Dụng Web',
-    mandatoryBadge: 'Bắt buộc xác nhận',
-    subtitle: '(Lọc theo các luật an ninh mạng của Việt Nam, luật của các quốc gia và quy định của web)',
-    close: 'Đóng',
-    all: `Tất cả (${currentRules.length})`,
-    speech: 'Ngôn từ & Giao tiếp',
-    file: 'Tệp tin & Hình ảnh',
-    system: 'Hệ thống & Phòng chat',
-    sanctions: 'Khung xử phạt',
-    searchPlaceholder: 'Tìm điều luật (ví dụ: Luật 1, 18+, lách luật)...',
-    mandatoryNotice: 'Chào mừng bạn đến với CloudSend! Vui lòng xem 12 điều luật dưới đây, tích xác nhận ở cuối trang và nhấn Bắt đầu sử dụng.',
-    mandatoryCounter: '12 / 12 Điều luật',
-    actionsLabel: '- Các Hành Vi Cụ Thể:',
-    penaltiesLabel: '- Căn Cứ Xử Phạt & Chế Tài:',
-    appliesToAll: 'Áp dụng cho toàn bộ người dùng trong hệ thống',
-    copyBtn: 'Sao chép',
-    copiedBtn: 'Đã sao chép điều luật!',
-    copyTooltip: 'Sao chép điều luật để gửi làm căn cứ xử lý vi phạm',
-    confirmTitle: 'Xác Nhận Chấp Nhận Nội Quy Web CloudSend',
-    confirmDesc: 'Bằng việc xác nhận chấp nhận, bạn cam kết tuân thủ đầy đủ 12 điều luật trên để giữ an toàn và trải nghiệm tốt cho mọi thành viên.',
-    agreeCheckbox: 'Tôi đã đọc và xác nhận chấp nhận các luật của web CloudSend',
-    startUsing: 'Bắt đầu sử dụng',
-    footerMandatoryHint: '* Kéo xuống cuối trang để tích xác nhận và bắt đầu sử dụng.',
-    footerNotice: 'Người dùng có thể sao chép điều luật để nhắc nhở thành viên vi phạm trong phòng chat.',
-    footerClose: 'Đã hiểu & Đóng',
+  // Localized text dictionary for modal UI via pick() -> translated into all 33 languages
+  const labels = {
+    title: pick('Nội Quy & Điều Khoản Sử Dụng Web', 'Web Terms of Use & Community Guidelines', '平台使用条款与社区规范'),
+    mandatoryBadge: pick('Bắt buộc xác nhận', 'Required Confirmation', '必须确认'),
+    subtitle: pick('(Lọc theo các luật an ninh mạng của Việt Nam, luật của các quốc gia và quy định của web)', '(Filtered in accordance with cybersecurity laws of Vietnam, international regulations, and web policies)', '（依据网络安全法规、国际标准及平台管理规范制定）'),
+    close: pick('Đóng', 'Close', '关闭'),
+    all: `${pick('Tất cả', 'All', '全部')} (${currentRules.length})`,
+    speech: pick('Ngôn từ & Giao tiếp', 'Language & Communication', '言语与交流'),
+    file: pick('Tệp tin & Hình ảnh', 'Files & Media', '文件与媒体'),
+    system: pick('Hệ thống & Phòng chat', 'System & Chat Rooms', '系统与聊天室'),
+    sanctions: pick('Khung xử phạt', 'Penalties & Sanctions', '处罚与申诉'),
+    dev: pick('Luật dành cho DEV', 'DEV Rules', '开发者规范'),
+    searchPlaceholder: pick('Tìm điều luật (ví dụ: Luật 1, 18+, DEV, lách luật)...', 'Search rules (e.g. Rule 1, 18+, DEV, bypass)...', '搜索规则（例如：规则 1、18+、DEV、绕过）...'),
+    mandatoryNotice: pick(
+      `Chào mừng bạn đến với CloudSend! Vui lòng xem ${currentRules.length} điều luật (bao gồm quy tắc cho người dùng & DEV) dưới đây, tích xác nhận ở cuối trang và nhấn Bắt đầu sử dụng.`,
+      `Welcome to CloudSend! Please review the ${currentRules.length} rules (covering both users & DEVs) below, check the confirmation box at the bottom, and click Start using.`,
+      `欢迎来到 CloudSend！请阅读下方 ${currentRules.length} 条社区与开发者规范，勾选底部确认框后点击“开始使用”。`
+    ),
+    mandatoryCounter: `${currentRules.length} / ${currentRules.length} ${pick('Điều luật', 'Rules', '条规则')}`,
+    actionsLabel: pick('- Các Hành Vi Cụ Thể:', '- Specific Prohibited Actions:', '- 具体违规行为：'),
+    penaltiesLabel: pick('- Căn Cứ Xử Phạt & Chế Tài:', '- Sanctions & Penalties:', '- 处罚依据与措施：'),
+    appliesToAll: pick('Áp dụng cho toàn bộ người dùng trong hệ thống', 'Applies to all users across the system', '适用于平台全体用户'),
+    appliesToDev: pick('Áp dụng bắt buộc cho DEV & Ban Quản Trị', 'Binding on all DEV & Admin accounts', '强制适用于所有 DEV 与管理员账号'),
+    copyBtn: pick('Sao chép', 'Copy', '复制'),
+    copiedBtn: pick('Đã sao chép điều luật!', 'Rule copied!', '已复制规则！'),
+    copyTooltip: pick('Sao chép điều luật để gửi làm căn cứ xử lý vi phạm', 'Copy rule to cite for moderation', '复制规则以作为处理违规行为的依据'),
+    confirmTitle: pick('Xác Nhận Chấp Nhận Nội Quy Web CloudSend', 'Confirm Acceptance of CloudSend Web Rules', '确认同意 CloudSend 平台社区规范'),
+    confirmDesc: pick(
+      `Bằng việc xác nhận chấp nhận, bạn cam kết tuân thủ đầy đủ ${currentRules.length} điều luật trên (bao gồm quy chuẩn minh bạch hai chiều giữa người dùng & DEV) để giữ an toàn cho mọi thành viên.`,
+      `By confirming acceptance, you commit to comply with all ${currentRules.length} rules above (establishing fair two-way accountability for both users & DEVs) to keep every member safe.`,
+      `确认同意即表示您认可并遵守以上 ${currentRules.length} 条规则（包含用户与 DEV 双向公平规范），共同维护安全友好的环境。`
+    ),
+    agreeCheckbox: pick('Tôi đã đọc và xác nhận chấp nhận các luật của web CloudSend', 'I have read and agree to comply with CloudSend web rules', '我已阅读并同意遵守 CloudSend 平台使用规则'),
+    startUsing: pick('Bắt đầu sử dụng', 'Start using', '开始使用'),
+    footerMandatoryHint: pick('* Kéo xuống cuối trang để tích xác nhận và bắt đầu sử dụng.', '* Scroll to the bottom to confirm acceptance and get started.', '* 请滚动至底部勾选确认并开始使用。'),
+    footerNotice: pick('Người dùng có thể sao chép điều luật để nhắc nhở thành viên vi phạm trong phòng chat.', 'Users can copy rules to remind violating members in chat rooms.', '用户可复制规则条款以在聊天室中提醒违规成员。'),
+    footerClose: pick('Đã hiểu & Đóng', 'Understood & Close', '我已了解并关闭'),
   };
 
   return (
@@ -1081,6 +1220,17 @@ export const RulesModal: React.FC<RulesModalProps> = ({
               >
                 {labels.sanctions}
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveCategory('dev')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                  activeCategory === 'dev'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                {labels.dev}
+              </button>
             </div>
 
             {/* Search Box */}
@@ -1179,8 +1329,8 @@ export const RulesModal: React.FC<RulesModalProps> = ({
 
                 {/* Bottom Bar: Copy button on bottom right */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                  <span className="text-[11px] text-slate-500 hidden sm:inline">
-                    {labels.appliesToAll}
+                  <span className={`text-[11px] hidden sm:inline ${rule.category === 'dev' ? 'text-emerald-400 font-semibold' : 'text-slate-500'}`}>
+                    {rule.category === 'dev' ? labels.appliesToDev : labels.appliesToAll}
                   </span>
 
                   {/* Copy button */}

@@ -11,6 +11,7 @@ import {
   Loader2,
   Sparkles
 } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface AudioPreviewPlayerProps {
   src: string;
@@ -23,6 +24,8 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
   fileName,
   autoPlay = true,
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const audioRef = useRef<HTMLAudioElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
 
@@ -149,7 +152,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
         onError={() => {
           setIsBuffering(false);
           setIsPlaying(false);
-          setAudioError('Không thể phát tệp âm thanh này hoặc liên kết đã hết hạn.');
+          setAudioError(pick('Không thể phát tệp âm thanh này hoặc liên kết đã hết hạn.', 'Unable to play this audio file or the link has expired.', '无法播放此音频文件或链接已过期。'));
         }}
       />
 
@@ -194,7 +197,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
             onClick={togglePlay}
             disabled={isBuffering && !isPlaying}
             className="w-8 h-8 rounded-full flex items-center justify-center text-slate-900 hover:text-black hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
-            title={isPlaying ? 'Tạm dừng (Phím Space)' : 'Phát (Phím Space)'}
+            title={isPlaying ? pick('Tạm dừng (Phím Space)', 'Pause (Spacebar)', '暂停（空格键）') : pick('Phát (Phím Space)', 'Play (Spacebar)', '播放（空格键）')}
           >
             {isBuffering ? (
               <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
@@ -215,7 +218,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
             ref={progressBarRef}
             onClick={handleProgressClick}
             className="flex-1 h-3 flex items-center cursor-pointer group py-1"
-            title="Tua đến vị trí"
+            title={pick('Tua đến vị trí', 'Seek to position', '拖动进度条')}
           >
             <div className="w-full h-1 bg-slate-300 group-hover:h-1.5 transition-all rounded-full overflow-hidden relative">
               <div
@@ -230,7 +233,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
             type="button"
             onClick={toggleMute}
             className="w-7 h-7 rounded-full flex items-center justify-center text-slate-800 hover:text-black hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
-            title={isMuted ? 'Bật âm thanh' : 'Tắt tiếng'}
+            title={isMuted ? pick('Bật âm thanh', 'Unmute', '取消静音') : pick('Tắt tiếng', 'Mute', '静音')}
           >
             {isMuted ? (
               <VolumeX className="w-4 h-4 text-rose-600" />
@@ -245,7 +248,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
               type="button"
               onClick={() => setShowMenu(!showMenu)}
               className="w-7 h-7 rounded-full flex items-center justify-center text-slate-600 hover:text-black hover:bg-slate-100 transition-colors shrink-0 cursor-pointer"
-              title="Tùy chọn phát"
+              title={pick('Tùy chọn phát', 'Playback options', '播放选项')}
             >
               <MoreVertical className="w-4 h-4" />
             </button>
@@ -257,7 +260,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Tốc độ phát
+                  {pick('Tốc độ phát', 'Playback Speed', '播放速度')}
                 </div>
                 <div className="grid grid-cols-4 gap-1 mb-2 px-1">
                   {[1, 1.25, 1.5, 2].map((rate) => (
@@ -285,7 +288,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
                 >
                   <span className="flex items-center gap-2">
                     <Repeat className="w-3.5 h-3.5" />
-                    <span>Lặp lại bài hát</span>
+                    <span>{pick('Lặp lại bài hát', 'Loop track', '单曲循环')}</span>
                   </span>
                   <span className={`w-2 h-2 rounded-full ${isLooping ? 'bg-emerald-400' : 'bg-slate-600'}`} />
                 </button>
@@ -299,7 +302,7 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl hover:bg-slate-800 text-slate-200 transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  <span>Phát lại từ đầu</span>
+                  <span>{pick('Phát lại từ đầu', 'Restart from beginning', '从头播放')}</span>
                 </button>
               </div>
             )}
@@ -311,12 +314,12 @@ export const AudioPreviewPlayer: React.FC<AudioPreviewPlayerProps> = ({
           <div className="flex items-center gap-2 mt-3 text-[11px] text-violet-300 font-medium">
             {isLooping && (
               <span className="px-2 py-0.5 rounded-full bg-violet-500/20 border border-violet-500/30">
-                🔁 Đang lặp lại
+                🔁 {pick('Đang lặp lại', 'Looping', '正在循环')}
               </span>
             )}
             {playbackRate !== 1 && (
               <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-500/30">
-                ⚡ Tốc độ: {playbackRate}x
+                ⚡ {pick('Tốc độ: {rate}x', 'Speed: {rate}x', '倍速：{rate}x').replace('{rate}', String(playbackRate))}
               </span>
             )}
           </div>

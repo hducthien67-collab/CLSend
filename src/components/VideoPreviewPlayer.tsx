@@ -101,6 +101,7 @@ export const VideoPreviewPlayer: React.FC<VideoPreviewPlayerProps> = ({
       <AllInOneVideoPlayer
         isOpen={true}
         isEmbedded={true}
+        initialId={fileId}
         initialSrc={resolvedSrc}
         initialTitle={fileName}
         initialFile={resolvedFile}

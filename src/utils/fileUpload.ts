@@ -2,6 +2,7 @@ import { inspectFileSecurity, sanitizeFilename } from './fileSecurity';
 import { getTelegramConfig, uploadToTelegram, isGifFile } from './telegramStorage';
 import { storeFileBlobLocally } from './idbStorage';
 import { uploadToExternalWebServices } from './externalStorage';
+import { pickActiveLang } from '../context/LanguageContext';
 
 export { isGifFile };
 
@@ -426,12 +427,15 @@ async function uploadViaBase64(
 
   if (!res.ok) {
     const errJson = await res.json().catch(() => ({}));
-    throw new Error(errJson.error || `Tải tệp "${file.name}" thất bại.`);
+    throw new Error(
+      errJson.error ||
+        pickActiveLang('Tải tệp "{name}" thất bại.', 'Failed to upload "{name}".', '文件“{name}”上传失败。').replace('{name}', file.name)
+    );
   }
 
   const json = await res.json();
   if (!json.success || !json.file) {
-    throw new Error(json.error || 'Máy chủ không thể lưu tệp.');
+    throw new Error(json.error || pickActiveLang('Máy chủ không thể lưu tệp.', 'The server could not save the file.', '服务器无法保存文件。'));
   }
 
   if (onProgress) onProgress(100);
@@ -503,7 +507,10 @@ async function uploadViaFetch(
   }
 
   if (!res.ok || !json.success || !json.file) {
-    throw new Error(json?.error || `Lỗi tải tệp (${res.status})`);
+    throw new Error(
+      json?.error ||
+        pickActiveLang('Lỗi tải tệp ({status})', 'File upload error ({status})', '文件上传错误 ({status})').replace('{status}', String(res.status))
+    );
   }
 
   if (onProgress) onProgress(100);
@@ -551,19 +558,19 @@ function uploadViaMultipart(
             if (onProgress) onProgress(100);
             resolve(res.file);
           } else {
-            reject(new Error(res.error || 'Tải tệp lên không thành công'));
+            reject(new Error(res.error || pickActiveLang('Tải tệp lên không thành công', 'File upload failed', '文件上传失败')));
           }
         } catch {
           reject(new Error('INVALID_JSON'));
         }
       } else {
-        let msg = `Lỗi HTTP ${status}`;
+        let msg = pickActiveLang('Lỗi HTTP {status}', 'HTTP error {status}', 'HTTP 错误 {status}').replace('{status}', String(status));
         try {
           const errRes = JSON.parse(rawText);
           if (errRes.error) msg = errRes.error;
         } catch {
           if (status === 413) {
-            msg = 'Tệp vượt quá kích thước cho phép của hệ thống.';
+            msg = pickActiveLang('Tệp vượt quá kích thước cho phép của hệ thống.', 'File exceeds the maximum system size limit.', '文件超过系统允许的最大大小。');
           }
         }
         reject(new Error(msg));
@@ -579,7 +586,7 @@ function uploadViaMultipart(
     };
 
     xhr.onabort = () => {
-      reject(new Error('Quá trình tải tệp đã bị hủy.'));
+      reject(new Error(pickActiveLang('Quá trình tải tệp đã bị hủy.', 'File upload was cancelled.', '文件上传已取消。')));
     };
 
     xhr.send(formData);
@@ -633,10 +640,18 @@ export async function uploadViaChunks(
         if (rawText.startsWith('<') || rawText.includes('<!doctype') || rawText.includes('<html')) {
           return reject(new Error('HTML_RESPONSE'));
         }
+        if (xhr.status === 404 || xhr.status === 405) {
+          return reject(new Error('ENDPOINT_NOT_FOUND'));
+        }
         try {
           const data = JSON.parse(rawText);
           if (xhr.status < 200 || xhr.status >= 300 || !data.success) {
-            return reject(new Error(data?.error || `Lỗi tải mảnh HTTP ${xhr.status}`));
+            return reject(
+              new Error(
+                data?.error ||
+                  pickActiveLang('Lỗi tải mảnh HTTP {status}', 'Chunk upload HTTP error {status}', '分片上传 HTTP 错误 {status}').replace('{status}', String(xhr.status))
+              )
+            );
           }
           chunkLoadedBytes[chunkIdx] = chunkByteLen;
           emitSmoothProgress();
@@ -689,13 +704,20 @@ export async function uploadViaChunks(
         } catch (err: any) {
           lastChunkError = err;
           chunkLoadedBytes[chunkIndex] = 0;
+          if (err?.message === 'HTML_RESPONSE' || err?.message === 'ENDPOINT_NOT_FOUND') {
+            fatalError = err;
+            throw err;
+          }
           try {
             const statusRes = await fetch(`/api/upload-chunk-status/${uploadId}`);
-            const statusData = await statusRes.json();
-            if (statusData.success && statusData.assembled && statusData.file) {
-              assembledFile = statusData.file;
-              chunkSuccess = true;
-              break;
+            const ct = statusRes.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const statusData = await statusRes.json();
+              if (statusData.success && statusData.assembled && statusData.file) {
+                assembledFile = statusData.file;
+                chunkSuccess = true;
+                break;
+              }
             }
           } catch {}
           await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
@@ -712,7 +734,12 @@ export async function uploadViaChunks(
           }
         } catch {}
 
-        fatalError = new Error(lastChunkError?.message || `Lỗi tải lên phần ${chunkIndex + 1}/${totalChunks}`);
+        fatalError = new Error(
+          lastChunkError?.message ||
+            pickActiveLang('Lỗi tải lên phần {part}/{total}', 'Failed to upload part {part}/{total}', '分片 {part}/{total} 上传失败')
+              .replace('{part}', String(chunkIndex + 1))
+              .replace('{total}', String(totalChunks))
+        );
         throw fatalError;
       }
     }
@@ -742,7 +769,13 @@ export async function uploadViaChunks(
   }
 
   if (!assembledFile) {
-    throw new Error('Máy chủ đang xử lý ghép tệp hoặc chưa nhận đủ các phần dữ liệu.');
+    throw new Error(
+      pickActiveLang(
+        'Máy chủ đang xử lý ghép tệp hoặc chưa nhận đủ các phần dữ liệu.',
+        'The server is still assembling the file or has not received all parts yet.',
+        '服务器正在合并文件或尚未收到全部分片数据。'
+      )
+    );
   }
 
   if (onProgress) onProgress(100);
@@ -841,11 +874,19 @@ export async function uploadFileToServer(
   // Security Inspection: Block dangerous executable extensions, double extensions, and dangerous MIME types
   const securityCheck = inspectFileSecurity(rawFile);
   if (!securityCheck.isSafe) {
-    throw new Error(securityCheck.error || `Tệp "${rawFile.name}" không đáp ứng tiêu chuẩn an toàn của VeloX.`);
+    throw new Error(
+      securityCheck.error ||
+        pickActiveLang('Tệp "{name}" không đáp ứng tiêu chuẩn an toàn của ClSend.', 'File "{name}" does not meet ClSend security standards.', '文件“{name}”不符合 ClSend 安全标准。').replace('{name}', rawFile.name)
+    );
   }
 
   if (rawFile.size > MAX_FILE_SIZE) {
-    throw new Error(`Tệp "${rawFile.name}" (${formatFileSize(rawFile.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
+    throw new Error(
+      pickActiveLang('Tệp "{name}" ({size}) vượt quá giới hạn tối đa {limit}.', 'File "{name}" ({size}) exceeds the maximum limit of {limit}.', '文件“{name}”({size}) 超出最大限制 {limit}。')
+        .replace('{name}', rawFile.name)
+        .replace('{size}', formatFileSize(rawFile.size))
+        .replace('{limit}', MAX_FILE_SIZE_LABEL)
+    );
   }
 
   // Fast client-side image optimization for heavy photos (> 3.5MB)
@@ -910,28 +951,31 @@ export async function uploadFileToServer(
     }
 
     // -------------------------------------------------------------
-    // PRIORITY 2: Resilient 4-Worker Parallel Chunked Upload (/api/upload-chunk)
-    // Uses 3MB proxy-safe chunks, automatically stepping down to 1.5MB / 2 workers on retry
+    // PRIORITY 2: Resilient Parallel Chunked Upload (/api/upload-chunk)
+    // Uses 2MB proxy-safe chunks / 2 workers, stepping down to 1MB / 1 worker on retry;
+    // skips immediately to Telegram/External on HTML_RESPONSE/ENDPOINT_NOT_FOUND (e.g. Vercel).
     // -------------------------------------------------------------
     if (file.size > 3.5 * 1024 * 1024 || directMultipartFailed) {
       try {
         const res = await uploadViaChunks(file, reportProgress, {
-          chunkSize: 3 * 1024 * 1024,
-          concurrency: 4
+          chunkSize: 2 * 1024 * 1024,
+          concurrency: 2
         });
         if (onProgress) onProgress(100);
         return await cacheAndReturn(file, res);
       } catch (chunkErr: any) {
         console.warn(`Chunked upload attempt 1 notice for "${file.name}":`, chunkErr?.message || chunkErr);
-        try {
-          const res = await uploadViaChunks(file, reportProgress, {
-            chunkSize: 1.5 * 1024 * 1024,
-            concurrency: 2
-          });
-          if (onProgress) onProgress(100);
-          return await cacheAndReturn(file, res);
-        } catch (retryErr: any) {
-          console.warn(`Chunked upload retry notice for "${file.name}":`, retryErr?.message || retryErr);
+        if (chunkErr?.message !== 'HTML_RESPONSE' && chunkErr?.message !== 'ENDPOINT_NOT_FOUND') {
+          try {
+            const res = await uploadViaChunks(file, reportProgress, {
+              chunkSize: 1 * 1024 * 1024,
+              concurrency: 1
+            });
+            if (onProgress) onProgress(100);
+            return await cacheAndReturn(file, res);
+          } catch (retryErr: any) {
+            console.warn(`Chunked upload retry notice for "${file.name}":`, retryErr?.message || retryErr);
+          }
         }
       }
     }
@@ -1002,7 +1046,9 @@ export async function uploadFileToServer(
       return await cacheAndReturn(file, res);
     }
 
-    throw new Error(`Không thể kết nối đến máy chủ lưu trữ cho tệp "${file.name}". Vui lòng thử lại.`);
+    throw new Error(
+      pickActiveLang('Không thể kết nối đến máy chủ lưu trữ cho tệp "{name}". Vui lòng thử lại.', 'Unable to connect to storage server for "{name}". Please try again.', '无法连接“{name}”的存储服务器，请重试。').replace('{name}', file.name)
+    );
   } catch (err: any) {
     throw err;
   }

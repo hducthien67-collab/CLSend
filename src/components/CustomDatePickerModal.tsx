@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { X, Calendar, Check, Sparkles, Sliders, ArrowRight, UserCheck } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface CustomDatePickerModalProps {
   value: string; // YYYY-MM-DD
@@ -18,6 +19,8 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
   onSave,
   onClose
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const currentYear = new Date().getFullYear();
 
   const parsed = useMemo(() => {
@@ -45,8 +48,8 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
 
   const calculatedAge = useMemo(() => {
     const age = currentYear - year;
-    return age >= 0 ? `${age} tuổi` : '';
-  }, [year, currentYear]);
+    return age >= 0 ? pick('{n} tuổi', '{n} yrs', '{n} 岁').replace('{n}', String(age)) : '';
+  }, [year, currentYear, currentLang]);
 
   const handleApply = () => {
     const formattedMonth = String(month).padStart(2, '0');
@@ -79,14 +82,14 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
             </div>
             <div>
               <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                <span>Chọn Ngày Sinh (Thanh Trượt)</span>
+                <span>{pick('Chọn Ngày Sinh (Thanh Trượt)', 'Select Birth Date (Slider)', '选择出生日期（滑块）')}</span>
                 {calculatedAge && (
                   <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
                     {calculatedAge}
                   </span>
                 )}
               </h3>
-              <p className="text-xs text-slate-400">Kéo trượt thanh Ngày • Tháng • Năm mượt mà</p>
+              <p className="text-xs text-slate-400">{pick('Kéo trượt thanh Ngày • Tháng • Năm mượt mà', 'Smoothly slide Day • Month • Year', '平滑拖动 日 • 月 • 年 滑块')}</p>
             </div>
           </div>
 
@@ -94,7 +97,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
             type="button"
             onClick={onClose}
             className="p-2 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700/60 transition-colors"
-            title="Đóng bảng trượt"
+            title={pick('Đóng bảng trượt', 'Close picker', '关闭选择器')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -104,19 +107,23 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
         <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border border-emerald-500/40 text-center shadow-inner space-y-1 relative overflow-hidden">
           <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest font-mono flex items-center justify-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Thời gian đã chọn</span>
+            <span>{pick('Thời gian đã chọn', 'Selected Date', '已选日期')}</span>
           </div>
           <div className="text-2xl sm:text-3xl font-black text-white tracking-wider font-mono">
             {String(validDay).padStart(2, '0')} / {String(month).padStart(2, '0')} / {year}
           </div>
           <p className="text-xs text-slate-300 font-medium">
-            Ngày {validDay} tháng {month} năm {year} {calculatedAge ? `(${calculatedAge})` : ''}
+            {pick('Ngày {d} tháng {m} năm {y}', 'Day {d}, Month {m}, {y}', '{y} 年 {m} 月 {d} 日')
+              .replace('{d}', String(validDay))
+              .replace('{m}', String(month))
+              .replace('{y}', String(year))}{' '}
+            {calculatedAge ? `(${calculatedAge})` : ''}
           </p>
         </div>
 
         {/* CÁC NÚT CHỌN NHANH ĐỘ TUỔI */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-slate-400 font-medium mr-1">Tuổi nhanh:</span>
+          <span className="text-[11px] text-slate-400 font-medium mr-1">{pick('Tuổi nhanh:', 'Quick age:', '快速年龄：')}</span>
           {[16, 18, 20, 22, 25, 30].map((quickAge) => (
             <button
               key={quickAge}
@@ -128,7 +135,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
                   : 'bg-slate-800/80 hover:bg-slate-750 text-slate-300 hover:text-emerald-300 border border-slate-700/60'
               }`}
             >
-              {quickAge}t
+              {pick('{n}t', '{n}y', '{n}岁').replace('{n}', String(quickAge))}
             </button>
           ))}
         </div>
@@ -139,7 +146,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
           <div className="space-y-1.5 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span className="text-slate-200 flex items-center gap-2">
-                <span>📅 Ngày sinh:</span>
+                <span>📅 {pick('Ngày sinh:', 'Day:', '出生日：')}</span>
                 <strong className="text-emerald-400 text-sm font-mono font-black">
                   {String(validDay).padStart(2, '0')}
                 </strong>
@@ -176,9 +183,9 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
           <div className="space-y-1.5 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span className="text-slate-200 flex items-center gap-2">
-                <span>🗓️ Tháng sinh:</span>
+                <span>🗓️ {pick('Tháng sinh:', 'Month:', '出生月：')}</span>
                 <strong className="text-teal-400 text-sm font-mono font-black">
-                  Tháng {month}
+                  {pick('Tháng {m}', 'Month {m}', '{m} 月').replace('{m}', String(month))}
                 </strong>
               </span>
               <div className="flex items-center gap-1.5">
@@ -213,7 +220,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
           <div className="space-y-1.5 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span className="text-slate-200 flex items-center gap-2">
-                <span>🎂 Năm sinh:</span>
+                <span>🎂 {pick('Năm sinh:', 'Year:', '出生年：')}</span>
                 <strong className="text-emerald-400 text-sm font-mono font-black">
                   {year}
                 </strong>
@@ -254,7 +261,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
             onClick={onClose}
             className="flex-1 py-3 px-4 rounded-xl bg-slate-800/90 hover:bg-slate-750 text-slate-300 hover:text-white font-semibold text-xs sm:text-sm transition-colors border border-slate-700/60 active:scale-95"
           >
-            Hủy bỏ
+            {pick('Hủy bỏ', 'Cancel', '取消')}
           </button>
           <button
             type="button"
@@ -262,7 +269,7 @@ export const CustomDatePickerModal: React.FC<CustomDatePickerModalProps> = ({
             className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:via-teal-500 hover:to-emerald-500 text-white font-bold text-xs sm:text-sm shadow-lg shadow-emerald-950/50 flex items-center justify-center gap-2 transition-all active:scale-95 border border-emerald-400/40"
           >
             <Check className="w-4 h-4" />
-            <span>Áp Dụng Ngày Sinh</span>
+            <span>{pick('Áp Dụng Ngày Sinh', 'Apply Birth Date', '应用出生日期')}</span>
           </button>
         </div>
       </div>

@@ -100,6 +100,8 @@ export const MobileSendView: React.FC = () => {
       const list: PresenceDevice[] = [];
       deviceMap.forEach((dev) => list.push(dev));
       setOnlineDevices(list);
+    }, (err) => {
+      console.warn('MobileSendView presence listener notice:', err);
     });
 
     return () => unsubscribe();
@@ -327,7 +329,7 @@ export const MobileSendView: React.FC = () => {
           <div className="flex items-center justify-between text-xs">
             <span className="text-emerald-400 font-bold flex items-center gap-1.5">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Đang truyền tệp tin siêu tốc...
+              {pickLang(currentLang, 'Đang truyền tệp tin siêu tốc...', 'Transferring files at high speed...', '正在高速传输文件...')}
             </span>
             <span className="text-white font-mono font-bold">{sendProgress || 10}%</span>
           </div>
@@ -478,7 +480,7 @@ export const MobileSendView: React.FC = () => {
         ) : (
           <div className="space-y-2">
             {filteredDevices.map((device) => {
-              const devName = device.displayName || device.deviceName || 'Thiết bị';
+              const devName = device.displayName || device.deviceName || pickLang(currentLang, 'Thiết bị', 'Device', '设备');
               const devTypeLabel = device.deviceType === 'mobile' ? t('mobile_send.device_type_mobile') : device.deviceType === 'laptop' ? t('mobile_send.device_type_laptop') : device.deviceType === 'tv' ? t('mobile_send.device_type_tv') : t('mobile_send.device_type_pc');
 
               return (
@@ -500,7 +502,7 @@ export const MobileSendView: React.FC = () => {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                       </div>
                       <p className="text-[11px] text-slate-400 truncate">
-                        {devTypeLabel} {device.connectCode ? `• Mã: ${device.connectCode}` : ''}
+                        {devTypeLabel} {device.connectCode ? `• ${pickLang(currentLang, 'Mã:', 'Code:', '代码：')} ${device.connectCode}` : ''}
                       </p>
                     </div>
                   </div>
@@ -603,14 +605,14 @@ export const MobileSendView: React.FC = () => {
         isOpen={isTextSheetOpen}
         onClose={() => setIsTextSheetOpen(false)}
         title={t('mobile_send.text_message_title')}
-        subtitle={selectedTargetDevice ? `Tới: ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}` : 'Nhập nội dung cần gửi:'}
+        subtitle={selectedTargetDevice ? `${pickLang(currentLang, 'Tới:', 'To:', '发送至：')} ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}` : pickLang(currentLang, 'Nhập nội dung cần gửi:', 'Enter content to send:', '输入要发送的内容：')}
         icon={<AlignLeft className="w-5 h-5 text-sky-400" />}
       >
         <div className="space-y-3">
           <textarea
             value={textMessage}
             onChange={(e) => setTextMessage(e.target.value)}
-            placeholder="Nhập nội dung văn bản, mật khẩu, link web cần chuyển qua điện thoại/máy tính..."
+            placeholder={pickLang(currentLang, 'Nhập nội dung văn bản, mật khẩu, link web cần chuyển qua điện thoại/máy tính...', 'Enter text, password, or web link to transfer to phone/computer...', '输入要发送到手机/电脑的文本、密码或网址...')}
             className="w-full h-32 p-3 bg-slate-900 border border-slate-700 rounded-2xl text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500 resize-none"
             autoFocus
           />
@@ -627,7 +629,7 @@ export const MobileSendView: React.FC = () => {
               className="px-3 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold flex items-center gap-1.5"
             >
               <Clipboard className="w-3.5 h-3.5" />
-              <span>Dán từ máy</span>
+              <span>{pickLang(currentLang, 'Dán từ máy', 'Paste from device', '从设备粘贴')}</span>
             </button>
 
             <button
@@ -637,7 +639,7 @@ export const MobileSendView: React.FC = () => {
               className="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-bold text-xs flex items-center gap-1.5 shadow-md will-change-transform transform-gpu select-none transition-transform duration-75 ease-out active:scale-95 active:opacity-90 cursor-pointer"
               style={{ transform: 'translateZ(0)', contain: 'layout paint' }}
             >
-              <span>Gửi Ngay</span>
+              <span>{pickLang(currentLang, 'Gửi Ngay', 'Send Now', '立即发送')}</span>
               <Send className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -658,10 +660,10 @@ export const MobileSendView: React.FC = () => {
               for (const file of selectedFiles) {
                 await addDoc(collection(db, 'transfers'), {
                   senderId: currentUser.uid,
-                  senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Thiết bị di động',
-                  senderDevice: settings?.deviceName || 'Điện thoại',
+                  senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || pickLang(currentLang, 'Thiết bị di động', 'Mobile device', '移动设备'),
+                  senderDevice: settings?.deviceName || pickLang(currentLang, 'Điện thoại', 'Phone', '手机'),
                   receiverId: selectedTargetDevice.uid,
-                  receiverName: selectedTargetDevice.displayName || selectedTargetDevice.deviceName || 'Thiết bị nhận',
+                  receiverName: selectedTargetDevice.displayName || selectedTargetDevice.deviceName || pickLang(currentLang, 'Thiết bị nhận', 'Receiver device', '接收设备'),
                   fileName: file.name,
                   fileSize: file.size,
                   fileType: file.type || 'application/octet-stream',
@@ -673,10 +675,10 @@ export const MobileSendView: React.FC = () => {
               }
               showToast(pickLang(
                 currentLang,
-                `Đã gửi ${selectedFiles.length} tệp từ Cloud tới ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`,
-                `Sent ${selectedFiles.length} file(s) from Cloud to ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName}!`,
-                `已从云盘向 ${selectedTargetDevice.displayName || selectedTargetDevice.deviceName} 发送 ${selectedFiles.length} 个文件！`
-              ), 'success');
+                'Đã gửi {count} tệp từ Cloud tới {device}!',
+                'Sent {count} file(s) from Cloud to {device}!',
+                '已从云盘向 {device} 发送 {count} 个文件！'
+              ).replace('{count}', String(selectedFiles.length)).replace('{device}', selectedTargetDevice.displayName || selectedTargetDevice.deviceName || pickLang(currentLang, 'Thiết bị nhận', 'Receiver device', '接收设备')), 'success');
             } catch (err) {
               showToast(pickLang(currentLang, 'Lỗi khi gửi tệp từ Cloud.', 'Error sending files from Cloud.', '从云盘发送文件失败。'), 'error');
             } finally {

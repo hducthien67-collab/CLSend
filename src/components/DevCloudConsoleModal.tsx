@@ -43,6 +43,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { ChatRoom, ChatMessage, UserSanction, UserDevice } from './types';
+import { openSafeExternalTab } from '../utils/fileDownload';
 import { applyTierSanction, removeDevSanction, isDevUser, SANCTION_TIERS } from '../utils/devModeration';
 import { runDevContentAudit, censorProfanity, ContentAuditReport } from '../utils/moderation';
 
@@ -56,6 +57,19 @@ interface DevCloudConsoleModalProps {
 interface UserAuditProfile {
   uid: string;
   email: string;
+  linkedEmail?: string;
+  phone?: string;
+  username?: string;
+  dob?: string;
+  gender?: string;
+  authProvider?: string;
+  lastBrowser?: string;
+  lastLocation?: string;
+  customBio?: string;
+  customBadgeText?: string;
+  isEmailVerified?: boolean;
+  isPhoneVerified?: boolean;
+  createdAt?: string;
   displayName: string;
   deviceName: string;
   avatarColor: string;
@@ -83,10 +97,25 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
   const [allMessagesByRoom, setAllMessagesByRoom] = useState<Record<string, (ChatMessage & { roomId: string; roomName: string })[]>>({});
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  // Online presence and sanctions list
+  // Online presence, registered users and sanctions list
   const [onlineUsers, setOnlineUsers] = useState<UserDevice[]>([]);
+  const [firestoreUsers, setFirestoreUsers] = useState<UserDevice[]>([]);
   const [sanctionsList, setSanctionsList] = useState<UserSanction[]>([]);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+  const [isConfirmProcessing, setIsConfirmProcessing] = useState(false);
+
+  const showConsoleError = (msg: string) => {
+    setActionErrorMsg(msg);
+    setTimeout(() => setActionErrorMsg(null), 5000);
+  };
 
   // User Selection for Deep Audit
   const [selectedUserUid, setSelectedUserUid] = useState<string | null>(null);
@@ -121,12 +150,16 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
       if (!selectedRoomId && list.length > 0) {
         setSelectedRoomId(list[0].id);
       }
+    }, (err) => {
+      console.warn('DevCloudConsole rooms listener error:', err);
     });
 
     // Presence (Online devices)
     const unsubPresence = onSnapshot(collection(db, 'presence'), (snap) => {
       const users: UserDevice[] = snap.docs.map(d => d.data() as UserDevice);
       setOnlineUsers(users);
+    }, (err) => {
+      console.warn('DevCloudConsole presence listener error:', err);
     });
 
     // Sanctions / Bans
@@ -142,12 +175,23 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
         }
       });
       setSanctionsList(list);
+    }, (err) => {
+      console.warn('DevCloudConsole sanctions listener error:', err);
+    });
+
+    // Registered Users
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
+      const list: UserDevice[] = snap.docs.map(d => ({ ...d.data(), uid: (d.data() as any).uid || d.id } as UserDevice));
+      setFirestoreUsers(list);
+    }, (err) => {
+      console.warn('DevCloudConsole users listener error:', err);
     });
 
     return () => {
       unsubRooms();
       unsubPresence();
       unsubSanctions();
+      unsubUsers();
     };
   }, [isOpen, selectedRoomId]);
 
@@ -241,6 +285,57 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
       }
       if ((msg as any).senderEmail && (!user.email || user.email.includes('@user.cloudsend'))) {
         user.email = (msg as any).senderEmail;
+      }
+    });
+
+    // B0. Merge registered users collection so full profile metadata is visible
+    firestoreUsers.forEach(fu => {
+      const uid = fu.uid;
+      if (!uid) return;
+      const existing = userMap.get(uid);
+      const mergedData: Partial<UserAuditProfile> = {
+        username: fu.username,
+        dob: fu.dob,
+        gender: fu.gender,
+        phone: fu.phone || fu.linkedPhone || fu.phoneNumber,
+        linkedEmail: fu.linkedEmail,
+        authProvider: fu.authProvider,
+        lastBrowser: fu.lastBrowser,
+        lastLocation: fu.lastLocation,
+        customBio: fu.customBio,
+        customBadgeText: fu.customBadgeText,
+        isEmailVerified: fu.isEmailVerified,
+        isPhoneVerified: fu.isPhoneVerified,
+        createdAt: fu.createdAt,
+      };
+      if (!existing) {
+        userMap.set(uid, {
+          uid,
+          email: fu.linkedEmail || fu.email || `${uid}@user.cloudsend`,
+          displayName: fu.displayName || fu.username || 'Người dùng',
+          deviceName: fu.deviceName || 'Thiết bị',
+          avatarColor: fu.avatarColor || '#10b981',
+          isOnline: false,
+          lastActive: fu.lastSeen || fu.createdAt || new Date().toISOString(),
+          messages: [],
+          sanction: undefined,
+          auditReport: {
+            riskLevel: 'clean',
+            riskScore: 0,
+            summary: '',
+            violationsFound: [],
+            suggestedAction: ''
+          },
+          ...mergedData,
+        });
+      } else {
+        Object.assign(existing, mergedData);
+        if (fu.displayName) existing.displayName = fu.displayName;
+        if (fu.deviceName) existing.deviceName = fu.deviceName;
+        if (fu.avatarColor) existing.avatarColor = fu.avatarColor;
+        if (fu.linkedEmail || (fu.email && existing.email.includes('@user.cloudsend'))) {
+          existing.email = fu.linkedEmail || fu.email;
+        }
       }
     });
 
@@ -339,7 +434,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
       }
       return new Date(b.lastActive).getTime() - new Date(a.lastActive).getTime();
     });
-  }, [allMessagesFlat, onlineUsers, sanctionsList]);
+  }, [allMessagesFlat, firestoreUsers, onlineUsers, sanctionsList]);
 
   // Filtered users in the Avatar roster
   const filteredUsers = useMemo(() => {
@@ -405,52 +500,72 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
       setCustomRemindText('');
       setCustomOffensiveItem('');
     } catch (err: any) {
-      alert('Không thể thực thi xử phạt: ' + (err?.message || 'Vui lòng thử lại'));
+      showConsoleError('Không thể thực thi xử phạt: ' + (err?.message || 'Vui lòng thử lại'));
     } finally {
       setIsProcessingSanction(false);
     }
   };
 
   // Dev Delete any violating message directly from Cloud Firestore
-  const handleDeleteViolatingMessage = async (msg: ChatMessage & { roomId: string }) => {
-    if (!window.confirm(`Xác nhận XÓA / TIÊU HỦY tin nhắn này của "${msg.senderName}" khỏi Cloud Firestore?`)) return;
-    try {
-      await deleteDoc(doc(db, 'rooms', msg.roomId, 'messages', msg.id));
-      setActionSuccessMsg(`Đã xóa vĩnh viễn tin nhắn [ID: ${msg.id}]`);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
-    } catch (err: any) {
-      alert('Lỗi khi xóa tin nhắn: ' + err?.message);
-    }
+  const handleDeleteViolatingMessage = (msg: ChatMessage & { roomId: string }) => {
+    setConfirmModal({
+      title: 'Xóa tin nhắn khỏi Cloud Firestore',
+      message: `Xác nhận XÓA / TIÊU HỦY tin nhắn này của "${msg.senderName}" khỏi Cloud Firestore?`,
+      confirmLabel: 'Xóa vĩnh viễn',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'rooms', msg.roomId, 'messages', msg.id));
+          setActionSuccessMsg(`Đã xóa vĩnh viễn tin nhắn [ID: ${msg.id}]`);
+          setTimeout(() => setActionSuccessMsg(null), 4000);
+        } catch (err: any) {
+          showConsoleError('Lỗi khi xóa tin nhắn: ' + err?.message);
+        }
+      }
+    });
   };
 
   // Dev Bulk Delete all messages of this user
-  const handleBulkDeleteUserMessages = async (u: UserAuditProfile) => {
+  const handleBulkDeleteUserMessages = (u: UserAuditProfile) => {
     if (u.messages.length === 0) return;
-    if (!window.confirm(`Bạn có chắc chắn muốn XÓA TOÀN BỘ ${u.messages.length} tin nhắn và ảnh của "${u.displayName}" khỏi tất cả các phòng Cloud?`)) return;
-
-    try {
-      let count = 0;
-      for (const m of u.messages) {
-        await deleteDoc(doc(db, 'rooms', m.roomId, 'messages', m.id));
-        count++;
+    setConfirmModal({
+      title: 'Xóa toàn bộ tin nhắn của người dùng',
+      message: `Bạn có chắc chắn muốn XÓA TOÀN BỘ ${u.messages.length} tin nhắn và ảnh của "${u.displayName}" khỏi tất cả các phòng Cloud?`,
+      confirmLabel: 'Xóa toàn bộ',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          let count = 0;
+          for (const m of u.messages) {
+            await deleteDoc(doc(db, 'rooms', m.roomId, 'messages', m.id));
+            count++;
+          }
+          setActionSuccessMsg(`Đã xóa sạch ${count} tin nhắn của ${u.displayName}`);
+          setTimeout(() => setActionSuccessMsg(null), 4000);
+        } catch (err: any) {
+          showConsoleError('Lỗi xóa tin nhắn: ' + err?.message);
+        }
       }
-      setActionSuccessMsg(`Đã xóa sạch ${count} tin nhắn của ${u.displayName}`);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
-    } catch (err: any) {
-      alert('Lỗi xóa tin nhắn: ' + err?.message);
-    }
+    });
   };
 
   // Dev Unban a user
-  const handleUnban = async (sanction: UserSanction) => {
-    if (!window.confirm(`Mở khóa (UNBAN) cho tài khoản Gmail: ${sanction.email}?`)) return;
-    try {
-      await removeDevSanction(sanction.email, sanction.uid);
-      setActionSuccessMsg(`Đã gỡ lệnh cấm cho Gmail: ${sanction.email}`);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
-    } catch (err: any) {
-      alert('Lỗi gỡ cấm: ' + err?.message);
-    }
+  const handleUnban = (sanction: UserSanction) => {
+    setConfirmModal({
+      title: 'Mở khóa (Unban) tài khoản',
+      message: `Mở khóa (UNBAN) cho tài khoản Gmail: ${sanction.email}?`,
+      confirmLabel: 'Mở khóa ngay',
+      danger: false,
+      onConfirm: async () => {
+        try {
+          await removeDevSanction(sanction.email, sanction.uid);
+          setActionSuccessMsg(`Đã gỡ lệnh cấm cho Gmail: ${sanction.email}`);
+          setTimeout(() => setActionSuccessMsg(null), 4000);
+        } catch (err: any) {
+          showConsoleError('Lỗi gỡ cấm: ' + err?.message);
+        }
+      }
+    });
   };
 
   if (!isOpen && !isStandalone) return null;
@@ -495,7 +610,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => window.open('/', '_blank')}
+                onClick={() => openSafeExternalTab('/')}
                 title="Mở thêm CloudSend ở tab khác để làm việc song song (Gửi nhận file, chat)"
                 className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-colors"
               >
@@ -517,7 +632,7 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  window.open('/?page=datastore', '_blank');
+                  openSafeExternalTab('/?page=datastore');
                   onClose();
                 }}
                 title="Mở TRANG DATASTORE (Kho dữ liệu Firestore trực tiếp) trong Tab Mới"
@@ -554,6 +669,17 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
           <div className="px-4 py-2 bg-emerald-500/20 border-b border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
             <CheckCircle className="w-4 h-4 text-emerald-400" />
             <span>{actionSuccessMsg}</span>
+          </div>
+        )}
+        {actionErrorMsg && (
+          <div className="px-4 py-2 bg-rose-500/20 border-b border-rose-500/40 text-rose-300 text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{actionErrorMsg}</span>
+            </div>
+            <button type="button" onClick={() => setActionErrorMsg(null)} className="text-rose-300 hover:text-white">
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
@@ -788,11 +914,54 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
                         </div>
 
                         <div className="text-xs text-emerald-400 font-mono flex items-center gap-2 flex-wrap">
-                          <span>Gmail: <strong>{selectedUser.email}</strong></span>
+                          <span>Email: <strong>{selectedUser.email}</strong>{selectedUser.isEmailVerified ? ' ✓' : ''}</span>
                           <span className="text-slate-500">•</span>
                           <span className="text-slate-400 font-sans text-[11px]">Thiết bị: {selectedUser.deviceName}</span>
                           <span className="text-slate-500">•</span>
                           <span className="text-slate-500 text-[10px]">UID: {selectedUser.uid}</span>
+                        </div>
+
+                        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap text-[10px]">
+                          {selectedUser.authProvider && (
+                            <span className="px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-semibold">
+                              Login: {selectedUser.authProvider}
+                            </span>
+                          )}
+                          {selectedUser.phone && (
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                              SĐT: {selectedUser.phone}{selectedUser.isPhoneVerified ? ' ✓' : ''}
+                            </span>
+                          )}
+                          {selectedUser.username && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+                              @{selectedUser.username}
+                            </span>
+                          )}
+                          {selectedUser.dob && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              NS: {selectedUser.dob}
+                            </span>
+                          )}
+                          {selectedUser.gender && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              GT: {selectedUser.gender}
+                            </span>
+                          )}
+                          {selectedUser.lastBrowser && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              {selectedUser.lastBrowser}
+                            </span>
+                          )}
+                          {selectedUser.lastLocation && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                              {selectedUser.lastLocation}
+                            </span>
+                          )}
+                          {selectedUser.createdAt && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 font-mono">
+                              Tạo: {new Date(selectedUser.createdAt).toLocaleDateString('vi-VN')}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1512,6 +1681,49 @@ export const DevCloudConsoleModal: React.FC<DevCloudConsoleModalProps> = ({
                 alt="Audit preview"
                 className="max-w-full max-h-[85vh] object-contain rounded-2xl border border-slate-700 shadow-2xl"
               />
+            </div>
+          </div>
+        )}
+
+        {/* In-App Confirmation Modal */}
+        {confirmModal && (
+          <div className="fixed inset-0 z-80 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+            <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 shadow-2xl space-y-4">
+              <div className="flex items-start gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${confirmModal.danger ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'}`}>
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-sm font-bold text-white">{confirmModal.title}</h4>
+                  <p className="text-xs text-slate-300 mt-1 whitespace-pre-line leading-relaxed">{confirmModal.message}</p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  disabled={isConfirmProcessing}
+                  onClick={() => setConfirmModal(null)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={isConfirmProcessing}
+                  onClick={async () => {
+                    setIsConfirmProcessing(true);
+                    try {
+                      await confirmModal.onConfirm();
+                    } finally {
+                      setIsConfirmProcessing(false);
+                      setConfirmModal(null);
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 ${confirmModal.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                >
+                  {isConfirmProcessing ? 'Đang xử lý...' : confirmModal.confirmLabel}
+                </button>
+              </div>
             </div>
           </div>
         )}

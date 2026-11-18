@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Copy, Check, Trash2, Activity } from 'lucide-react';
 import { useLanguage, getLocaleTag } from '../context/LanguageContext';
+import { useAuth } from '../context/AuthContext';
+import { isDevUser } from '../utils/devModeration';
+import { useLocalDevMode } from '../utils/localDevMode';
 
 interface LogItem {
   id: string;
@@ -13,7 +16,7 @@ const STORAGE_KEY_LOGS = 'clsend_perf_debug_logs_v2';
 const STORAGE_KEY_EXPANDED = 'clsend_perf_debug_expanded_v2';
 const STORAGE_KEY_VISIBLE = 'clsend_perf_debug_visible_v2';
 
-const PerfDebugWidgetComponent: React.FC = () => {
+const PerfDebugWidgetActive: React.FC = () => {
   const { t, currentLang } = useLanguage();
   const localeRef = useRef<string>(getLocaleTag(currentLang));
   localeRef.current = getLocaleTag(currentLang);
@@ -60,6 +63,26 @@ const PerfDebugWidgetComponent: React.FC = () => {
   });
 
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Sync if external clear/visibility change occurred from Developer Mode tab
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const savedLogs = localStorage.getItem(STORAGE_KEY_LOGS);
+        if (!savedLogs) {
+          setLogs([]);
+          setAvgLatency(0);
+          setLatency(0);
+        }
+        const savedVisible = localStorage.getItem(STORAGE_KEY_VISIBLE);
+        if (savedVisible !== null) {
+          setIsVisible(savedVisible === 'true');
+        }
+      } catch {}
+    };
+    window.addEventListener('clsend-local-dev-change', handleSync);
+    return () => window.removeEventListener('clsend-local-dev-change', handleSync);
+  }, []);
 
   // Debounced log persistence so localStorage I/O never blocks click-to-paint
   useEffect(() => {
@@ -291,6 +314,18 @@ const PerfDebugWidgetComponent: React.FC = () => {
       )}
     </div>
   );
+};
+
+const PerfDebugWidgetComponent: React.FC = () => {
+  const { currentUser } = useAuth();
+  const isDev = isDevUser(currentUser?.email);
+  const { isDebugLogActive } = useLocalDevMode(isDev);
+
+  if (!isDebugLogActive) {
+    return null;
+  }
+
+  return <PerfDebugWidgetActive />;
 };
 
 export const PerfDebugWidget = React.memo(PerfDebugWidgetComponent);

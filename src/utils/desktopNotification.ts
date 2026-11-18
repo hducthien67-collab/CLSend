@@ -6,6 +6,8 @@
  * 2. Web / PWA Desktop OS notifications (using browser Notification API)
  */
 
+import { pickActiveLang } from '../context/LanguageContext';
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -81,8 +83,12 @@ export function sendDesktopMessageNotification({
 }) {
   if (typeof window === 'undefined') return;
 
-  const title = `Tin nhắn mới từ ${senderName}`;
-  const body = text || 'Đã gửi một tin nhắn mới cho bạn';
+  const title = pickActiveLang(
+    'Tin nhắn mới từ {sender}',
+    'New message from {sender}',
+    '来自 {sender} 的新消息'
+  ).replace('{sender}', senderName);
+  const body = text || pickActiveLang('Đã gửi một tin nhắn mới cho bạn', 'Sent you a new message', '给你发送了一条新消息');
   const icon = '/pwa-192x192.png';
 
   // 1. Electron Native Notification
@@ -134,10 +140,28 @@ export function sendDesktopFileNotification({
 }) {
   if (typeof window === 'undefined') return;
 
-  const sender = senderName ? `từ ${senderName}` : '';
+  const sender = senderName
+    ? pickActiveLang('từ {sender}', 'from {sender}', '来自 {sender}').replace('{sender}', senderName)
+    : '';
   const size = fileSize ? ` (${fileSize})` : '';
-  const title = 'ClSend - Nhận tệp mới';
-  const body = `Tệp "${fileName}"${size} sẵn sàng tải về ${sender}`.trim();
+  const title = pickActiveLang('ClSend - Nhận tệp mới', 'ClSend - New File Received', 'ClSend - 收到新文件');
+  const body = (sender
+    ? pickActiveLang(
+        'Tệp "{name}"{size} sẵn sàng tải về {sender}',
+        'File "{name}"{size} is ready to download {sender}',
+        '文件 "{name}"{size} 已可下载 ({sender})'
+      )
+        .replace('{name}', fileName)
+        .replace('{size}', size)
+        .replace('{sender}', sender)
+    : pickActiveLang(
+        'Tệp "{name}"{size} sẵn sàng tải về',
+        'File "{name}"{size} is ready to download',
+        '文件 "{name}"{size} 已可下载'
+      )
+        .replace('{name}', fileName)
+        .replace('{size}', size)
+  ).trim();
   const icon = '/pwa-192x192.png';
 
   if (isElectronApp() && window.electronAPI?.sendNotification) {

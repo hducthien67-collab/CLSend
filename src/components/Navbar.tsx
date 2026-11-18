@@ -25,7 +25,9 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import { isDevUser } from '../utils/devModeration';
+import { useLogoDevUnlock } from '../utils/localDevMode';
 import { useLanguage, LanguageCode, pickLang } from '../context/LanguageContext';
+import { openSafeExternalTab } from '../utils/fileDownload';
 
 interface NavbarProps {
   activeTab: 'send' | 'receive' | 'chat' | 'drive';
@@ -59,6 +61,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
   const [isAvatarMenuOpen, setIsAvatarMenuOpen] = React.useState(false);
   const [isLangSubMenuOpen, setIsLangSubMenuOpen] = React.useState(false);
   const isDev = isDevUser(currentUser?.email);
+  const handleLogoTap = useLogoDevUnlock(isDev);
 
   const handleSelectLanguage = (langCode: LanguageCode) => {
     setLanguage(langCode);
@@ -84,7 +87,13 @@ const NavbarComponent: React.FC<NavbarProps> = ({
         {/* === GÓC BÊN TRÁI: Logo + Tên + Cụm Tab chuyển đổi === */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           {/* Logo and Brand */}
-          <div className="flex items-center gap-2 sm:gap-2.5 cursor-pointer shrink-0" onClick={() => setActiveTab('send')}>
+          <div
+            className="flex items-center gap-2 sm:gap-2.5 cursor-pointer shrink-0 select-none"
+            onClick={() => {
+              setActiveTab('send');
+              handleLogoTap();
+            }}
+          >
             <div className="relative group">
               <CloudSendLogo className="w-8 h-8 sm:w-9 sm:h-9 shadow-lg shadow-emerald-500/10 rounded-xl transition-transform group-hover:scale-105" size={36} />
             </div>
@@ -188,7 +197,12 @@ const NavbarComponent: React.FC<NavbarProps> = ({
               id="navbar-tv-mode-badge"
               type="button"
               onClick={onOpenSettings}
-              title="Chế độ Smart TV đang bật. Nhấn để mở Cài đặt & chỉnh DPI"
+              title={pickLang(
+                currentLang,
+                "Chế độ Smart TV đang bật. Nhấn để mở Cài đặt & chỉnh DPI",
+                "Smart TV mode is enabled. Click to open Settings & adjust DPI",
+                "智能电视模式已开启。点击打开设置并调整 DPI"
+              )}
               className="flex items-center gap-1 px-2 py-1 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-semibold transition-all shadow-sm"
             >
               <Tv className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
@@ -219,7 +233,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                       window.location.href = '/?page=datastore';
                     }
                   }}
-                  title="Mở TRANG WEB DATASTORE (Dành riêng cho DEV)"
+                  title={pickLang(currentLang, "Mở TRANG WEB DATASTORE (Dành riêng cho DEV)", "Open DATASTORE WEB PAGE (DEV Only)", "打开 DATASTORE 网页（仅限 DEV）")}
                   className="px-2 py-1 rounded-lg text-emerald-300 hover:text-white text-xs font-bold transition-all flex items-center gap-1"
                 >
                   <Database className="w-3.5 h-3.5 text-emerald-400" />
@@ -229,9 +243,9 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                   id="open-datastore-tab-btn"
                   type="button"
                   onClick={() => {
-                    window.open('/?page=datastore', '_blank');
+                    openSafeExternalTab('/?page=datastore');
                   }}
-                  title="Mở trang web Datastore trong TAB MỚI riêng biệt"
+                  title={pickLang(currentLang, "Mở trang web Datastore trong TAB MỚI riêng biệt", "Open Datastore web page in a NEW TAB", "在新标签页打开 Datastore 网页")}
                   className="p-1 rounded-lg hover:bg-emerald-500/30 text-emerald-300 hover:text-white border-l border-emerald-500/30 transition-colors"
                 >
                   <ExternalLink className="w-3 h-3 text-emerald-400" />
@@ -248,11 +262,16 @@ const NavbarComponent: React.FC<NavbarProps> = ({
               id="open-design-studio-btn"
               type="button"
               onClick={onOpenDesignStudio}
-              title="Khung Thiết Kế - Tùy chỉnh avatar, khung viền, nhãn dán & giao diện 🥳"
+              title={pickLang(
+                currentLang,
+                "Khung Thiết Kế - Tùy chỉnh avatar, khung viền, nhãn dán & giao diện",
+                "Design Studio - Customize avatar, frames, stickers & theme",
+                "设计工作室 - 自定义头像、边框、贴纸与主题"
+              )}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600/30 to-purple-600/30 hover:from-indigo-600/50 hover:to-purple-600/50 text-indigo-200 hover:text-white border border-indigo-500/40 hover:border-indigo-400 text-xs font-semibold transition-all shadow-sm group cursor-pointer"
             >
               <Palette className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-12 transition-transform" />
-              <span className="hidden sm:inline">Khung Thiết Kế</span>
+              <span className="hidden sm:inline">{pickLang(currentLang, "Khung Thiết Kế", "Design Studio", "设计工作室")}</span>
               <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
             </button>
           )}
@@ -280,7 +299,10 @@ const NavbarComponent: React.FC<NavbarProps> = ({
           <div className="relative">
             <div
               onClick={() => setIsAvatarMenuOpen(!isAvatarMenuOpen)}
-              title={`${currentUser?.displayName || 'Tài khoản'} - Nhấn để mở menu`}
+              title={pickLang(currentLang, "{name} - Nhấn để mở menu", "{name} - Click to open menu", "{name} - 点击打开菜单").replace(
+                '{name}',
+                currentUser?.displayName || pickLang(currentLang, 'Tài khoản', 'Account', '账号')
+              )}
               className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold cursor-pointer ring-2 ring-emerald-500/40 hover:ring-emerald-400 transition-all shadow-md overflow-hidden relative"
               style={{ backgroundColor: settings.avatarColor }}
             >
@@ -314,7 +336,7 @@ const NavbarComponent: React.FC<NavbarProps> = ({
                 <div className="absolute ltr:right-0 rtl:left-0 top-full mt-2 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
                   <div className="px-3 py-2 border-b border-slate-800 mb-1">
                     <p className="text-xs font-bold text-white truncate">
-                      {currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Tài khoản'}
+                      {currentUser?.displayName || currentUser?.email?.split('@')[0] || pickLang(currentLang, 'Tài khoản', 'Account', '账号')}
                     </p>
                     <p className="text-[10px] text-slate-400 truncate">
                       {currentUser?.email || t('nav.connected')}

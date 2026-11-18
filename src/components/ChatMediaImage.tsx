@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Image as ImageIcon, RefreshCw, Download, Film } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface ChatMediaImageProps {
   src: string;
@@ -20,6 +21,7 @@ export const ChatMediaImage: React.FC<ChatMediaImageProps> = ({
   minHeightClass = 'min-h-[120px] min-w-[180px]',
   onDownload
 }) => {
+  const { currentLang } = useLanguage();
   const [activeSrc, setActiveSrc] = useState<string>(src);
   const [triedBackup, setTriedBackup] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
@@ -107,7 +109,7 @@ export const ChatMediaImage: React.FC<ChatMediaImageProps> = ({
             className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer border border-slate-700"
           >
             <RefreshCw className="w-3 h-3" />
-            <span>Thử lại</span>
+            <span>{pickLang(currentLang, 'Thử lại', 'Retry', '重试')}</span>
           </button>
           {onDownload && (
             <button
@@ -116,7 +118,7 @@ export const ChatMediaImage: React.FC<ChatMediaImageProps> = ({
               className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-semibold inline-flex items-center gap-1 cursor-pointer"
             >
               <Download className="w-3 h-3" />
-              <span>Tải về</span>
+              <span>{pickLang(currentLang, 'Tải về', 'Download', '下载')}</span>
             </button>
           )}
         </div>

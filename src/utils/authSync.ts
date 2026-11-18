@@ -3,6 +3,7 @@ import { doc, getDoc, setDoc, deleteDoc, onSnapshot, serverTimestamp } from 'fir
 import { db } from '../firebase/config';
 import { AppUser, UserDevice, AppSettings } from '../types';
 import { getClientDeviceId } from '../context/AuthContext';
+import { pickActiveLang } from '../context/LanguageContext';
 
 export interface AuthSyncPayload {
   userSession: AppUser;
@@ -81,7 +82,7 @@ export const createDesktopSyncSession = async (
     createdAtMs: Date.now(),
     expiresAt,
     desktopDeviceId: deviceId,
-    desktopDeviceName: deviceName || 'Ứng dụng ClSend Desktop',
+    desktopDeviceName: deviceName || pickActiveLang('Ứng dụng ClSend Desktop', 'ClSend Desktop App', 'ClSend 桌面应用'),
   });
 
   // Listen in real-time for authorization from Web/Phone
@@ -128,24 +129,24 @@ export const verifySyncCode = async (
 }> => {
   const cleanCode = rawCode.replace(/[^0-9]/g, '').trim();
   if (cleanCode.length !== 6) {
-    return { valid: false, message: 'Mã đồng bộ phải gồm đúng 6 chữ số.' };
+    return { valid: false, message: pickActiveLang('Mã đồng bộ phải gồm đúng 6 chữ số.', 'Sync code must be exactly 6 digits.', '同步码必须为 6 位数字。') };
   }
 
   const syncDocRef = doc(db, 'auth_sync', cleanCode);
   const snap = await getDoc(syncDocRef);
 
   if (!snap.exists()) {
-    return { valid: false, message: 'Mã đồng bộ không tồn tại hoặc đã hết hạn.' };
+    return { valid: false, message: pickActiveLang('Mã đồng bộ không tồn tại hoặc đã hết hạn.', 'Sync code does not exist or has expired.', '同步码不存在或已过期。') };
   }
 
   const data = snap.data() as AuthSyncSessionDoc;
   if (data.status !== 'waiting') {
-    return { valid: false, message: 'Mã đồng bộ này đã được sử dụng hoặc đã hủy.' };
+    return { valid: false, message: pickActiveLang('Mã đồng bộ này đã được sử dụng hoặc đã hủy.', 'This sync code has already been used or cancelled.', '此同步码已被使用或已取消。') };
   }
 
   if (Date.now() > data.expiresAt) {
     deleteDoc(syncDocRef).catch(() => {});
-    return { valid: false, message: 'Mã đồng bộ này đã quá hạn 10 phút. Vui lòng lấy mã mới.' };
+    return { valid: false, message: pickActiveLang('Mã đồng bộ này đã quá hạn 10 phút. Vui lòng lấy mã mới.', 'This sync code expired after 10 minutes. Please generate a new one.', '此同步码已超过 10 分钟有效期，请重新获取。') };
   }
 
   return { valid: true, data };
@@ -162,7 +163,7 @@ export const authorizeSyncCode = async (
 ): Promise<{ success: boolean; message: string }> => {
   const check = await verifySyncCode(rawCode);
   if (!check.valid || !check.data) {
-    return { success: false, message: check.message || 'Mã đồng bộ không hợp lệ.' };
+    return { success: false, message: check.message || pickActiveLang('Mã đồng bộ không hợp lệ.', 'Invalid sync code.', '同步码无效。') };
   }
 
   const cleanCode = rawCode.replace(/[^0-9]/g, '').trim();
@@ -198,7 +199,7 @@ export const authorizeSyncCode = async (
           autoAccept: settings.autoAccept,
         }
       : undefined,
-    authorizedDeviceName: settings?.deviceName || 'Trình duyệt Web',
+    authorizedDeviceName: settings?.deviceName || pickActiveLang('Trình duyệt Web', 'Web Browser', 'Web 浏览器'),
     authorizedAt: new Date().toISOString(),
   };
 
@@ -213,6 +214,10 @@ export const authorizeSyncCode = async (
 
   return {
     success: true,
-    message: `Đã cấp quyền đăng nhập thành công cho ${check.data.desktopDeviceName || 'ứng dụng máy tính'}!`,
+    message: pickActiveLang(
+      'Đã cấp quyền đăng nhập thành công cho {device}!',
+      'Successfully authorized login for {device}!',
+      '已成功为 {device} 授权登录！'
+    ).replace('{device}', check.data.desktopDeviceName || pickActiveLang('ứng dụng máy tính', 'desktop app', '桌面应用')),
   };
 };

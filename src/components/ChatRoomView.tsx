@@ -2,7 +2,7 @@ import { UserProfileModal } from './UserProfileModal';
 import React, { useState, useEffect, useLayoutEffect, useRef, startTransition } from 'react';
 import { yieldToMain } from '../utils/scheduler';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage, pickLang } from '../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../context/LanguageContext';
 import { ChatInlineVideoPlayer } from './ChatInlineVideoPlayer';
 import { ChatMediaImage } from './ChatMediaImage';
 import { db } from '../firebase/config';
@@ -146,6 +146,7 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 const ChatRoomViewComponent: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
   const { currentLang, t } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string>('public-relay-lounge');
@@ -224,7 +225,7 @@ const ChatRoomViewComponent: React.FC = () => {
     return extractRoomMediaFromMessages(messages, {
       roomId: activeRoomId,
       currentUserUid: currentUser?.uid,
-      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn',
+      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || pick('Bạn', 'You', '你'),
       currentUserAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || null,
       memberNamesMap,
       memberMetaMap,
@@ -624,6 +625,8 @@ const ChatRoomViewComponent: React.FC = () => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
       setRooms(roomList);
+    }, (err) => {
+      console.warn('Rooms listener notice:', err);
     });
 
     return () => unsubscribe();
@@ -637,7 +640,13 @@ const ChatRoomViewComponent: React.FC = () => {
         setActiveRoomId('public-relay-lounge');
         setRecentMessages([]);
         setOlderMessages([]);
-        setModerationWarning('📢 Phòng chat bạn đang tham gia đã được Chủ phòng giải tán. Bạn đã được chuyển về Đại Sảnh Toàn Cầu.');
+        setModerationWarning(
+          pick(
+            '📢 Phòng chat bạn đang tham gia đã được Chủ phòng giải tán. Bạn đã được chuyển về Đại Sảnh Toàn Cầu.',
+            '📢 The chat room you were in was disbanded by the room owner. You have been moved back to the Global Lounge.',
+            '📢 您所在的聊天室已被房主解散，已为您切换回全球大厅。'
+          )
+        );
         setTimeout(() => setModerationWarning(null), 8000);
       }
     }
@@ -650,7 +659,7 @@ const ChatRoomViewComponent: React.FC = () => {
     
     // 1. Current user
     if (currentUser?.uid) {
-      const myName = userProfile?.displayName || currentUser.displayName || settings.deviceName || 'Bạn';
+      const myName = userProfile?.displayName || currentUser.displayName || settings.deviceName || pick('Bạn', 'You', '你');
       names[currentUser.uid] = myName;
       meta[currentUser.uid] = {
         displayName: myName,
@@ -716,6 +725,8 @@ const ChatRoomViewComponent: React.FC = () => {
       });
       setMemberNamesMap((prev) => ({ ...prev, ...names }));
       setMemberMetaMap((prev) => ({ ...prev, ...meta }));
+    }, (err) => {
+      console.warn('Presence listener notice:', err);
     });
 
     const usersRef = collection(db, 'users');
@@ -772,6 +783,8 @@ const ChatRoomViewComponent: React.FC = () => {
       });
       setMemberNamesMap((prev) => ({ ...prev, ...names }));
       setMemberMetaMap((prev) => ({ ...prev, ...meta }));
+    }, (err) => {
+      console.warn('Users listener notice:', err);
     });
 
     return () => {
@@ -939,7 +952,7 @@ const ChatRoomViewComponent: React.FC = () => {
       const isDev = isDevUser(currentUser.email);
       const newMember: RoomMember = {
         uid: currentUser.uid,
-        displayName: userProfile?.displayName || currentUser.displayName || 'Thành viên',
+        displayName: userProfile?.displayName || currentUser.displayName || pick('Thành viên', 'Member', '成员'),
         deviceName: settings.deviceName,
         avatarColor: settings.avatarColor || '#10b981',
         role: isRoomOwner ? 'owner' : 'member',
@@ -968,11 +981,18 @@ const ChatRoomViewComponent: React.FC = () => {
     let imageVerified = !isPublicRoom;
 
     if (isPublicRoom && thumb) {
-      setUploadProgressText(`🛡️ AI đang kiểm tra an toàn ảnh "${file.name}"...`);
+      setUploadProgressText(
+        pick('🛡️ AI đang kiểm tra an toàn ảnh "{name}"...', '🛡️ AI is checking safety of image "{name}"...', '🛡️ AI 正在检查图片“{name}”的安全性...')
+          .replace('{name}', file.name)
+      );
       const imgMod = await moderateUploadedImage(thumb, file.name);
       if (!imgMod.safe) {
         playShieldAlertSound();
-        setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setModerationWarning(
+          imgMod.reason ||
+          pick('🚫 Cảnh báo: Ảnh "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Image "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：图片“{name}”包含 18+/色情内容，已被立即删除！')
+            .replace('{name}', file.name)
+        );
         setTimeout(() => setModerationWarning(null), 9000);
         return null;
       }
@@ -987,7 +1007,13 @@ const ChatRoomViewComponent: React.FC = () => {
     if (file.size > 200 * 1024 || isHeic || isGif || !thumb) {
       try {
         const uploaded = await uploadFileToServer(file, (pct) => {
-          setUploadProgressText(`Đang xử lý ${isGif ? 'GIF' : 'ảnh'} "${file.name}" (${pct}%)...`);
+          setUploadProgressText(
+            (isGif
+              ? pick('Đang xử lý GIF "{name}" ({pct}%)...', 'Processing GIF "{name}" ({pct}%)...', '正在处理 GIF“{name}”({pct}%)...')
+              : pick('Đang xử lý ảnh "{name}" ({pct}%)...', 'Processing image "{name}" ({pct}%)...', '正在处理图片“{name}”({pct}%)...'))
+              .replace('{name}', file.name)
+              .replace('{pct}', String(pct))
+          );
         });
         fileUrl = isGif ? (uploaded.viewUrl || uploaded.url) : uploaded.url;
         if (uploaded.thumbnail && !isGif) {
@@ -1010,12 +1036,19 @@ const ChatRoomViewComponent: React.FC = () => {
 
     // Ensure HEIC / fallback / server-thumb / filename images in public rooms are ALWAYS AI checked before attaching
     if (isPublicRoom && !imageVerified) {
-      setUploadProgressText(`🛡️ AI đang kiểm tra an toàn ảnh "${file.name}"...`);
+      setUploadProgressText(
+        pick('🛡️ AI đang kiểm tra an toàn ảnh "{name}"...', '🛡️ AI is checking safety of image "{name}"...', '🛡️ AI 正在检查图片“{name}”的安全性...')
+          .replace('{name}', file.name)
+      );
       const imgMod = await moderateUploadedImage(thumb || finalData || fileUrl || '', file.name);
       if (!imgMod.safe) {
         deleteServerUploadedFile(fileUrl);
         playShieldAlertSound();
-        setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setModerationWarning(
+          imgMod.reason ||
+          pick('🚫 Cảnh báo: Ảnh "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Image "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：图片“{name}”包含 18+/色情内容，已被立即删除！')
+            .replace('{name}', file.name)
+        );
         setTimeout(() => setModerationWarning(null), 9000);
         return null;
       }
@@ -1038,13 +1071,20 @@ const ChatRoomViewComponent: React.FC = () => {
     const securityCheck = inspectFileSecurity(file);
     if (!securityCheck.isSafe) {
       playShieldAlertSound();
-      setModerationWarning(`🚫 ${securityCheck.error || `Tệp "${file.name}" không an toàn và đã bị chặn.`}`);
+      setModerationWarning(
+        `🚫 ${securityCheck.error || pick('Tệp "{name}" không an toàn và đã bị chặn.', 'File "{name}" is unsafe and has been blocked.', '文件“{name}”不安全，已被拦截。').replace('{name}', file.name)}`
+      );
       setTimeout(() => setModerationWarning(null), 7000);
       return null;
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      setModerationWarning(`⚠️ Tệp "${file.name}" (${formatFileSize(file.size)}) vượt quá giới hạn tối đa ${MAX_FILE_SIZE_LABEL}.`);
+      setModerationWarning(
+        pick('⚠️ Tệp "{name}" ({size}) vượt quá giới hạn tối đa {limit}.', '⚠️ File "{name}" ({size}) exceeds the maximum limit of {limit}.', '⚠️ 文件“{name}”({size}) 超出最大限制 {limit}。')
+          .replace('{name}', file.name)
+          .replace('{size}', formatFileSize(file.size))
+          .replace('{limit}', MAX_FILE_SIZE_LABEL)
+      );
       setTimeout(() => setModerationWarning(null), 5000);
       return null;
     }
@@ -1054,10 +1094,17 @@ const ChatRoomViewComponent: React.FC = () => {
     let videoVerified = !isPublicRoom || !fileIsVideo;
 
     try {
-      setUploadProgressText(`Đang tải tệp "${file.name}"...`);
+      setUploadProgressText(
+        pick('Đang tải tệp "{name}"...', 'Uploading file "{name}"...', '正在上传文件“{name}”...')
+          .replace('{name}', file.name)
+      );
 
       const uploadPromise = uploadFileToServer(file, (pct) => {
-        setUploadProgressText(`Đang tải tệp "${file.name}" (${pct}%)...`);
+        setUploadProgressText(
+          pick('Đang tải tệp "{name}" ({pct}%)...', 'Uploading file "{name}" ({pct}%)...', '正在上传文件“{name}”({pct}%)...')
+            .replace('{name}', file.name)
+            .replace('{pct}', String(pct))
+        );
       });
 
       const clientModPromise = (isPublicRoom && fileIsVideo)
@@ -1082,7 +1129,11 @@ const ChatRoomViewComponent: React.FC = () => {
       if (modResult.blocked) {
         deleteServerUploadedFile(uploadedUrl);
         playShieldAlertSound();
-        setModerationWarning(modResult.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+        setModerationWarning(
+          modResult.reason ||
+          pick('🚫 Cảnh báo: Video "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Video "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：视频“{name}”包含 18+/色情内容，已被立即删除！')
+            .replace('{name}', file.name)
+        );
         setTimeout(() => setModerationWarning(null), 9000);
         return null;
       }
@@ -1090,12 +1141,19 @@ const ChatRoomViewComponent: React.FC = () => {
 
       // Server-side ffmpeg frame check fallback if browser could not seek video frames (e.g. MKV/MOV/>250MB)
       if (isPublicRoom && fileIsVideo && !videoVerified) {
-        setUploadProgressText(`🛡️ AI đang phân tích nội dung video "${file.name}"...`);
+        setUploadProgressText(
+          pick('🛡️ AI đang phân tích nội dung video "{name}"...', '🛡️ AI is analyzing video "{name}"...', '🛡️ AI 正在分析视频“{name}”的内容...')
+            .replace('{name}', file.name)
+        );
         const vidMod = await moderateUploadedVideo([], file.name, uploadedUrl);
         if (!vidMod.safe) {
           deleteServerUploadedFile(uploadedUrl);
           playShieldAlertSound();
-          setModerationWarning(vidMod.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setModerationWarning(
+            vidMod.reason ||
+            pick('🚫 Cảnh báo: Video "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Video "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：视频“{name}”包含 18+/色情内容，已被立即删除！')
+              .replace('{name}', file.name)
+          );
           setTimeout(() => setModerationWarning(null), 9000);
           return null;
         }
@@ -1111,7 +1169,7 @@ const ChatRoomViewComponent: React.FC = () => {
         aiVerifiedSafe: videoVerified
       };
     } catch (err: any) {
-      setModerationWarning(err?.message || 'Lỗi khi tải tệp lên máy chủ.');
+      setModerationWarning(err?.message || pick('Lỗi khi tải tệp lên máy chủ.', 'Failed to upload file to server.', '上传文件到服务器失败。'));
       setTimeout(() => setModerationWarning(null), 5000);
       return null;
     }
@@ -1126,7 +1184,7 @@ const ChatRoomViewComponent: React.FC = () => {
     const itemsToProcess = files.slice(0, MAX_FILES);
 
     setIsCompressing(true);
-    setUploadProgressText('Đang đính kèm tệp tin...');
+    setUploadProgressText(pick('Đang đính kèm tệp tin...', 'Attaching files...', '正在附加文件...'));
     try {
       const results = await Promise.all(
         itemsToProcess.map(async (file) => {
@@ -1175,7 +1233,7 @@ const ChatRoomViewComponent: React.FC = () => {
 
     if (isPublicRoom) {
       setIsCompressing(true);
-      setUploadProgressText('🛡️ AI đang kiểm tra an toàn ảnh từ Kho Cloud...');
+      setUploadProgressText(pick('🛡️ AI đang kiểm tra an toàn ảnh từ Kho Cloud...', '🛡️ AI is verifying safety of media from Cloud Drive...', '🛡️ AI 正在检查来自云盘的媒体安全性...'));
     }
 
     try {
@@ -1210,7 +1268,11 @@ const ChatRoomViewComponent: React.FC = () => {
 
       if (blockedNames.length > 0) {
         playShieldAlertSound();
-        setModerationWarning(`🚫 Cảnh báo: AI đã phát hiện và xóa ngay ${blockedNames.length} ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") do vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu!`);
+        setModerationWarning(
+          pick('🚫 Cảnh báo: AI đã phát hiện và xóa ngay {count} ảnh/video 18+/khiêu dâm ("{names}") do vi phạm tiêu chuẩn Đại Sảnh Toàn Cầu!', '🚫 Warning: AI detected and immediately removed {count} 18+/explicit media item(s) ("{names}") violating Global Lounge rules!', '🚫 警告：AI 检测到并立即移除了 {count} 个违反全球大厅规范的 18+/色情媒体文件（“{names}”）！')
+            .replace('{count}', String(blockedNames.length))
+            .replace('{names}', blockedNames.join(', '))
+        );
         setTimeout(() => setModerationWarning(null), 9000);
       }
 
@@ -1292,7 +1354,7 @@ const ChatRoomViewComponent: React.FC = () => {
     const isPublicRoom = activeRoomId === 'public-relay-lounge' || (activeRoom && activeRoom.isPrivate !== true);
 
     if (isPublicRoom && isCompressing) {
-      setModerationWarning('⏳ AI đang kiểm tra an toàn hình ảnh trước khi gửi lên Đại Sảnh Toàn Cầu...');
+      setModerationWarning(pick('⏳ AI đang kiểm tra an toàn hình ảnh trước khi gửi lên Đại Sảnh Toàn Cầu...', '⏳ AI is verifying image safety before sending to Global Lounge...', '⏳ AI 正在发送至全球大厅前检查图片安全性...'));
       setTimeout(() => setModerationWarning(null), 3000);
       return;
     }
@@ -1301,14 +1363,14 @@ const ChatRoomViewComponent: React.FC = () => {
     const now = Date.now();
     sendTimestampsRef.current = sendTimestampsRef.current.filter(t => now - t < 3000);
     if (sendTimestampsRef.current.length >= 5) {
-      setModerationWarning('⚠️ Bạn đang gửi tin nhắn quá nhanh. Vui lòng chậm lại 1-2 giây.');
+      setModerationWarning(pick('⚠️ Bạn đang gửi tin nhắn quá nhanh. Vui lòng chậm lại 1-2 giây.', '⚠️ You are sending messages too fast. Please slow down 1-2 seconds.', '⚠️ 您发送消息过快，请稍等 1-2 秒。'));
       setTimeout(() => setModerationWarning(null), 3000);
       return;
     }
     sendTimestampsRef.current.push(now);
 
     if (rawTextOriginal.length > 5000) {
-      setModerationWarning('⚠️ Độ dài tin nhắn vượt quá giới hạn 5,000 ký tự cho phép.');
+      setModerationWarning(pick('⚠️ Độ dài tin nhắn vượt quá giới hạn 5,000 ký tự cho phép.', '⚠️ Message length exceeds the maximum 5,000 characters allowed.', '⚠️ 消息长度超出允许的 5,000 个字符上限。'));
       setTimeout(() => setModerationWarning(null), 4000);
       return;
     }
@@ -1317,7 +1379,7 @@ const ChatRoomViewComponent: React.FC = () => {
     let attachmentsToSend = [...attachments];
     if (isPublicRoom && attachmentsToSend.some(att => (isImageFile(att) || isVideoFile(att)) && !att.aiVerifiedSafe)) {
       setIsCompressing(true);
-      setUploadProgressText('🛡️ AI đang kiểm tra ảnh/video 18+/khiêu dâm trước khi gửi...');
+      setUploadProgressText(pick('🛡️ AI đang kiểm tra ảnh/video 18+/khiêu dâm trước khi gửi...', '🛡️ AI is checking media for 18+/explicit content before sending...', '🛡️ AI 正在发送前检查 18+/色情媒体内容...'));
       const verifiedAttachments: ChatAttachment[] = [];
       const blockedNames: string[] = [];
 
@@ -1350,7 +1412,8 @@ const ChatRoomViewComponent: React.FC = () => {
         setAttachments(verifiedAttachments);
         playShieldAlertSound();
         setModerationWarning(
-          `🚫 Cảnh báo: AI phát hiện ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") và đã xóa ngay lập tức khỏi Đại Sảnh Toàn Cầu!`
+          pick('🚫 Cảnh báo: AI phát hiện ảnh/video 18+/khiêu dâm ("{names}") và đã xóa ngay lập tức khỏi Đại Sảnh Toàn Cầu!', '🚫 Warning: AI detected 18+/explicit media ("{names}") and removed it immediately from Global Lounge!', '🚫 警告：AI 检测到 18+/色情媒体（“{names}”），已立即从全球大厅移除！')
+            .replace('{names}', blockedNames.join(', '))
         );
         setTimeout(() => setModerationWarning(null), 9000);
 
@@ -1385,7 +1448,10 @@ const ChatRoomViewComponent: React.FC = () => {
     const textToSend = cleanText;
 
     if (hasProfanity) {
-      setModerationWarning(`⚠️ Phát hiện từ ngữ thô tục (${detectedList.slice(0, 3).join(', ')}). Đã tự động thay bằng ***.`);
+      setModerationWarning(
+        pick('⚠️ Phát hiện từ ngữ thô tục ({words}). Đã tự động thay bằng ***.', '⚠️ Inappropriate language detected ({words}). Automatically masked with ***.', '⚠️ 检测到不当用语（{words}），已自动替换为 ***。')
+          .replace('{words}', detectedList.slice(0, 3).join(', '))
+      );
       setTimeout(() => setModerationWarning(null), 4000);
     }
 
@@ -1409,7 +1475,7 @@ const ChatRoomViewComponent: React.FC = () => {
     const messagePayload: any = {
       roomId: activeRoomId,
       senderId: currentUser.uid,
-      senderName: userProfile?.displayName || settings.deviceName || 'Người dùng',
+      senderName: userProfile?.displayName || settings.deviceName || pick('Người dùng', 'User', '用户'),
       senderEmail: currentUser.email || userProfile?.email || '',
       senderDevice: settings.deviceName,
       senderAvatar: userProfile?.customAvatarUrl || settings.customAvatarUrl || currentUser.photoURL || '',
@@ -1468,7 +1534,7 @@ const ChatRoomViewComponent: React.FC = () => {
       // Remove optimistic message on error and restore text if failed
       setRecentMessages(prev => prev.filter(m => m.id !== tempId));
       setInputText(rawTextOriginal);
-      setModerationWarning('Lỗi khi gửi tin nhắn lên máy chủ. Vui lòng thử lại.');
+      setModerationWarning(pick('Lỗi khi gửi tin nhắn lên máy chủ. Vui lòng thử lại.', 'Failed to send message to server. Please try again.', '发送消息到服务器失败，请重试。'));
       setTimeout(() => setModerationWarning(null), 4000);
     }
 
@@ -1479,7 +1545,9 @@ const ChatRoomViewComponent: React.FC = () => {
           if (aiCheck?.isFlagged && (aiCheck.severity === 'high' || aiCheck.severity === 'critical')) {
             playShieldAlertSound();
             setModerationWarning(
-              `🚫 [AI Kiểm Duyệt] Cảnh báo vi phạm: ${aiCheck.message || aiCheck.matchedRule}. Nhắc nhở: "${aiCheck.remindText || 'Vui lòng tuân thủ nội quy'}"`
+              pick('🚫 [AI Kiểm Duyệt] Cảnh báo vi phạm: {msg}. Nhắc nhở: "{remind}"', '🚫 [AI Moderation] Policy violation: {msg}. Reminder: "{remind}"', '🚫 [AI 审核] 违规警告：{msg}。提示：“{remind}”')
+                .replace('{msg}', aiCheck.message || aiCheck.matchedRule || '')
+                .replace('{remind}', aiCheck.remindText || pick('Vui lòng tuân thủ nội quy', 'Please follow community rules', '请遵守社区规则'))
             );
             setTimeout(() => setModerationWarning(null), 8000);
           }
@@ -1535,7 +1603,7 @@ const ChatRoomViewComponent: React.FC = () => {
     const isCreatorDev = isDevUser(currentUser.email);
     const creatorMember: RoomMember = {
       uid: currentUser.uid,
-      displayName: userProfile?.displayName || currentUser.displayName || 'Trưởng phòng',
+      displayName: userProfile?.displayName || currentUser.displayName || pick('Trưởng phòng', 'Room Owner', '房主'),
       deviceName: settings.deviceName,
       avatarColor: settings.avatarColor || '#10b981',
       role: 'owner',
@@ -1553,13 +1621,13 @@ const ChatRoomViewComponent: React.FC = () => {
         code: randomCode,
         isPrivate: true,
         createdBy: currentUser.uid,
-        createdByName: userProfile?.displayName || 'Người dùng',
+        createdByName: userProfile?.displayName || pick('Người dùng', 'User', '用户'),
         ownerId: currentUser.uid,
-        ownerName: userProfile?.displayName || currentUser.displayName || 'Trưởng phòng',
+        ownerName: userProfile?.displayName || currentUser.displayName || pick('Trưởng phòng', 'Room Owner', '房主'),
         avatar: newRoomAvatar || '',
         avatarColor: newRoomColor || '#10b981',
         createdAt: new Date().toISOString(),
-        description: `Phòng riêng tư bảo mật (Mã: ${randomCode})`,
+        description: pick('Phòng riêng tư bảo mật (Mã: {code})', 'Private secure room (Code: {code})', '私密安全房间（代码：{code}）').replace('{code}', randomCode),
         members: [creatorMember],
         membersCount: 1
       };
@@ -1607,7 +1675,7 @@ const ChatRoomViewComponent: React.FC = () => {
         const isDev = isDevUser(currentUser.email);
         const newMember: RoomMember = {
           uid: currentUser.uid,
-          displayName: userProfile?.displayName || currentUser.displayName || 'Thành viên',
+          displayName: userProfile?.displayName || currentUser.displayName || pick('Thành viên', 'Member', '成员'),
           deviceName: settings.deviceName,
           avatarColor: settings.avatarColor || '#3b82f6',
           role: 'member', // Là thành viên
@@ -1630,7 +1698,7 @@ const ChatRoomViewComponent: React.FC = () => {
       setJoinCodeInput('');
       setMobileTab('chat');
     } else {
-      setJoinError('Không tìm thấy phòng với mã ID này. Vui lòng kiểm tra lại!');
+      setJoinError(pick('Không tìm thấy phòng với mã ID này. Vui lòng kiểm tra lại!', 'No room found with this ID code. Please check again!', '未找到对应 ID 代码的房间，请重新检查！'));
     }
   };
 
@@ -1758,7 +1826,7 @@ const ChatRoomViewComponent: React.FC = () => {
                     )}
                   </div>
                   <p className="text-xs text-slate-400 truncate mt-0.5">
-                    {room.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (room.description || (room.isPrivate !== false ? `Mã riêng tư: ${room.code}` : 'Phòng cộng đồng'))}
+                    {room.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (room.description || (room.isPrivate !== false ? pick('Mã riêng tư: {code}', 'Private code: {code}', '私密代码：{code}').replace('{code}', room.code || '') : pick('Phòng cộng đồng', 'Community room', '社区聊天室')))}
                   </p>
                 </div>
                 {room.isPrivate !== false && room.id !== 'public-relay-lounge' && (
@@ -1787,9 +1855,9 @@ const ChatRoomViewComponent: React.FC = () => {
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center mb-3 shadow-lg shadow-emerald-500/20">
               <ImageIcon className="w-8 h-8 animate-bounce" />
             </div>
-            <h3 className="text-base font-bold text-white mb-1">Thả ảnh hoặc tệp vào đây</h3>
+            <h3 className="text-base font-bold text-white mb-1">{pick('Thả ảnh hoặc tệp vào đây', 'Drop images or files here', '将图片或文件拖放到此处')}</h3>
             <p className="text-xs text-emerald-300/90 max-w-xs">
-              Ảnh sẽ được tự động đính kèm và hiển thị ngay trên thanh chat để bạn xem trước!
+              {pick('Ảnh sẽ được tự động đính kèm và hiển thị ngay trên thanh chat để bạn xem trước!', 'Files will be automatically attached and shown above the chat bar for preview!', '文件将自动附加并立即显示在聊天输入栏上方供您预览！')}
             </p>
           </div>
         )}
@@ -1802,7 +1870,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 type="button"
                 onClick={() => setMobileTab('rooms')}
                 className="md:hidden p-1.5 -ml-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
-                title="Danh sách phòng"
+                title={pick('Danh sách phòng', 'Room list', '房间列表')}
               >
                 <ChevronLeft className="w-5 h-5" />
               </button>
@@ -1812,12 +1880,12 @@ const ChatRoomViewComponent: React.FC = () => {
                 className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold text-base shadow-md shrink-0 border border-white/10 overflow-hidden relative cursor-pointer group"
                 style={{ backgroundColor: activeRoom.avatarColor || '#10b981' }}
                 onClick={() => setShowRoomDetails(true)}
-                title="Xem & Chỉnh sửa thông tin phòng (nút i)"
+                title={pick('Xem & Chỉnh sửa thông tin phòng (nút i)', 'View & Edit Room Details (i button)', '查看与编辑房间信息 (i 按钮)')}
               >
                 {activeRoom.avatar ? (
                   <img src={activeRoom.avatar} alt={activeRoom.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                 ) : activeRoom.id === 'public-relay-lounge' ? (
-                  <img src={DEFAULT_GLOBAL_LOUNGE_AVATAR} alt="Đại Sảnh Toàn Cầu" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <img src={DEFAULT_GLOBAL_LOUNGE_AVATAR} alt={t('chat.public_lounge')} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                 ) : (
                   <span>{(activeRoom.name || 'P').charAt(0).toUpperCase()}</span>
                 )}
@@ -1832,7 +1900,7 @@ const ChatRoomViewComponent: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleCopyRoomCode(activeRoom.code)}
-                      title="Sao chép mã phòng"
+                      title={pick('Sao chép mã phòng', 'Copy room code', '复制房间代码')}
                       className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-amber-400 hover:bg-slate-700 transition-colors border border-amber-500/30 shrink-0"
                     >
                       {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3 text-slate-400" />}
@@ -1841,7 +1909,7 @@ const ChatRoomViewComponent: React.FC = () => {
                   )}
                 </div>
                 <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5">
-                  {activeRoom.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (activeRoom.description || (activeRoom.isPrivate !== false ? 'Phòng riêng tư bảo mật' : 'Sảnh kết nối công khai'))}
+                  {activeRoom.id === 'public-relay-lounge' ? t('chat.global_lounge_desc') : (activeRoom.description || (activeRoom.isPrivate !== false ? pick('Phòng riêng tư bảo mật', 'Private secure room', '私密安全房间') : pick('Sảnh kết nối công khai', 'Public connection lounge', '公共连接大厅')))}
                 </p>
               </div>
             </div>
@@ -1852,7 +1920,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="room-report-btn"
                 type="button"
                 onClick={() => setShowRoomReportModal(true)}
-                title={pickLang(currentLang, "Báo cáo vi phạm phòng chat / Gửi phản hồi tới DEV", "Report room violation / Send report to DEV", "举报聊天室违规 / 向 DEV 发送反馈")}
+                title={pick("Báo cáo vi phạm phòng chat / Gửi phản hồi tới DEV", "Report room violation / Send report to DEV", "举报聊天室违规 / 向 DEV 发送反馈")}
                 className="w-9 h-9 rounded-full bg-slate-800 hover:bg-rose-500/20 text-slate-300 hover:text-rose-400 border border-slate-700/80 hover:border-rose-500/40 flex items-center justify-center shadow-sm active:scale-95 transition-all group cursor-pointer"
               >
                 <Flag className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
@@ -1862,7 +1930,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="room-info-i-btn"
                 type="button"
                 onClick={() => setShowRoomDetails(true)}
-                title={activeRoom.isPrivate !== false ? "Cấu trúc & Cài đặt phòng riêng tư" : "Thông tin & Thành viên phòng"}
+                title={activeRoom.isPrivate !== false ? pick("Cấu trúc & Cài đặt phòng riêng tư", "Private room structure & settings", "私密房间结构与设置") : pick("Thông tin & Thành viên phòng", "Room info & members", "房间信息与成员")}
                 className="w-9 h-9 rounded-full bg-slate-800 hover:bg-emerald-600/20 text-slate-300 hover:text-emerald-400 border border-slate-700/80 hover:border-emerald-500/40 flex items-center justify-center shadow-sm active:scale-95 transition-all group"
               >
                 <span className="font-serif italic font-bold text-base text-emerald-400 group-hover:scale-110 transition-transform">
@@ -1987,8 +2055,8 @@ const ChatRoomViewComponent: React.FC = () => {
                     const effectiveAvatarUrl = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
                     const effectiveAvatarColor = msg.senderAvatarColor || (isMe ? (userProfile?.avatarColor || settings?.avatarColor || '#10b981') : (senderMeta?.avatarColor || '#10b981'));
                     const senderDisplayName = isMe 
-                      ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn') 
-                      : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || 'Người dùng');
+                      ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || pick('Bạn', 'You', '你')) 
+                      : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || pick('Người dùng', 'User', '用户'));
                     const initialChar = (senderDisplayName.trim().charAt(0) || 'U').toUpperCase();
 
                     return (
@@ -2014,12 +2082,12 @@ const ChatRoomViewComponent: React.FC = () => {
                             setSelectedProfileUser({
                               uid: msg.senderId || msg.senderDevice,
                               displayName: senderDisplayName,
-                              email: senderMeta?.email || '',
+                              email: senderMeta?.email || msg.senderEmail || '',
                               avatarUrl: effectiveAvatarUrl,
                               avatarColor: effectiveAvatarColor,
                               isDev: isDevMsg,
                               isOnline: isMe || Boolean(senderMeta?.isOnline),
-                              deviceName: senderMeta?.deviceName,
+                              deviceName: senderMeta?.deviceName || msg.senderDevice,
                               deviceType: senderMeta?.deviceType,
                               createdAt: senderMeta?.createdAt,
                               bannerUrl: senderMeta?.bannerUrl,
@@ -2028,7 +2096,7 @@ const ChatRoomViewComponent: React.FC = () => {
                               isMe: false
                             });
                           }}
-                          title={isMe ? undefined : "Xem hồ sơ cá nhân"}
+                          title={isMe ? undefined : pick("Xem hồ sơ cá nhân", "View user profile", "查看个人资料")}
                         >
                           {effectiveAvatarUrl ? (
                             <img
@@ -2047,21 +2115,53 @@ const ChatRoomViewComponent: React.FC = () => {
                           {isDevMsg ? (
                             <span
                               className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-gradient-to-tr from-amber-500 to-amber-300 rounded-full flex items-center justify-center shadow-xs ring-1 ring-slate-900"
-                              title="DEV Chính Chủ"
+                              title={pick("DEV Chính Chủ", "Official DEV", "官方 DEV")}
                             >
                               <Crown className="w-2 h-2 text-slate-950 fill-slate-950" />
                             </span>
                           ) : (isMe || senderMeta?.isOnline) ? (
                             <span
                               className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full ring-2 ring-slate-900 shadow-xs"
-                              title="Đang hoạt động (Online - Thời gian sống 3p)"
+                              title={pick("Đang hoạt động (Online - Thời gian sống 3p)", "Online (3m active TTL)", "在线（3 分钟活跃）")}
                             />
                           ) : null}
                         </div>
 
                         {/* Sender Name / DEV Badge */}
                         {isDevMsg ? (
-                          <div className="flex items-center gap-1.5 flex-wrap">
+                          <div
+                            className={`flex items-center gap-1.5 flex-wrap ${isMe ? '' : 'cursor-pointer hover:underline'}`}
+                            onClick={(e) => {
+                              if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setProfileAnchor({
+                                top: rect.top,
+                                bottom: rect.bottom,
+                                left: rect.left,
+                                right: rect.right,
+                                width: rect.width,
+                                height: rect.height,
+                                isRightHalf: false,
+                                isMe: false
+                              });
+                              setSelectedProfileUser({
+                                uid: msg.senderId || msg.senderDevice,
+                                displayName: senderDisplayName,
+                                email: senderMeta?.email || msg.senderEmail || '',
+                                avatarUrl: effectiveAvatarUrl,
+                                avatarColor: effectiveAvatarColor,
+                                isDev: isDevMsg,
+                                isOnline: isMe || Boolean(senderMeta?.isOnline),
+                                deviceName: senderMeta?.deviceName || msg.senderDevice,
+                                deviceType: senderMeta?.deviceType,
+                                createdAt: senderMeta?.createdAt,
+                                bannerUrl: senderMeta?.bannerUrl,
+                                customBio: senderMeta?.customBio || (senderMeta as any)?.bio,
+                                customBadgeText: senderMeta?.customBadgeText,
+                                isMe: false
+                              });
+                            }}
+                          >
                             <span className="font-extrabold text-xs bg-gradient-to-r from-amber-300 via-emerald-300 to-teal-300 bg-clip-text text-transparent truncate max-w-[150px]">
                               {senderDisplayName}
                             </span>
@@ -2070,7 +2170,39 @@ const ChatRoomViewComponent: React.FC = () => {
                             </span>
                           </div>
                         ) : (
-                          <span className="font-semibold text-slate-200 truncate max-w-[150px]">
+                          <span
+                            onClick={(e) => {
+                              if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setProfileAnchor({
+                                top: rect.top,
+                                bottom: rect.bottom,
+                                left: rect.left,
+                                right: rect.right,
+                                width: rect.width,
+                                height: rect.height,
+                                isRightHalf: false,
+                                isMe: false
+                              });
+                              setSelectedProfileUser({
+                                uid: msg.senderId || msg.senderDevice,
+                                displayName: senderDisplayName,
+                                email: senderMeta?.email || msg.senderEmail || '',
+                                avatarUrl: effectiveAvatarUrl,
+                                avatarColor: effectiveAvatarColor,
+                                isDev: isDevMsg,
+                                isOnline: isMe || Boolean(senderMeta?.isOnline),
+                                deviceName: senderMeta?.deviceName || msg.senderDevice,
+                                deviceType: senderMeta?.deviceType,
+                                createdAt: senderMeta?.createdAt,
+                                bannerUrl: senderMeta?.bannerUrl,
+                                customBio: senderMeta?.customBio || (senderMeta as any)?.bio,
+                                customBadgeText: senderMeta?.customBadgeText,
+                                isMe: false
+                              });
+                            }}
+                            className={`font-semibold text-slate-200 truncate max-w-[150px] ${isMe ? '' : 'cursor-pointer hover:underline hover:text-emerald-300'}`}
+                          >
                             {senderDisplayName}
                           </span>
                         )}
@@ -2084,7 +2216,7 @@ const ChatRoomViewComponent: React.FC = () => {
                           {(() => {
                             const t = getMessageTime(msg);
                             return t > 0
-                              ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                              ? new Date(t).toLocaleTimeString(getLocaleTag(currentLang), { hour: '2-digit', minute: '2-digit' })
                               : '';
                           })()}
                         </span>
@@ -2095,7 +2227,7 @@ const ChatRoomViewComponent: React.FC = () => {
                             type="button"
                             onClick={() => handleDeleteMessage(msg.id)}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all ml-1"
-                            title="Xóa / tiêu hủy tin nhắn này"
+                            title={pick("Xóa / tiêu hủy tin nhắn này", "Delete / destruct this message", "删除/销毁此消息")}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -2114,7 +2246,7 @@ const ChatRoomViewComponent: React.FC = () => {
                               }
                             }}
                             className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-all ml-1 cursor-pointer"
-                            title="Sao chép nội dung tin nhắn"
+                            title={pick("Sao chép nội dung tin nhắn", "Copy message text", "复制消息内容")}
                           >
                             {copiedMsgId === msg.id ? (
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -2130,7 +2262,7 @@ const ChatRoomViewComponent: React.FC = () => {
                             type="button"
                             onClick={() => setReportingMessage(msg)}
                             className="opacity-60 sm:opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-amber-400 hover:bg-amber-500/10 transition-all ml-1"
-                            title="Tố cáo tin nhắn này đến DEV (lách luật, 18+, quấy rối)"
+                            title={pick("Tố cáo tin nhắn này đến DEV (lách luật, 18+, quấy rối)", "Report this message to DEV (spam, 18+, harassment)", "向 DEV 举报此消息（违规、18+、骚扰）")}
                           >
                             <Flag className="w-3.5 h-3.5" />
                           </button>
@@ -2155,14 +2287,14 @@ const ChatRoomViewComponent: React.FC = () => {
                     {isDevMsg && (
                       <div className="flex items-center gap-1.5 pb-1 border-b border-amber-500/20 text-[10px] text-amber-300 font-semibold">
                         <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
-                        <span>Thông điệp từ Nhà Phát Triển (DEV)</span>
+                        <span>{pick('Thông điệp từ Nhà Phát Triển (DEV)', 'Message from Developer (DEV)', '来自开发者 (DEV) 的消息')}</span>
                       </div>
                     )}
                     {/* Warning Notice if flagged */}
                     {isWarned && (
                       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-rose-500/25 border border-rose-500/40 text-rose-200 text-[10px] font-semibold w-fit">
                         <AlertTriangle className="w-3 h-3 text-rose-300 animate-pulse" />
-                        <span>Nội dung bị cảnh cáo vi phạm</span>
+                        <span>{pick('Nội dung bị cảnh cáo vi phạm', 'Flagged policy violation', '内容因违规被警告')}</span>
                       </div>
                     )}
 
@@ -2170,7 +2302,11 @@ const ChatRoomViewComponent: React.FC = () => {
                     {msg.isSelfDestruct && (
                       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-orange-500/20 border border-orange-500/40 text-orange-200 text-[10px] font-semibold w-fit">
                         <Flame className="w-3 h-3 text-orange-400 animate-pulse" />
-                        <span>{msg.selfDestructDuration ? `Ảnh tự hủy sau ${msg.selfDestructDuration}s` : 'Ảnh bảo mật (Xem 1 lần)'}</span>
+                        <span>
+                          {msg.selfDestructDuration
+                            ? pick('Ảnh tự hủy sau {sec}s', 'Self-destruct image in {sec}s', '{sec} 秒后自动销毁的图片').replace('{sec}', String(msg.selfDestructDuration))
+                            : pick('Ảnh bảo mật (Xem 1 lần)', 'Protected image (View once)', '加密图片（仅限查看一次）')}
+                        </span>
                       </div>
                     )}
 
@@ -2186,10 +2322,12 @@ const ChatRoomViewComponent: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-orange-200">
-                              {msg.selfDestructDuration ? `Ảnh tự hủy (${msg.selfDestructDuration} giây)` : 'Ảnh tự hủy (Xem 1 lần)'}
+                              {msg.selfDestructDuration
+                                ? pick('Ảnh tự hủy ({sec} giây)', 'Self-destruct image ({sec} seconds)', '自动销毁图片（{sec} 秒）').replace('{sec}', String(msg.selfDestructDuration))
+                                : pick('Ảnh tự hủy (Xem 1 lần)', 'Self-destruct image (View once)', '阅后即焚图片（查看 1 次）')}
                             </p>
                             <p className="text-[10px] text-slate-400 mt-0.5">
-                              Nhấn để mở xem ({imageAttachments.length} ảnh) • Tự động tiêu hủy sau khi xem
+                              {pick('Nhấn để mở xem ({count} ảnh) • Tự động tiêu hủy sau khi xem', 'Tap to open ({count} photos) • Auto-destructs after viewing', '点击打开查看（{count} 张图片）• 查看后自动销毁').replace('{count}', String(imageAttachments.length))}
                             </p>
                           </div>
                         </div>
@@ -2216,8 +2354,8 @@ const ChatRoomViewComponent: React.FC = () => {
                             const imgDownload = img.url || img.data;
                             const senderMeta = memberMetaMap[msg.senderId] || memberMetaMap[msg.senderDevice];
                             const resolvedImgSenderName = isMe
-                              ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn')
-                              : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || 'Người dùng');
+                              ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || pick('Bạn', 'You', '你'))
+                              : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || pick('Người dùng', 'User', '用户'));
                             const resolvedImgSenderAvatar = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
                             return (
                             <div
@@ -2230,8 +2368,8 @@ const ChatRoomViewComponent: React.FC = () => {
                                   roomMedia: roomMediaGallery.unifiedMedia,
                                   activeItem: {
                                     id: `${msg.id}_i_${idx}`,
-                                    name: img.name || 'Ảnh',
-                                    title: img.name || 'Ảnh',
+                                    name: img.name || pick('Ảnh', 'Image', '图片'),
+                                    title: img.name || pick('Ảnh', 'Image', '图片'),
                                     src: zoomUrl,
                                     downloadUrl: imgDownload,
                                     thumbnail: (img.data && img.data.startsWith('data:image/') ? img.data : imgSrc) || null,
@@ -2272,7 +2410,7 @@ const ChatRoomViewComponent: React.FC = () => {
                                 <button
                                   type="button"
                                   className="p-1 rounded-md bg-black/40 hover:bg-emerald-600 text-white transition-colors cursor-pointer"
-                                  title="Tải ảnh về máy"
+                                  title={pick("Tải ảnh về máy", "Download image", "下载图片")}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     downloadFileSafely(imgDownload, img.name);
@@ -2307,8 +2445,8 @@ const ChatRoomViewComponent: React.FC = () => {
                             : vidSrc;
                           const senderMeta = memberMetaMap[msg.senderId] || memberMetaMap[msg.senderDevice];
                           const resolvedSenderName = isMe
-                            ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn')
-                            : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || 'Người dùng');
+                            ? (memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || pick('Bạn', 'You', '你'))
+                            : (memberNamesMap[msg.senderId] || senderMeta?.displayName || msg.senderName || pick('Người dùng', 'User', '用户'));
                           const resolvedSenderAvatar = msg.senderAvatar || (isMe ? (userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL) : senderMeta?.avatarUrl);
                           const openVideoPlayer = () => {
                             if (!vidSrc) return;
@@ -2366,7 +2504,7 @@ const ChatRoomViewComponent: React.FC = () => {
                               <div className="min-w-0">
                                 <p className="text-xs font-semibold truncate text-white">{file.name}</p>
                                 <p className="text-[10px] opacity-80">
-                                  {formatFileSize(file.size)} • {getDocumentTypeInfo(file.name, file.type).label}
+                                  {formatFileSize(file.size)} • {getDocumentTypeInfo(file.name, file.type, currentLang).label}
                                 </p>
                               </div>
                             </div>
@@ -2374,7 +2512,7 @@ const ChatRoomViewComponent: React.FC = () => {
                               type="button"
                               onClick={() => downloadFileSafely(fileHref, file.name)}
                               className="p-1.5 rounded-lg bg-black/25 hover:bg-emerald-600 text-white transition-colors shrink-0 shadow-sm cursor-pointer"
-                              title="Tải tệp"
+                              title={pick("Tải tệp", "Download file", "下载文件")}
                             >
                               <Download className="w-3.5 h-3.5" />
                             </button>
@@ -2417,15 +2555,15 @@ const ChatRoomViewComponent: React.FC = () => {
                   ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400/60'
                   : 'bg-slate-800/95 hover:bg-slate-700 text-slate-200 hover:text-white border-slate-700'
               }`}
-              title="Cuộn xuống tin nhắn mới nhất"
+              title={pick("Cuộn xuống tin nhắn mới nhất", "Scroll to latest messages", "滚动到最新消息")}
             >
               <ChevronDown className={`w-4 h-4 ${unreadNewCount > 0 || showScrollBottomBtn ? 'text-white animate-bounce' : 'text-emerald-400'}`} />
               <span>
                 {unreadNewCount > 0
-                  ? `${unreadNewCount} tin nhắn mới`
+                  ? pick('{count} tin nhắn mới', '{count} new message(s)', '{count} 条新消息').replace('{count}', String(unreadNewCount))
                   : showScrollBottomBtn
-                  ? 'Tin nhắn mới nhất'
-                  : 'Xuống cuối'}
+                  ? pick('Tin nhắn mới nhất', 'Latest messages', '最新消息')
+                  : pick('Xuống cuối', 'Jump to bottom', '回到底部')}
               </span>
             </button>
           )}
@@ -2437,14 +2575,16 @@ const ChatRoomViewComponent: React.FC = () => {
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="font-semibold text-slate-300 flex items-center gap-1.5">
                 <ImageIcon className="w-4 h-4 text-emerald-400" />
-                Đã chọn {attachments.length} ảnh/tệp ({formatFileSize(attachments.reduce((acc, cur) => acc + cur.size, 0))})
+                {pick('Đã chọn {count} ảnh/tệp ({size})', 'Selected {count} file(s) ({size})', '已选择 {count} 个文件（{size}）')
+                  .replace('{count}', String(attachments.length))
+                  .replace('{size}', formatFileSize(attachments.reduce((acc, cur) => acc + cur.size, 0)))}
               </span>
               <button
                 type="button"
                 onClick={() => setAttachments([])}
                 className="text-xs text-slate-400 hover:text-rose-400 transition-colors"
               >
-                Xóa tất cả
+                {pick('Xóa tất cả', 'Clear all', '全部清除')}
               </button>
             </div>
 
@@ -2484,7 +2624,7 @@ const ChatRoomViewComponent: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleRemoveAttachment(idx)}
-                      title="Xóa tệp này"
+                      title={pick("Xóa tệp này", "Remove this file", "移除此文件")}
                       className="absolute top-1 right-1 p-1 rounded-full bg-slate-950/80 hover:bg-rose-600 text-white transition-colors"
                     >
                       <X className="w-3 h-3" />
@@ -2498,7 +2638,13 @@ const ChatRoomViewComponent: React.FC = () => {
 
         {/* Moderation Warning Toast/Banner */}
         {moderationWarning && (() => {
-          const isSevereBlock = moderationWarning.includes('🚫') || moderationWarning.includes('18+') || moderationWarning.includes('khiêu dâm');
+          const isSevereBlock =
+            moderationWarning.includes('🚫') ||
+            moderationWarning.includes('18+') ||
+            moderationWarning.includes('khiêu dâm') ||
+            moderationWarning.toLowerCase().includes('explicit') ||
+            moderationWarning.toLowerCase().includes('nsfw') ||
+            moderationWarning.includes('色情');
           return (
             <div className={`mx-4 mb-2 p-3 rounded-xl text-xs sm:text-sm flex items-center justify-between gap-3 animate-in fade-in duration-200 shadow-xl ${
               isSevereBlock
@@ -2520,7 +2666,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 <div className="min-w-0">
                   {isSevereBlock && (
                     <div className="text-[10px] font-bold uppercase tracking-wider text-rose-300 mb-0.5">
-                      Cảnh báo kiểm duyệt nội dung 18+ (Ảnh / Video)
+                      {pick('Cảnh báo kiểm duyệt nội dung 18+ (Ảnh / Video)', '18+ Content Moderation Warning (Image / Video)', '18+ 内容审核警告（图片 / 视频）')}
                     </div>
                   )}
                   <span className={`font-sans leading-relaxed break-words ${isSevereBlock ? 'text-rose-100 font-medium' : 'italic text-cyan-300'}`}>
@@ -2547,9 +2693,13 @@ const ChatRoomViewComponent: React.FC = () => {
             <div className="flex items-center gap-2">
               <Flame className="w-4 h-4 text-orange-400 animate-pulse" />
               <span>
-                Chế độ Ảnh tự hủy đang bật:{' '}
+                {pick('Chế độ Ảnh tự hủy đang bật:', 'Self-destruct image mode enabled:', '阅后即焚图片模式已开启：')}{' '}
                 <strong className="text-orange-300">
-                  {selfDestructMode === 'view_once' ? 'Xem 1 lần rồi biến mất vĩnh viễn' : `Tự tiêu hủy sau ${selfDestructMode === '10s' ? '10 giây' : '30 giây'}`}
+                  {selfDestructMode === 'view_once'
+                    ? pick('Xem 1 lần rồi biến mất vĩnh viễn', 'View once then disappear permanently', '仅限查看 1 次后永久销毁')
+                    : selfDestructMode === '10s'
+                    ? pick('Tự tiêu hủy sau 10 giây', 'Auto-destruct after 10 seconds', '10 秒后自动销毁')
+                    : pick('Tự tiêu hủy sau 30 giây', 'Auto-destruct after 30 seconds', '30 秒后自动销毁')}
                 </strong>
               </span>
             </div>
@@ -2558,7 +2708,7 @@ const ChatRoomViewComponent: React.FC = () => {
               onClick={() => setSelfDestructMode('off')}
               className="text-orange-400 hover:text-white font-semibold underline text-xs"
             >
-              Tắt tự hủy
+              {pick('Tắt tự hủy', 'Disable self-destruct', '关闭阅后即焚')}
             </button>
           </div>
         )}
@@ -2568,15 +2718,15 @@ const ChatRoomViewComponent: React.FC = () => {
           {isDevUser(currentUser?.email) && (
             <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] sm:text-[11px] text-amber-300 bg-gradient-to-r from-amber-500/20 via-emerald-500/10 to-transparent border-b border-amber-500/30 font-medium flex-wrap">
               <Crown className="w-3 h-3 text-amber-400 fill-amber-400 animate-pulse shrink-0" />
-              <span>Gửi tin với tư cách:</span>
+              <span>{pick('Gửi tin với tư cách:', 'Sending as:', '发送身份：')}</span>
               <span className="font-extrabold bg-gradient-to-r from-amber-300 via-emerald-300 to-teal-300 bg-clip-text text-transparent">
                 {(userProfile?.displayName || currentUser?.displayName || settings.deviceName || 'Admin').trim()} (DEV)
               </span>
               <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                👑 DEV CHÍNH CHỦ
+                {pick('👑 DEV CHÍNH CHỦ', '👑 OFFICIAL DEV', '👑 官方 DEV')}
               </span>
               <span className="text-[10px] text-emerald-400/90 ml-auto hidden md:inline font-mono">
-                ✨ Trang trí vương miện & viền vàng như DEV Datastore
+                {pick('✨ Trang trí vương miện & viền vàng như DEV Datastore', '✨ Crown badge & gold border styling', '✨ 专属皇冠徽章与金色边框样式')}
               </span>
             </div>
           )}
@@ -2634,7 +2784,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="attach-image-btn"
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
-                title="Chọn một hoặc nhiều ảnh để gửi (hỗ trợ tới 250MB hoặc kéo thả / dán Ctrl+V)"
+                title={pick("Chọn một hoặc nhiều ảnh để gửi (hỗ trợ tới 250MB hoặc kéo thả / dán Ctrl+V)", "Select one or more images to send (up to 250MB, or drag & drop / paste)", "选择一张或多张图片发送（最高 250MB，支持拖放或粘贴）")}
                 className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-emerald-400 border border-slate-700 transition-colors shrink-0"
               >
                 <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2645,7 +2795,7 @@ const ChatRoomViewComponent: React.FC = () => {
                 id="attach-video-btn"
                 type="button"
                 onClick={() => videoInputRef.current?.click()}
-                title="Chọn một hoặc nhiều video để gửi (hỗ trợ MP4, WebM, MOV, MKV... lên tới 2GB)"
+                title={pick("Chọn một hoặc nhiều video để gửi (hỗ trợ MP4, WebM, MOV, MKV... lên tới 2GB)", "Select one or more videos to send (MP4, WebM, MOV, MKV... up to 2GB)", "选择一个或多个视频发送（支持 MP4、WebM、MOV、MKV 等，最高 2GB）")}
                 className="p-2 sm:p-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-emerald-400 border border-slate-700 transition-colors shrink-0"
               >
                 <Film className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -2897,7 +3047,7 @@ const ChatRoomViewComponent: React.FC = () => {
           room={activeRoom}
           currentUserUid={currentUser?.uid || ''}
           currentUserEmail={currentUser?.email || ''}
-          currentUserName={userProfile?.displayName || currentUser?.displayName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || currentUser?.displayName || pick('Người dùng', 'User', '用户')}
           currentDeviceName={settings.deviceName}
           messages={messages}
           onRoomDeleted={() => {
@@ -2936,7 +3086,7 @@ const ChatRoomViewComponent: React.FC = () => {
           roomId={activeRoom.id}
           roomName={activeRoom.name}
           currentUserId={currentUser.uid}
-          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户')}
         />
       )}
 
@@ -2948,7 +3098,7 @@ const ChatRoomViewComponent: React.FC = () => {
           roomId={activeRoom.id}
           roomName={activeRoom.name}
           currentUserId={currentUser.uid}
-          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户')}
         />
       )}
 
@@ -2958,7 +3108,7 @@ const ChatRoomViewComponent: React.FC = () => {
           isOpen={Boolean(viewingZoomImage)}
           onClose={() => setViewingZoomImage(null)}
           imageUrl={viewingZoomImage.url}
-          imageName={viewingZoomImage.name || 'Hình ảnh'}
+          imageName={viewingZoomImage.name || pick('Hình ảnh', 'Image', '图片')}
           fileSize={viewingZoomImage.size}
         />
       )}

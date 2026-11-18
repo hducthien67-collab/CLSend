@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { X, Calendar as CalendarIcon, Check, Sparkles, UserCheck } from 'lucide-react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface WheelDatePickerModalProps {
   value: string; // YYYY-MM-DD
@@ -15,6 +16,8 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
   onSave,
   onClose
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
   const currentYear = new Date().getFullYear();
 
   // Parse initial value (default to 18 years ago)
@@ -165,8 +168,8 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
   // Calculated Age
   const calculatedAge = useMemo(() => {
     const age = currentYear - selectedYear;
-    return age >= 0 ? `${age} tuổi` : '';
-  }, [selectedYear, currentYear]);
+    return age >= 0 ? pick('{n} tuổi', '{n} yrs', '{n} 岁').replace('{n}', String(age)) : '';
+  }, [selectedYear, currentYear, currentLang]);
 
   // Apply selection
   const handleApply = () => {
@@ -206,14 +209,14 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <span>Chọn Ngày Sinh</span>
+                <span>{pick('Chọn Ngày Sinh', 'Select Date of Birth', '选择出生日期')}</span>
                 {calculatedAge && (
                   <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
                     {calculatedAge}
                   </span>
                 )}
               </h3>
-              <p className="text-[11px] text-slate-400">Lăn chuột hoặc vuốt chạm để cuộn chọn</p>
+              <p className="text-[11px] text-slate-400">{pick('Lăn chuột hoặc vuốt chạm để cuộn chọn', 'Scroll or swipe to select date', '滑动或滚轮选择日期')}</p>
             </div>
           </div>
 
@@ -229,7 +232,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
         {/* PREVIEW DISPLAY: Hiển thị ngày đã chọn to rõ */}
         <div className="p-3 rounded-2xl bg-slate-950/80 border border-emerald-500/30 text-center relative z-10 shadow-inner">
           <div className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">
-            Ngày đã chọn
+            {pick('Ngày đã chọn', 'Selected Date', '已选日期')}
           </div>
           <div className="text-xl sm:text-2xl font-bold font-mono text-emerald-400 tracking-wide mt-0.5 flex items-center justify-center gap-2">
             <span>{String(selectedDay).padStart(2, '0')}</span>
@@ -239,7 +242,10 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
             <span>{selectedYear}</span>
           </div>
           <div className="text-xs text-slate-300 mt-0.5">
-            Ngày {selectedDay} tháng {selectedMonth} năm {selectedYear}
+            {pick('Ngày {d} tháng {m} năm {y}', '{y}-{m}-{d}', '{y}年{m}月{d}日')
+              .replace('{d}', String(selectedDay).padStart(2, '0'))
+              .replace('{m}', String(selectedMonth).padStart(2, '0'))
+              .replace('{y}', String(selectedYear))}
           </div>
         </div>
 
@@ -247,9 +253,9 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
         <div className="relative z-10 bg-slate-950/90 rounded-2xl border border-slate-800 p-2 overflow-hidden shadow-inner">
           {/* Header tên 3 cột */}
           <div className="grid grid-cols-3 text-center pb-2 border-b border-slate-800/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-            <span>Ngày</span>
-            <span>Tháng</span>
-            <span>Năm</span>
+            <span>{pick('Ngày', 'Day', '日')}</span>
+            <span>{pick('Tháng', 'Month', '月')}</span>
+            <span>{pick('Năm', 'Year', '年')}</span>
           </div>
 
           {/* Vùng cuộn 3 cột có thanh highlight ở giữa */}
@@ -327,7 +333,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
                         : 'text-slate-500 hover:text-slate-300 font-medium'
                     }`}
                   >
-                    Tháng {m}
+                    {pick('Tháng {m}', 'Month {m}', '{m}月').replace('{m}', String(m))}
                   </div>
                 );
               })}
@@ -371,7 +377,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
 
         {/* NÚT CHỌN NHANH ĐỘ TUỔI */}
         <div className="flex items-center justify-between gap-1.5 pt-1 relative z-10 flex-wrap">
-          <span className="text-[10px] text-slate-500 font-semibold uppercase">Chọn nhanh:</span>
+          <span className="text-[10px] text-slate-500 font-semibold uppercase">{pick('Chọn nhanh:', 'Quick select:', '快速选择：')}</span>
           <div className="flex items-center gap-1 flex-wrap">
             {[16, 18, 20, 25, 30].map((age) => (
               <button
@@ -384,7 +390,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
                     : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700/60'
                 }`}
               >
-                {age} tuổi
+                {pick('{n} tuổi', '{n} yrs', '{n} 岁').replace('{n}', String(age))}
               </button>
             ))}
           </div>
@@ -397,7 +403,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 text-xs font-semibold transition-colors"
           >
-            Hủy
+            {pick('Hủy', 'Cancel', '取消')}
           </button>
           <button
             type="button"
@@ -405,7 +411,7 @@ export const WheelDatePickerModal: React.FC<WheelDatePickerModalProps> = ({
             className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/30 transition-all active:scale-95 flex items-center gap-1.5"
           >
             <Check className="w-3.5 h-3.5" />
-            <span>Xác nhận ngày sinh</span>
+            <span>{pick('Xác nhận ngày sinh', 'Confirm Date', '确认日期')}</span>
           </button>
         </div>
       </div>

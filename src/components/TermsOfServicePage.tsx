@@ -32,21 +32,44 @@ interface TermsOfServicePageProps {
 
 export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }) => {
   const { currentLang, setLanguage } = useLanguage();
-  const isVi = currentLang === 'vi';
   const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
-  const isEn = !isVi && !isZh;
-  const pick = <T,>(vi: T, en: T, zh: T): T => pickLang(currentLang, vi, en, zh);
+  const pick = <T,>(vi: T, en: T, zh?: T): T => pickLang(currentLang, vi, en, zh);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [copiedClauseId, setCopiedClauseId] = useState<string | null>(null);
 
-  // Active localized terms dataset
+  // Active localized terms dataset across all 33 languages
   const activeTermsData = useMemo(() => {
-    if (isEn) return OFFICIAL_TERMS_OF_SERVICE_EN;
-    if (isZh) return OFFICIAL_TERMS_OF_SERVICE_ZH;
-    return OFFICIAL_TERMS_OF_SERVICE;
-  }, [isEn, isZh]);
+    if (currentLang === 'vi') return OFFICIAL_TERMS_OF_SERVICE;
+    if (currentLang === 'zh-CN') return OFFICIAL_TERMS_OF_SERVICE_ZH;
+    if (currentLang === 'en') return OFFICIAL_TERMS_OF_SERVICE_EN;
+    return OFFICIAL_TERMS_OF_SERVICE_EN.map((enArt, i) => {
+      const viArt = OFFICIAL_TERMS_OF_SERVICE[i] || enArt;
+      const zhArt = OFFICIAL_TERMS_OF_SERVICE_ZH[i] || enArt;
+      return {
+        ...enArt,
+        articleNumber: pickLang(currentLang, viArt.articleNumber, enArt.articleNumber, zhArt.articleNumber),
+        title: pickLang(currentLang, viArt.title, enArt.title, zhArt.title),
+        categoryLabel: pickLang(currentLang, viArt.categoryLabel, enArt.categoryLabel, zhArt.categoryLabel),
+        summary: pickLang(currentLang, viArt.summary, enArt.summary, zhArt.summary),
+        subClauses: enArt.subClauses.map((enClause, j) => {
+          const viClause = viArt.subClauses[j] || enClause;
+          const zhClause = zhArt.subClauses[j] || enClause;
+          return {
+            ...enClause,
+            title: pickLang(currentLang, viClause.title, enClause.title, zhClause.title),
+            description: pickLang(currentLang, viClause.description, enClause.description, zhClause.description),
+            severityLabel: pickLang(currentLang, viClause.severityLabel, enClause.severityLabel, zhClause.severityLabel),
+            penalty: pickLang(currentLang, viClause.penalty, enClause.penalty, zhClause.penalty),
+            examples: enClause.examples.map((ex, k) =>
+              pickLang(currentLang, viClause.examples[k] ?? ex, ex, zhClause.examples[k] ?? ex)
+            ),
+          };
+        }),
+      };
+    });
+  }, [currentLang]);
 
   // Filter clauses based on category & search query
   const filteredArticles = useMemo(() => {
@@ -89,11 +112,18 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
   }, [activeTermsData]);
 
   const handleCopyCitation = (clause: SubClause, article: MainArticle) => {
-    const citation = isEn
-      ? `[ClSend Citation: ${article.articleNumber} - Clause ${clause.clauseNumber}: ${clause.title}]\nContent: ${clause.description}\nPenalty: ${clause.penalty}\nOfficial Source: ${window.location.origin}/?page=rules#clause-${clause.id}`
-      : isZh
-      ? `[ClSend 条款引用: ${article.articleNumber} - 第 ${clause.clauseNumber} 款: ${clause.title}]\n内容：${clause.description}\n处罚：${clause.penalty}\n官方来源：${window.location.origin}/?page=rules#clause-${clause.id}`
-      : `[Trích dẫn ClSend: ${article.articleNumber} - Khoản ${clause.clauseNumber}: ${clause.title}]\nNội dung: ${clause.description}\nChế tài: ${clause.penalty}\nNguồn chính thức: ${window.location.origin}/?page=rules#clause-${clause.id}`;
+    const citation = pick(
+      '[Trích dẫn ClSend: {article} - Khoản {clause}: {title}]\nNội dung: {desc}\nChế tài: {penalty}\nNguồn chính thức: {origin}/?page=rules#clause-{id}',
+      '[ClSend Citation: {article} - Clause {clause}: {title}]\nContent: {desc}\nPenalty: {penalty}\nOfficial Source: {origin}/?page=rules#clause-{id}',
+      '[ClSend 条款引用: {article} - 第 {clause} 款: {title}]\n内容：{desc}\n处罚：{penalty}\n官方来源：{origin}/?page=rules#clause-{id}'
+    )
+      .replace('{article}', article.articleNumber)
+      .replace('{clause}', clause.clauseNumber)
+      .replace('{title}', clause.title)
+      .replace('{desc}', clause.description)
+      .replace('{penalty}', clause.penalty)
+      .replace('{origin}', window.location.origin)
+      .replace('{id}', clause.id);
     
     navigator.clipboard.writeText(citation);
     setCopiedClauseId(clause.id);
@@ -354,7 +384,7 @@ export const TermsOfServicePage: React.FC<TermsOfServicePageProps> = ({ onBack }
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-900">
                         <div className="flex items-center gap-2.5 flex-wrap">
                           <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 font-mono font-bold text-xs border border-emerald-500/30">
-                            {pick(`Khoản ${clause.clauseNumber}`, `Clause ${clause.clauseNumber}`, `第 ${clause.clauseNumber} 款`)}
+                            {`${pick('Khoản', 'Clause', '第')} ${clause.clauseNumber}`}
                           </span>
                           <h3 className="font-bold text-white text-sm sm:text-base">
                             {clause.title}

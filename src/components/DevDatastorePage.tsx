@@ -54,7 +54,15 @@ import {
   Laptop,
   Tv,
   Tablet,
-  Bell
+  Bell,
+  Calendar,
+  Phone,
+  Mail,
+  HardDrive,
+  KeyRound,
+  BadgeCheck,
+  MapPin,
+  Link2
 } from 'lucide-react';
 import { 
   collection, 
@@ -74,12 +82,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
-import { ChatRoom, UserDevice, UserSanction, ChatMessage, ContentReport, ChatAttachment, DeviceType } from './types';
+import { ChatRoom, UserDevice, UserSanction, ChatMessage, ContentReport, ChatAttachment, DeviceType, LoginSession, CloudDriveFile } from './types';
 import { formatFileSize } from '../utils/device';
 import { 
   isDevUser, 
   DEV_EMAIL, 
   SANCTION_TIERS, 
+  SanctionTierKey,
   applyTierSanction, 
   applyLinkedBanSanction,
   removeDevSanction,
@@ -148,6 +157,7 @@ const DEFAULT_GLOBAL_LOUNGE_AVATAR = `data:image/svg+xml;utf8,<svg xmlns="http:/
 
 export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp }) => {
   const { currentUser, settings } = useAuth();
+  const isCurrentDev = isDevUser(currentUser?.email);
   
   // 1. Tác vụ được chọn trên Thanh Điều Khiển
   const [activeTask, setActiveTask] = useState<ManagementTask>('rooms_users');
@@ -158,6 +168,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const [roomFilter, setRoomFilter] = useState<'all' | 'public' | 'private' | 'violating'>('all');
   const [roomViolationSeverity, setRoomViolationSeverity] = useState<'all' | 'light' | 'medium' | 'heavy' | 'critical'>('all');
   const [userFilter, setUserFilter] = useState<'all' | 'online' | 'offline' | 'violating'>('all');
+  const [userProviderFilter, setUserProviderFilter] = useState<'all' | 'google' | 'github' | 'facebook' | 'other'>('all');
   const [userViolationSeverity, setUserViolationSeverity] = useState<'all' | 'light' | 'medium' | 'heavy' | 'critical'>('all');
   const [violatorFilter, setViolatorFilter] = useState<'all' | 'light' | 'medium' | 'heavy' | 'critical'>('all');
   const [violatorTarget, setViolatorTarget] = useState<'users' | 'rooms'>('users');
@@ -210,6 +221,20 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const [aiAuditResult, setAiAuditResult] = useState<AiEvaluationResult | null>(null);
   const [isAiAuditing, setIsAiAuditing] = useState(false);
   const [userMessages, setUserMessages] = useState<ChatMessage[]>([]);
+  const [userSessions, setUserSessions] = useState<LoginSession[]>([]);
+  const [userCloudFiles, setUserCloudFiles] = useState<CloudDriveFile[]>([]);
+  const [userAccountMeta, setUserAccountMeta] = useState<{
+    username?: string;
+    dob?: string;
+    gender?: string;
+    linkedEmail?: string;
+    phone?: string;
+    linkedPhone?: string;
+    linkedUids?: string[];
+    isEmailVerified?: boolean;
+    emailVerifiedAt?: string;
+    createdAt?: string;
+  } | null>(null);
   const [copiedUid, setCopiedUid] = useState(false);
 
   // State Kiểm Duyệt Hàng Loạt bằng OpenAI Moderation
@@ -243,10 +268,40 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
   const [sanctionCustomRule, setSanctionCustomRule] = useState<string>('Tiêu Chuẩn & Nội Quy Cộng Đồng');
   const [sanctionCustomOffensiveItem, setSanctionCustomOffensiveItem] = useState<string>('');
 
+  const [devToast, setDevToast] = useState<{ text: string; type: 'info' | 'success' | 'error' } | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
+  const [isConfirmRunning, setIsConfirmRunning] = useState(false);
+
+  // State Ban / Mở Khóa Thủ Công (DEV-only, không cần chờ AI kiểm duyệt)
+  const [showManualBanModal, setShowManualBanModal] = useState(false);
+  const [manualBanSearch, setManualBanSearch] = useState('');
+  const [manualBanTargetUser, setManualBanTargetUser] = useState<any | null>(null);
+  const [manualBanTier, setManualBanTier] = useState<SanctionTierKey>('ban_3d');
+  const [manualBanReason, setManualBanReason] = useState('');
+  const [isApplyingManualBan, setIsApplyingManualBan] = useState(false);
+  const [detailManualTier, setDetailManualTier] = useState<SanctionTierKey>('ban_3d');
+  const [detailManualReason, setDetailManualReason] = useState('');
+
+  const showDevToast = (text: string, type: 'info' | 'success' | 'error' = 'info') => {
+    setDevToast({ text, type });
+    setTimeout(() => {
+      setDevToast(prev => (prev?.text === text ? null : prev));
+    }, 5000);
+  };
+
   // Lắng nghe thông báo riêng và tin nhắn của người dùng đang được chọn thời gian thực
   useEffect(() => {
     if (activeTask !== 'rooms_users' || roomsUsersSubTab !== 'users' || !selectedItemId) {
       setUserMessages([]);
+      setUserSessions([]);
+      setUserCloudFiles([]);
+      setUserAccountMeta(null);
       setSentPrivateNotifs([]);
       setAiAuditResult(null);
       setPrivateMsgText('');
@@ -307,11 +362,61 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       }
     });
 
+    // 3. Lắng nghe các phiên đăng nhập (sessions) và kho tệp Cloud Drive (cloud_files) của người dùng này
+    const unsubSessions = onSnapshot(
+      query(collection(db, 'sessions'), where('uid', '==', selectedItemId), limit(25)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as LoginSession));
+        list.sort((a, b) => new Date(b.lastActive || b.loginAt).getTime() - new Date(a.lastActive || a.loginAt).getTime());
+        setUserSessions(list);
+      },
+      (err) => {
+        console.warn('Lỗi đọc sessions người dùng:', err);
+      }
+    );
+
+    const unsubCloudFiles = onSnapshot(
+      query(collection(db, 'cloud_files'), where('userId', '==', selectedItemId), limit(100)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CloudDriveFile));
+        list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setUserCloudFiles(list);
+      },
+      (err) => {
+        console.warn('Lỗi đọc cloud_files người dùng:', err);
+      }
+    );
+
+    // 4. Đọc bổ sung metadata không nhạy cảm từ accounts (không bao giờ lấy passwordHash / salt)
+    getDocs(query(collection(db, 'accounts'), where('uid', '==', selectedItemId), limit(1)))
+      .then((snap) => {
+        if (!snap.empty) {
+          const d = snap.docs[0].data();
+          setUserAccountMeta({
+            username: d.username,
+            dob: d.dob,
+            gender: d.gender,
+            linkedEmail: d.linkedEmail,
+            phone: d.phone,
+            linkedPhone: d.linkedPhone,
+            linkedUids: d.linkedUids,
+            isEmailVerified: d.isEmailVerified,
+            emailVerifiedAt: d.emailVerifiedAt,
+            createdAt: d.createdAt,
+          });
+        } else {
+          setUserAccountMeta(null);
+        }
+      })
+      .catch(() => setUserAccountMeta(null));
+
     return () => {
       unsubNotifs();
+      unsubSessions();
+      unsubCloudFiles();
       roomMsgUnsubs.forEach(u => u());
     };
-  }, [activeTask, selectedItemId, rooms]);
+  }, [activeTask, roomsUsersSubTab, selectedItemId, rooms]);
 
   // Lắng nghe tin nhắn phòng chat đang được chọn thời gian thực (Bao gồm lưu trữ vĩnh viễn không bị mất khi Client xóa)
   useEffect(() => {
@@ -881,6 +986,52 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     return evaluatedUsersWithViolations.filter(u => u.onlineCheck?.isOnline).length;
   }, [evaluatedUsersWithViolations]);
 
+  const resolveUserLoginProvider = (u: any): 'google' | 'github' | 'facebook' | 'phone' | 'account' | 'guest' => {
+    const raw = u?.authProvider;
+    if (raw === 'google' || raw === 'github' || raw === 'facebook' || raw === 'phone' || raw === 'account' || raw === 'guest') {
+      return raw;
+    }
+    if (u?.facebookUid) return 'facebook';
+    if (u?.githubUid) return 'github';
+    if (u?.googleUid) return 'google';
+    const email = String(u?.email || '').toLowerCase();
+    const uid = String(u?.uid || u?.id || '');
+    if (u?.isGuest || uid.startsWith('guest_') || email.includes('@guest.cloudsend')) return 'guest';
+    if (email.endsWith('@phone.cloudsend.local') || (!email && (u?.phone || u?.linkedPhone || u?.phoneNumber))) return 'phone';
+    if (uid.startsWith('u_') || u?.username || email.endsWith('@cloudsend.local')) return 'account';
+    if (email && !email.endsWith('.local')) return 'google';
+    return 'account';
+  };
+
+  const userMatchesProviderFilter = (
+    u: any,
+    filter: 'all' | 'google' | 'github' | 'facebook' | 'other'
+  ): boolean => {
+    if (filter === 'all') return true;
+    const primary = resolveUserLoginProvider(u);
+    if (filter === 'google') return primary === 'google' || Boolean(u?.googleUid);
+    if (filter === 'github') return primary === 'github' || Boolean(u?.githubUid);
+    if (filter === 'facebook') return primary === 'facebook' || Boolean(u?.facebookUid);
+    return primary !== 'google' && primary !== 'github' && primary !== 'facebook';
+  };
+
+  const userProviderCounts = useMemo(() => {
+    const counts = {
+      all: evaluatedUsersWithViolations.length,
+      google: 0,
+      github: 0,
+      facebook: 0,
+      other: 0,
+    };
+    evaluatedUsersWithViolations.forEach((u) => {
+      if (userMatchesProviderFilter(u, 'google')) counts.google += 1;
+      if (userMatchesProviderFilter(u, 'github')) counts.github += 1;
+      if (userMatchesProviderFilter(u, 'facebook')) counts.facebook += 1;
+      if (userMatchesProviderFilter(u, 'other')) counts.other += 1;
+    });
+    return counts;
+  }, [evaluatedUsersWithViolations]);
+
   // Dữ liệu lọc cho Khung 3 (Middle Frame)
   const filteredItems = useMemo(() => {
     if (activeTask === 'rooms_users') {
@@ -909,9 +1060,17 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             list = list.filter(u => u.violationSeverity === userViolationSeverity);
           }
         }
+        if (userProviderFilter !== 'all') {
+          list = list.filter(u => userMatchesProviderFilter(u, userProviderFilter));
+        }
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
-          list = list.filter(u => u.displayName.toLowerCase().includes(q) || (u.email && u.email.toLowerCase().includes(q)));
+          list = list.filter(u =>
+            (u.displayName || '').toLowerCase().includes(q) ||
+            (u.email && u.email.toLowerCase().includes(q)) ||
+            (u.username && u.username.toLowerCase().includes(q)) ||
+            (u.phone && String(u.phone).toLowerCase().includes(q))
+          );
         }
         return list;
       }
@@ -1013,7 +1172,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
 
     return [];
-  }, [activeTask, roomsUsersSubTab, violatorsBannedSubTab, roomFilter, roomViolationSeverity, userFilter, userViolationSeverity, violatorFilter, violatorTarget, bannedFilter, broadcastFilter, reportFilter, roomsWithViolations, evaluatedUsersWithViolations, sanctions, broadcasts, reports, searchQuery]);
+  }, [activeTask, roomsUsersSubTab, violatorsBannedSubTab, roomFilter, roomViolationSeverity, userFilter, userProviderFilter, userViolationSeverity, violatorFilter, violatorTarget, bannedFilter, broadcastFilter, reportFilter, roomsWithViolations, evaluatedUsersWithViolations, sanctions, broadcasts, reports, searchQuery]);
 
   // Chi tiết mục đang chọn ở Khung 3 / Modal
   const selectedItemData = useMemo(() => {
@@ -1058,8 +1217,12 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     }
   };
 
-  // Xử lý Gỡ Ban (Unban) ngay lập tức (gỡ cả tài khoản chính + email/SĐT liên kết)
+  // Xử lý Gỡ Ban (Unban) ngay lập tức (gỡ cả tài khoản chính + email/SĐT liên kết) - Chỉ DEV
   const handleUnbanUser = async (targetUid: string, targetEmail?: string) => {
+    if (!isCurrentDev) {
+      showDevToast('Chỉ tài khoản DEV mới có quyền mở khóa tài khoản!', 'error');
+      return;
+    }
     try {
       const found = sanctions.find(s => s.uid === targetUid) || firestoreUsers.find(u => (u.uid || u.id) === targetUid);
       const email = targetEmail || found?.email || (found as any)?.linkedEmail || '';
@@ -1076,12 +1239,106 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         return true;
       }));
 
-      alert('✅ Đã gỡ lệnh cấm thành công (bao gồm cả các tài khoản liên kết Email / SĐT)! Người dùng có thể đăng nhập lại ngay lập tức.');
+      showDevToast('✅ Đã gỡ lệnh cấm thành công (bao gồm cả các tài khoản liên kết Email / SĐT)! Người dùng có thể đăng nhập lại ngay lập tức.', 'success');
     } catch (err) {
       console.error('Lỗi khi gỡ ban:', err);
       setSanctions(prev => prev.filter(s => s.uid !== targetUid));
-      alert('Đã hoàn tất thao tác gỡ lệnh cấm.');
+      showDevToast('Đã hoàn tất thao tác gỡ lệnh cấm.', 'info');
     }
+  };
+
+  // Mở hộp thoại Ban / Mở Khóa Thủ Công (DEV-only)
+  const openManualBanModalForUser = (targetUser?: any | null) => {
+    if (!isCurrentDev) {
+      showDevToast('Chỉ tài khoản DEV mới có quyền ban / mở khóa tài khoản!', 'error');
+      return;
+    }
+    if (targetUser && isDevUser(targetUser.email)) {
+      showDevToast('Không thể áp dụng lệnh ban cho tài khoản Quản Trị Viên (DEV)!', 'error');
+      return;
+    }
+    setManualBanTargetUser(targetUser || null);
+    setManualBanSearch('');
+    setManualBanTier('ban_3d');
+    setManualBanReason('');
+    setShowManualBanModal(true);
+  };
+
+  // Thực thi Ban / Khóa Thủ Công (không cần AI kiểm duyệt trước) - Chỉ DEV
+  const handleExecuteManualBan = async (targetUser: any, tier: SanctionTierKey, customReasonText: string, closeManualModal = false) => {
+    if (!isCurrentDev || !currentUser?.email) {
+      showDevToast('Chỉ tài khoản DEV mới có quyền thực hiện lệnh ban!', 'error');
+      return;
+    }
+    if (!targetUser) return;
+    const targetUid = targetUser.uid || targetUser.id;
+    const targetEmail = targetUser.linkedEmail || targetUser.email || '';
+    const targetPhone = targetUser.phone || targetUser.linkedPhone || targetUser.phoneNumber || '';
+    const targetName = targetUser.displayName || targetEmail || 'Người dùng';
+
+    if (!targetUid) {
+      showDevToast('Không xác định được UID của tài khoản này.', 'error');
+      return;
+    }
+    if (isDevUser(targetEmail) || (currentUser?.uid && targetUid === currentUser.uid)) {
+      showDevToast('Không thể ban tài khoản Quản Trị Viên (DEV)!', 'error');
+      return;
+    }
+
+    const tierConf = SANCTION_TIERS[tier];
+    const reasonToSave = customReasonText.trim() || tierConf.label;
+    const remindToSave = customReasonText.trim()
+      ? `${tierConf.remind} Lý do từ DEV: ${customReasonText.trim()}`
+      : tierConf.remind;
+
+    const executeAction = async () => {
+      setIsApplyingManualBan(true);
+      try {
+        const updated = await applyTierSanction({
+          targetUid,
+          targetEmail,
+          targetPhone,
+          targetDisplayName: targetName,
+          tier,
+          customReason: reasonToSave,
+          customRemindText: remindToSave,
+          ruleViolated: 'Xử phạt thủ công trực tiếp bởi DEV',
+          offensiveItemTimestamp: new Date().toISOString(),
+          devEmail: currentUser.email || DEV_EMAIL,
+        });
+
+        setSanctions(prev => {
+          const filtered = prev.filter(s => s.uid !== targetUid);
+          return [updated, ...filtered];
+        });
+
+        if (closeManualModal) {
+          setShowManualBanModal(false);
+          setManualBanTargetUser(null);
+          setManualBanReason('');
+        }
+        setDetailManualReason('');
+        showDevToast(`✅ Đã áp dụng [${tierConf.label}] trực tiếp cho tài khoản [${targetName}]!`, 'success');
+      } catch (err: any) {
+        console.error('Manual DEV ban error:', err);
+        showDevToast(err?.message || 'Lỗi khi áp dụng lệnh ban tài khoản.', 'error');
+      } finally {
+        setIsApplyingManualBan(false);
+      }
+    };
+
+    if (tier === 'level_perm') {
+      setConfirmDialog({
+        title: 'Xác nhận cấm tài khoản vĩnh viễn',
+        message: `Bạn có chắc chắn muốn CẤM VĨNH VIỄN tài khoản [${targetName}] không?\n\nLý do: "${reasonToSave}"\nHệ thống sẽ thu hồi quyền truy cập ngay lập tức và đồng bộ Email / SĐT liên kết.`,
+        confirmLabel: 'Cấm vĩnh viễn ngay',
+        danger: true,
+        onConfirm: executeAction,
+      });
+      return;
+    }
+
+    await executeAction();
   };
 
   // Xóa sạch lịch sử vi phạm / khóa chat test để đưa tài khoản/phòng về trạng thái sạch
@@ -1141,10 +1398,10 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         return next;
       });
       setShowDetailModal(false);
-      alert(`✅ Đã xóa sạch trạng thái vi phạm / khóa test cho [${targetName || targetId}]!`);
+      showDevToast(`✅ Đã xóa sạch trạng thái vi phạm / khóa test cho [${targetName || targetId}]!`, 'success');
     } catch (err) {
       console.error('Clear violation history error:', err);
-      alert('Đã dọn dẹp trạng thái vi phạm cục bộ.');
+      showDevToast('Đã dọn dẹp trạng thái vi phạm cục bộ.', 'info');
     }
   };
 
@@ -1181,10 +1438,10 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         actionTaken: 'deleted_message',
         resolvedAt: new Date().toISOString()
       });
-      alert('Đã xóa tin nhắn vi phạm khỏi phòng và cập nhật trạng thái tố cáo thành Đã xử lý!');
+      showDevToast('Đã xóa tin nhắn vi phạm khỏi phòng và cập nhật trạng thái tố cáo thành Đã xử lý!', 'success');
     } catch (err) {
       console.error('Delete reported message error:', err);
-      alert('Đã xử lý xóa tin nhắn vi phạm.');
+      showDevToast('Đã xử lý xóa tin nhắn vi phạm.', 'info');
     }
   };
 
@@ -1212,9 +1469,10 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           resolvedAt: now.toISOString()
         });
       }
-      alert(`Đã áp dụng hình phạt khóa tài khoản với [${targetName}] (và ${Math.max(0, propagatedCount - 1)} định danh Email/SĐT/tài khoản liên kết) thành công (${durationDays === 'perm' ? 'Vĩnh viễn' : durationDays + ' ngày'})!`);
+      showDevToast(`Đã áp dụng hình phạt khóa tài khoản với [${targetName}] (và ${Math.max(0, propagatedCount - 1)} định danh Email/SĐT/tài khoản liên kết) thành công (${durationDays === 'perm' ? 'Vĩnh viễn' : durationDays + ' ngày'})!`, 'success');
     } catch (err) {
       console.error('Ban user error:', err);
+      showDevToast('Lỗi khi áp dụng hình phạt khóa tài khoản.', 'error');
     }
   };
 
@@ -1871,7 +2129,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     const targetName = target.displayName || 'Người dùng';
 
     if (isDevUser(targetEmail)) {
-      alert('Không thể áp dụng hình phạt kỷ luật cho Quản Trị Viên (DEV)!');
+      showDevToast('Không thể áp dụng hình phạt kỷ luật cho Quản Trị Viên (DEV)!', 'error');
       return;
     }
 
@@ -1884,74 +2142,84 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       ? `⚠️ BẠN CÓ CHẮC CHẮN MUỐN CẤM TÀI KHOẢN [${targetName}] VĨNH VIỄN KHÔNG?\n\nHệ thống sẽ thu hồi quyền truy cập của tài khoản này và đồng bộ cấm tất cả tài khoản chung Email / SĐT liên kết (không cấm máy/tài khoản sạch mới).`
       : `Xác nhận áp dụng hình phạt kỷ luật:\n\n• ${tierConf.label}\n• Ghi chú Moderator gửi đi: "${customRemind}"\n• Lý do: "${customFinalReason}"\n\nBạn có muốn thực hiện không?`;
 
-    if (!window.confirm(confirmMsg)) return;
+    setConfirmDialog({
+      title: tier === 'level_perm' ? 'Xác nhận cấm tài khoản vĩnh viễn' : 'Xác nhận áp dụng kỷ luật',
+      message: confirmMsg,
+      confirmLabel: 'Xác nhận ban hành',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const updated = await applyTierSanction({
+            targetUid,
+            targetEmail,
+            targetPhone,
+            targetDisplayName: targetName,
+            tier,
+            customReason: customFinalReason,
+            customRemindText: customRemind,
+            ruleViolated: finalRule,
+            offensiveItem: sanctionCustomOffensiveItem.trim() || undefined,
+            offensiveItemTimestamp: new Date().toISOString(),
+            devEmail: currentUser?.email || DEV_EMAIL
+          });
 
-    try {
-      const updated = await applyTierSanction({
-        targetUid,
-        targetEmail,
-        targetPhone,
-        targetDisplayName: targetName,
-        tier,
-        customReason: customFinalReason,
-        customRemindText: customRemind,
-        ruleViolated: finalRule,
-        offensiveItem: sanctionCustomOffensiveItem.trim() || undefined,
-        offensiveItemTimestamp: new Date().toISOString(),
-        devEmail: currentUser?.email || DEV_EMAIL
-      });
+          setSanctions(prev => {
+            const filtered = prev.filter(s => s.uid !== targetUid);
+            return [updated, ...filtered];
+          });
 
-      setSanctions(prev => {
-        const filtered = prev.filter(s => s.uid !== targetUid);
-        return [updated, ...filtered];
-      });
-
-      alert(`✅ Đã ban hành bản án kỷ luật Roblox thành công [${tierConf.label}] cho [${targetName}]!\n\nModerator Note: "${customRemind}"`);
-    } catch (err) {
-      console.error('Apply tier sanction error:', err);
-      alert('Gặp lỗi khi lưu kỷ luật vào Firestore.');
-    }
+          showDevToast(`✅ Đã ban hành bản án kỷ luật Roblox thành công [${tierConf.label}] cho [${targetName}]!`, 'success');
+        } catch (err) {
+          console.error('Apply tier sanction error:', err);
+          showDevToast('Gặp lỗi khi lưu kỷ luật vào Firestore.', 'error');
+        }
+      }
+    });
   };
 
   // Xóa một người dùng test / ảo khỏi Firestore
-  const handleDeleteUser = async (targetUid: string, targetName: string, targetEmail?: string) => {
+  const handleDeleteUser = (targetUid: string, targetName: string, targetEmail?: string) => {
     if (isDevUser(targetEmail)) {
-      alert('Không thể xóa tài khoản của Quản Trị Viên DEV chính thức!');
+      showDevToast('Không thể xóa tài khoản của Quản Trị Viên DEV chính thức!', 'error');
       return;
     }
 
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản [${targetName}] khỏi Firestore không?\n\nThao tác này sẽ xóa hồ sơ người dùng, trạng thái presence và các bản ghi kỷ luật liên quan.`)) {
-      return;
-    }
+    setConfirmDialog({
+      title: 'Xóa vĩnh viễn tài khoản',
+      message: `Bạn có chắc chắn muốn xóa vĩnh viễn tài khoản [${targetName}] khỏi Firestore không?\n\nThao tác này sẽ xóa hồ sơ người dùng, trạng thái presence và các bản ghi kỷ luật liên quan.`,
+      confirmLabel: 'Xóa tài khoản',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          const cleanEmail = (targetEmail || '').trim().toLowerCase();
+          const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
 
-    try {
-      const cleanEmail = (targetEmail || '').trim().toLowerCase();
-      const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
+          await deleteDoc(doc(db, 'users', targetUid));
+          await deleteDoc(doc(db, 'presence', targetUid));
+          await deleteDoc(doc(db, 'sanctions', targetUid));
+          if (emailDocId && emailDocId !== targetUid) {
+            await deleteDoc(doc(db, 'sanctions', emailDocId));
+          }
 
-      await deleteDoc(doc(db, 'users', targetUid));
-      await deleteDoc(doc(db, 'presence', targetUid));
-      await deleteDoc(doc(db, 'sanctions', targetUid));
-      if (emailDocId && emailDocId !== targetUid) {
-        await deleteDoc(doc(db, 'sanctions', emailDocId));
+          setFirestoreUsers(prev => prev.filter(u => (u.uid || u.id) !== targetUid));
+          setOnlinePresence(prev => prev.filter(p => p.uid !== targetUid));
+          setSanctions(prev => prev.filter(s => s.uid !== targetUid && (!cleanEmail || s.email?.toLowerCase() !== cleanEmail)));
+
+          if (selectedItemId === targetUid) {
+            setSelectedItemId(null);
+          }
+
+          showDevToast(`✅ Đã xóa tài khoản [${targetName}] thành công khỏi hệ thống!`, 'success');
+        } catch (err) {
+          console.error('Delete user error:', err);
+          showDevToast('Lỗi khi xóa người dùng khỏi Firestore.', 'error');
+        }
       }
-
-      setFirestoreUsers(prev => prev.filter(u => (u.uid || u.id) !== targetUid));
-      setOnlinePresence(prev => prev.filter(p => p.uid !== targetUid));
-      setSanctions(prev => prev.filter(s => s.uid !== targetUid && (!cleanEmail || s.email?.toLowerCase() !== cleanEmail)));
-
-      if (selectedItemId === targetUid) {
-        setSelectedItemId(null);
-      }
-
-      alert(`✅ Đã xóa tài khoản [${targetName}] thành công khỏi hệ thống!`);
-    } catch (err) {
-      console.error('Delete user error:', err);
-      alert('Lỗi khi xóa người dùng khỏi Firestore.');
-    }
+    });
   };
 
   // Dọn dẹp hàng loạt các tài khoản test / không thật
-  const handlePurgeTestUsers = async () => {
+  const handlePurgeTestUsers = () => {
     const testUsers = evaluatedUsersWithViolations.filter(u => {
       if (isDevUser(u.email)) return false;
       if (currentUser && u.uid === currentUser.uid) return false;
@@ -1970,41 +2238,45 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     });
 
     if (testUsers.length === 0) {
-      alert('Hiện tại không có tài khoản test hoặc tài khoản ảo nào cần dọn dẹp.');
+      showDevToast('Hiện tại không có tài khoản test hoặc tài khoản ảo nào cần dọn dẹp.', 'info');
       return;
     }
 
-    if (!window.confirm(`Tìm thấy ${testUsers.length} tài khoản thử nghiệm / không thật:\n\n${testUsers.map(u => `• ${u.displayName} (${u.email || 'Khách'})`).slice(0, 8).join('\n')}${testUsers.length > 8 ? `\n... và ${testUsers.length - 8} tài khoản khác` : ''}\n\nBạn có muốn xóa toàn bộ các tài khoản này khỏi Firestore không? (Tài khoản DEV của bạn sẽ được bảo vệ tuyệt đối).`)) {
-      return;
-    }
-
-    let deletedCount = 0;
-    for (const u of testUsers) {
-      try {
-        const cleanEmail = (u.email || '').trim().toLowerCase();
-        const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
-        await deleteDoc(doc(db, 'users', u.uid));
-        await deleteDoc(doc(db, 'presence', u.uid));
-        await deleteDoc(doc(db, 'sanctions', u.uid));
-        if (emailDocId && emailDocId !== u.uid) {
-          await deleteDoc(doc(db, 'sanctions', emailDocId));
+    setConfirmDialog({
+      title: `Dọn dẹp ${testUsers.length} tài khoản thử nghiệm`,
+      message: `Tìm thấy ${testUsers.length} tài khoản thử nghiệm / không thật:\n\n${testUsers.map(u => `• ${u.displayName} (${u.email || 'Khách'})`).slice(0, 8).join('\n')}${testUsers.length > 8 ? `\n... và ${testUsers.length - 8} tài khoản khác` : ''}\n\nBạn có muốn xóa toàn bộ các tài khoản này khỏi Firestore không? (Tài khoản DEV của bạn sẽ được bảo vệ tuyệt đối).`,
+      confirmLabel: 'Xóa toàn bộ tài khoản test',
+      danger: true,
+      onConfirm: async () => {
+        let deletedCount = 0;
+        for (const u of testUsers) {
+          try {
+            const cleanEmail = (u.email || '').trim().toLowerCase();
+            const emailDocId = cleanEmail ? encodeURIComponent(cleanEmail).replace(/\./g, '_') : '';
+            await deleteDoc(doc(db, 'users', u.uid));
+            await deleteDoc(doc(db, 'presence', u.uid));
+            await deleteDoc(doc(db, 'sanctions', u.uid));
+            if (emailDocId && emailDocId !== u.uid) {
+              await deleteDoc(doc(db, 'sanctions', emailDocId));
+            }
+            deletedCount++;
+          } catch (err) {
+            console.warn('Purge test user error for:', u.uid, err);
+          }
         }
-        deletedCount++;
-      } catch (err) {
-        console.warn('Purge test user error for:', u.uid, err);
+
+        const testUids = new Set(testUsers.map(u => u.uid));
+        setFirestoreUsers(prev => prev.filter(u => !testUids.has(u.uid || u.id)));
+        setOnlinePresence(prev => prev.filter(p => !testUids.has(p.uid)));
+        setSanctions(prev => prev.filter(s => !testUids.has(s.uid)));
+
+        if (selectedItemId && testUids.has(selectedItemId)) {
+          setSelectedItemId(null);
+        }
+
+        showDevToast(`✅ Đã dọn dẹp thành công ${deletedCount} tài khoản test khỏi Firestore!`, 'success');
       }
-    }
-
-    const testUids = new Set(testUsers.map(u => u.uid));
-    setFirestoreUsers(prev => prev.filter(u => !testUids.has(u.uid || u.id)));
-    setOnlinePresence(prev => prev.filter(p => !testUids.has(p.uid)));
-    setSanctions(prev => prev.filter(s => !testUids.has(s.uid)));
-
-    if (selectedItemId && testUids.has(selectedItemId)) {
-      setSelectedItemId(null);
-    }
-
-    alert(`✅ Đã dọn dẹp thành công ${deletedCount} tài khoản test khỏi Firestore!`);
+    });
   };
 
   // Định dạng thời gian gửi tin nhắn (Tên hiển thị + Giờ gửi bên cạnh)
@@ -2216,7 +2488,7 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
     if (!files || files.length === 0) return;
     for (const file of Array.from(files)) {
       if (file.size > MAX_FILE_SIZE) {
-        alert(`Tệp "${file.name}" vượt quá giới hạn tối đa 250MB.`);
+        showDevToast(`Tệp "${file.name}" vượt quá giới hạn tối đa 250MB.`, 'error');
         continue;
       }
       try {
@@ -2295,61 +2567,84 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
       setDevAttachments([]);
     } catch (err) {
       console.error('Lỗi gửi tin nhắn DEV vào phòng:', err);
-      alert('Lỗi gửi tin nhắn: ' + (err instanceof Error ? err.message : String(err)));
+      showDevToast('Lỗi gửi tin nhắn: ' + (err instanceof Error ? err.message : String(err)), 'error');
     } finally {
       setIsSendingDevMessage(false);
     }
   };
 
   // DEV xóa tin nhắn cụ thể trong phòng (Vẫn giữ lại trong lưu trữ kiểm toán Khung 4)
-  const handleDeleteRoomMessage = async (msgId: string) => {
+  const handleDeleteRoomMessage = (msgId: string) => {
     if (!selectedItemId) return;
-    if (!confirm('Bạn có chắc chắn muốn xóa tin nhắn này khỏi phòng hiển thị của Client? (Tin nhắn vẫn được bảo lưu trong Khung 4 - Nội Dung để kiểm toán)')) return;
-    try {
-      await deleteDoc(doc(db, 'rooms', selectedItemId, 'messages', msgId));
-      setRoomMessages(prev => prev.map(m => m.id === msgId ? { ...m, isDeletedBySender: true, deletedBySender: true, deletedAt: new Date().toISOString() } : m));
-    } catch (err) {
-      console.error('Lỗi xóa tin nhắn:', err);
-    }
+    setConfirmDialog({
+      title: 'Xóa tin nhắn khỏi phòng hiển thị',
+      message: 'Bạn có chắc chắn muốn xóa tin nhắn này khỏi phòng hiển thị của Client? (Tin nhắn vẫn được bảo lưu trong Khung 4 - Nội Dung để kiểm toán)',
+      confirmLabel: 'Xóa tin nhắn',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'rooms', selectedItemId, 'messages', msgId));
+          setRoomMessages(prev => prev.map(m => m.id === msgId ? { ...m, isDeletedBySender: true, deletedBySender: true, deletedAt: new Date().toISOString() } : m));
+          showDevToast('Đã xóa tin nhắn khỏi phòng hiển thị.', 'success');
+        } catch (err) {
+          console.error('Lỗi xóa tin nhắn:', err);
+          showDevToast('Lỗi khi xóa tin nhắn.', 'error');
+        }
+      }
+    });
   };
 
   // DEV xóa vĩnh viễn phòng chat (bảo vệ Đại Sảnh Toàn Cầu)
-  const handleDeleteRoom = async (roomId: string) => {
+  const handleDeleteRoom = (roomId: string) => {
     if (roomId === 'public-relay-lounge') {
-      alert('Không thể xóa Đại Sảnh Toàn Cầu (Global Lounge)! Đây là phòng công khai mặc định của hệ thống.');
+      showDevToast('Không thể xóa Đại Sảnh Toàn Cầu (Global Lounge)! Đây là phòng công khai mặc định của hệ thống.', 'error');
       return;
     }
-    if (!confirm('CẢNH BÁO DEV: Bạn có chắc chắn muốn xóa vĩnh viễn phòng chat này khỏi hệ thống Firestore?')) return;
-    try {
-      await deleteDoc(doc(db, 'rooms', roomId));
-      if (selectedItemId === roomId) {
-        setSelectedItemId(null);
+    setConfirmDialog({
+      title: 'Xóa vĩnh viễn phòng chat',
+      message: 'CẢNH BÁO DEV: Bạn có chắc chắn muốn xóa vĩnh viễn phòng chat này khỏi hệ thống Firestore?',
+      confirmLabel: 'Xóa phòng',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'rooms', roomId));
+          if (selectedItemId === roomId) {
+            setSelectedItemId(null);
+          }
+          showDevToast('Đã xóa phòng chat khỏi Firestore.', 'success');
+        } catch (err) {
+          console.error('Lỗi xóa phòng chat:', err);
+          showDevToast('Lỗi khi xóa phòng chat.', 'error');
+        }
       }
-    } catch (err) {
-      console.error('Lỗi xóa phòng chat:', err);
-    }
+    });
   };
 
   // DEV dọn dẹp tất cả các phòng ảo / phòng thử nghiệm (Chỉ giữ lại Đại Sảnh Toàn Cầu)
-  const handlePurgeTestRooms = async () => {
+  const handlePurgeTestRooms = () => {
     const testRooms = rooms.filter(r => r.id !== 'public-relay-lounge');
     if (testRooms.length === 0) {
-      alert('Hệ thống hiện tại chỉ có duy nhất Đại Sảnh Toàn Cầu (Global Lounge), không có phòng test nào khác!');
+      showDevToast('Hệ thống hiện tại chỉ có duy nhất Đại Sảnh Toàn Cầu (Global Lounge), không có phòng test nào khác!', 'info');
       return;
     }
-    if (!confirm(`Bạn có chắc chắn muốn XÓA TẤT CẢ ${testRooms.length} phòng thử nghiệm / phòng không thật không? Chỉ duy nhất Đại Sảnh Toàn Cầu sẽ được giữ lại!`)) {
-      return;
-    }
-    try {
-      await Promise.all(testRooms.map(r => deleteDoc(doc(db, 'rooms', r.id))));
-      alert(`Đã xóa thành công ${testRooms.length} phòng test. Hiện chỉ còn duy nhất Đại Sảnh Toàn Cầu!`);
-      if (selectedItemId && selectedItemId !== 'public-relay-lounge') {
-        setSelectedItemId(null);
+    setConfirmDialog({
+      title: `Xóa ${testRooms.length} phòng thử nghiệm`,
+      message: `Bạn có chắc chắn muốn XÓA TẤT CẢ ${testRooms.length} phòng thử nghiệm / phòng không thật không? Chỉ duy nhất Đại Sảnh Toàn Cầu sẽ được giữ lại!`,
+      confirmLabel: 'Xóa các phòng test',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await Promise.all(testRooms.map(r => deleteDoc(doc(db, 'rooms', r.id))));
+          showDevToast(`Đã xóa thành công ${testRooms.length} phòng test. Hiện chỉ còn duy nhất Đại Sảnh Toàn Cầu!`, 'success');
+          if (selectedItemId && selectedItemId !== 'public-relay-lounge') {
+            setSelectedItemId(null);
+          }
+        } catch (err) {
+          console.error('Lỗi khi xóa các phòng test:', err);
+          showDevToast('Có lỗi xảy ra khi xóa phòng test.', 'error');
+        }
       }
-    } catch (err) {
-      console.error('Lỗi khi xóa các phòng test:', err);
-      alert('Có lỗi xảy ra khi xóa phòng test.');
-    }
+    });
   };
 
   const handleBack = () => {
@@ -2697,6 +2992,35 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         {evaluatedUsersWithViolations.length - verifiedOnlineUsersCount}
                       </span>
                     </button>
+
+                    <div className="pt-2.5 mt-2.5 border-t border-slate-800/80 space-y-1.5">
+                      <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                        Phương thức đăng nhập
+                      </div>
+                      {[
+                        { key: 'all' as const, label: 'Tất cả nguồn', count: userProviderCounts.all, activeClass: 'bg-slate-800 text-white border-slate-600' },
+                        { key: 'google' as const, label: 'Google', count: userProviderCounts.google, activeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' },
+                        { key: 'github' as const, label: 'GitHub', count: userProviderCounts.github, activeClass: 'bg-violet-500/15 text-violet-300 border-violet-500/40' },
+                        { key: 'facebook' as const, label: 'Facebook', count: userProviderCounts.facebook, activeClass: 'bg-blue-500/15 text-blue-300 border-blue-500/40' },
+                        { key: 'other' as const, label: 'TK / SĐT / Khách', count: userProviderCounts.other, activeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/40' },
+                      ].map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => { setUserProviderFilter(p.key); setSelectedItemId(null); }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-all border ${
+                            userProviderFilter === p.key
+                              ? `${p.activeClass} font-semibold`
+                              : 'border-transparent hover:bg-slate-900/80 text-slate-300'
+                          }`}
+                        >
+                          <span>{p.label}</span>
+                          <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                            {p.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2735,6 +3059,32 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                 {violatorsBannedSubTab === 'violators' ? (
                   <div className="space-y-3">
+                    {/* Box Ban / Mở Khóa Thủ Công (DEV Only) */}
+                    {isCurrentDev && (
+                      <div className="p-3 rounded-xl bg-slate-900/90 border border-rose-500/30 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs font-bold text-rose-300">
+                            <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span>Ban / Mở Khóa Thủ Công</span>
+                          </div>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            DEV
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Tự chọn bất kỳ tài khoản nào để khóa chat, tạm ban hoặc gỡ khóa ngay mà không cần chờ AI kiểm duyệt.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => openManualBanModalForUser(null)}
+                          className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer"
+                        >
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          <span>Chọn Tài Khoản Ban / Mở Khóa</span>
+                        </button>
+                      </div>
+                    )}
+
                     {/* Box AI Kiểm Duyệt OpenAI */}
                     <div className="p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 space-y-2">
                       <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
@@ -2833,33 +3183,57 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
-                    <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
-                      Lọc danh sách đang khóa
-                    </div>
-                    {[
-                      { key: 'all' as const, label: 'Tất cả đang khóa', icon: Ban, cls: 'text-rose-400' },
-                      { key: 'perm' as const, label: 'Cấm vĩnh viễn', icon: ShieldAlert, cls: 'text-red-400' },
-                      { key: 'temp' as const, label: 'Tạm khóa tài khoản', icon: Clock, cls: 'text-amber-400' },
-                      { key: 'muted' as const, label: 'Khóa chat / Cảnh cáo', icon: VolumeX, cls: 'text-slate-300' }
-                    ].map(f => {
-                      const IconComp = f.icon;
-                      return (
+                  <div className="space-y-3">
+                    {isCurrentDev && (
+                      <div className="p-3 rounded-xl bg-slate-900/90 border border-rose-500/30 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs font-bold text-rose-300">
+                            <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                            <span>Ban / Mở Khóa Thủ Công</span>
+                          </div>
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            DEV
+                          </span>
+                        </div>
                         <button
-                          key={f.key}
                           type="button"
-                          onClick={() => { setBannedFilter(f.key); setSelectedItemId(null); }}
-                          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
-                            bannedFilter === f.key
-                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/40 font-semibold'
-                              : 'border-transparent text-slate-300 hover:bg-slate-900/80'
-                          }`}
+                          onClick={() => openManualBanModalForUser(null)}
+                          className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-sm active:scale-95 cursor-pointer"
                         >
-                          <IconComp className={`w-4 h-4 ${f.cls} shrink-0`} />
-                          <span>{f.label}</span>
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          <span>Ban Tài Khoản Mới Ngay</span>
                         </button>
-                      );
-                    })}
+                      </div>
+                    )}
+
+                    <div className="space-y-1.5">
+                      <div className="text-[11px] font-semibold text-slate-400 px-1 mb-1">
+                        Lọc danh sách đang khóa
+                      </div>
+                      {[
+                        { key: 'all' as const, label: 'Tất cả đang khóa', icon: Ban, cls: 'text-rose-400' },
+                        { key: 'perm' as const, label: 'Cấm vĩnh viễn', icon: ShieldAlert, cls: 'text-red-400' },
+                        { key: 'temp' as const, label: 'Tạm khóa tài khoản', icon: Clock, cls: 'text-amber-400' },
+                        { key: 'muted' as const, label: 'Khóa chat / Cảnh cáo', icon: VolumeX, cls: 'text-slate-300' }
+                      ].map(f => {
+                        const IconComp = f.icon;
+                        return (
+                          <button
+                            key={f.key}
+                            type="button"
+                            onClick={() => { setBannedFilter(f.key); setSelectedItemId(null); }}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all border ${
+                              bannedFilter === f.key
+                                ? 'bg-rose-500/15 text-rose-300 border-rose-500/40 font-semibold'
+                                : 'border-transparent text-slate-300 hover:bg-slate-900/80'
+                            }`}
+                          >
+                            <IconComp className={`w-4 h-4 ${f.cls} shrink-0`} />
+                            <span>{f.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>
@@ -4033,13 +4407,19 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                   className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-sm relative border border-white/10 overflow-hidden"
                   style={{ backgroundColor: (selectedItemData as any).avatarColor || '#0284c7' }}
                 >
-                  {((selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL) ? (
-                    <img src={(selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL} alt={(selectedItemData as any).displayName} className="w-full h-full object-cover" />
-                  ) : (
-                    (selectedItemData as any).displayName?.charAt(0).toUpperCase() || 'U'
+                  <span>{(selectedItemData as any).displayName?.charAt(0).toUpperCase() || 'U'}</span>
+                  {((selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL) && (
+                    <img
+                      src={(selectedItemData as any).customAvatarUrl || (selectedItemData as any).avatarUrl || (selectedItemData as any).photoURL}
+                      alt={(selectedItemData as any).displayName}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                      className="w-full h-full object-cover absolute inset-0 z-10"
+                    />
                   )}
                   {(selectedItemData as any).onlineCheck?.isOnline && (
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 animate-pulse" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 z-20 animate-pulse" />
                   )}
                 </div>
 
@@ -4107,17 +4487,39 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
             </div>
 
             {/* Nút hành động nhanh */}
-            <div className="flex items-center gap-1.5 shrink-0 self-end lg:self-center">
-              {!isDevUser((selectedItemData as any).email) && (
-                <button
-                  type="button"
-                  onClick={() => handleDeleteUser((selectedItemData as any).uid || (selectedItemData as any).id, (selectedItemData as any).displayName, (selectedItemData as any).email)}
-                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
-                  title="Xóa tài khoản này khỏi Firestore"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  <span className="hidden sm:inline">Xóa tài khoản</span>
-                </button>
+            <div className="flex items-center gap-1.5 shrink-0 self-end lg:self-center flex-wrap">
+              {isCurrentDev && !isDevUser((selectedItemData as any).email) && (
+                <>
+                  {(selectedItemData as any).isActiveSanction && (
+                    <button
+                      type="button"
+                      onClick={() => handleUnbanUser((selectedItemData as any).uid || (selectedItemData as any).id, (selectedItemData as any).email)}
+                      className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                      title="Mở khóa / Gỡ cấm tài khoản này ngay lập tức"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="hidden sm:inline">Mở Khóa</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => openManualBanModalForUser(selectedItemData)}
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
+                    title="Ban / Khóa tài khoản thủ công (DEV)"
+                  >
+                    <Ban className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Ban / Khóa</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteUser((selectedItemData as any).uid || (selectedItemData as any).id, (selectedItemData as any).displayName, (selectedItemData as any).email)}
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                    title="Xóa tài khoản này khỏi Firestore"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span className="hidden sm:inline">Xóa tài khoản</span>
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -4158,52 +4560,288 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
           </div>
 
           {/* TAB 1: THÔNG TIN VÀ THIẾT BỊ ĐĂNG NHẬP */}
-          {userDetailsTab === 'info' && (
+          {userDetailsTab === 'info' && (() => {
+            const uData = selectedItemData as any;
+            const effectiveUsername = uData.username || userAccountMeta?.username || uData.email?.split('@')[0] || uData.displayName || 'user';
+            const effectiveDob = uData.dob || userAccountMeta?.dob;
+            const effectiveGender = uData.gender || userAccountMeta?.gender;
+            const effectivePhone = uData.phone || uData.linkedPhone || uData.phoneNumber || userAccountMeta?.phone || userAccountMeta?.linkedPhone;
+            const effectiveEmail = uData.linkedEmail || uData.email || userAccountMeta?.linkedEmail;
+            const isEmailVerified = Boolean(uData.isEmailVerified || userAccountMeta?.isEmailVerified);
+            const isPhoneVerified = Boolean(uData.isPhoneVerified);
+            const effectiveLinkedUids: string[] = Array.from(new Set([
+              ...(Array.isArray(uData.linkedUids) ? uData.linkedUids : []),
+              ...(Array.isArray(userAccountMeta?.linkedUids) ? userAccountMeta.linkedUids : []),
+              ...(uData.googleUid ? [uData.googleUid] : []),
+              ...(uData.facebookUid ? [uData.facebookUid] : []),
+              ...(uData.githubUid ? [uData.githubUid] : []),
+            ].filter(Boolean)));
+            const providerLabelMap: Record<string, string> = {
+              google: 'Google OAuth',
+              facebook: 'Facebook OAuth',
+              github: 'GitHub OAuth',
+              phone: 'Số điện thoại (OTP SMS)',
+              account: 'Tài khoản ClSend',
+              sync: 'Đồng bộ QR / PIN',
+              guest: 'Chế độ Khách (Ẩn danh)',
+            };
+            const effectiveProvider = uData.authProvider
+              ? (providerLabelMap[uData.authProvider] || uData.authProvider)
+              : (uData.uid?.startsWith('guest_') ? 'Chế độ Khách (Ẩn danh)' : uData.googleUid ? 'Google OAuth' : 'Tài khoản hệ thống');
+            const latestSession = userSessions[0];
+            const effectiveBrowser = uData.lastBrowser || latestSession?.browser;
+            const effectiveLocation = uData.lastLocation || latestSession?.location;
+            const currentRoomObj = uData.currentRoomId ? rooms.find(r => r.id === uData.currentRoomId) : null;
+            const joinedRooms = rooms.filter(r =>
+              r.ownerId === uData.uid ||
+              r.createdBy === uData.uid ||
+              (Array.isArray(r.members) && r.members.some(m => m.uid === uData.uid))
+            );
+            const userSanction = sanctions.find(s =>
+              s.uid === uData.uid ||
+              (effectiveEmail && s.email?.toLowerCase() === effectiveEmail.toLowerCase()) ||
+              (effectivePhone && s.phone === effectivePhone)
+            );
+            const cloudTotalBytes = userCloudFiles.reduce((acc, f) => acc + (Number(f.size) || 0), 0);
+
+            return (
             <div className="flex-1 overflow-y-auto space-y-4 p-2 sm:p-3 min-h-0 scrollbar-thin scrollbar-thumb-slate-800">
-              {/* Thẻ tóm tắt thông tin hồ sơ (Thiết Bị & Hồ Sơ) */}
+              {/* Nhóm 1: Thẻ tóm tắt thông tin hồ sơ & định danh đầy đủ */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Họ Tên / Tên đệm / Biệt Danh</div>
-                  <div className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                    <span>{(selectedItemData as any).displayName || 'Người dùng'}</span>
+                  <div className="text-[11px] text-slate-400 font-medium">Họ Tên / Tên Hiển Thị</div>
+                  <div className="text-sm font-bold text-slate-100 flex items-center gap-2 flex-wrap">
+                    <span>{uData.displayName || 'Người dùng'}</span>
+                    {uData.customBadgeText && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                        {uData.customBadgeText}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
                   <div className="text-[11px] text-slate-400 font-medium">Tên Tài Khoản (Username)</div>
                   <div className="text-sm font-semibold text-slate-200 font-mono truncate">
-                    {(selectedItemData as any).username || (selectedItemData as any).email?.split('@')[0] || (selectedItemData as any).displayName || 'user'}
+                    {effectiveUsername}
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Ngày / Tháng / Năm Đăng Ký</div>
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <KeyRound className="w-3 h-3 text-sky-400" />
+                    <span>Phương Thức Đăng Nhập</span>
+                  </div>
+                  <div className="text-xs font-semibold text-sky-300">
+                    {effectiveProvider}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <Mail className="w-3 h-3 text-emerald-400" />
+                    <span>Gmail / Email Liên Kết</span>
+                  </div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-200 truncate font-mono flex items-center gap-1.5">
+                    <span className="truncate">{effectiveEmail || <span className="text-slate-500 italic">Chưa liên kết</span>}</span>
+                    {isEmailVerified && (
+                      <span title="Email đã xác thực" className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] font-sans border border-emerald-500/30 shrink-0">
+                        <BadgeCheck className="w-3 h-3" />
+                        <span>Đã xác thực</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <Phone className="w-3 h-3 text-emerald-400" />
+                    <span>Số Điện Thoại (SĐT)</span>
+                  </div>
+                  <div className="text-xs sm:text-sm font-mono text-slate-200 flex items-center gap-1.5 flex-wrap">
+                    <span>{effectivePhone || <span className="text-slate-500 italic font-sans">Chưa cập nhật SĐT</span>}</span>
+                    {effectivePhone && isPhoneVerified && (
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 text-[10px] font-sans border border-emerald-500/30">
+                        <BadgeCheck className="w-3 h-3" />
+                        <span>OTP Verified</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-amber-400" />
+                    <span>Ngày Sinh & Giới Tính</span>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
+                    <span>{effectiveDob || <span className="text-slate-500 italic">Chưa nhập ngày sinh</span>}</span>
+                    <span className="text-slate-600">•</span>
+                    <span className="text-slate-300">{effectiveGender || 'Chưa chọn'}</span>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium">Ngày Tạo Tài Khoản</div>
                   <div className="text-xs font-mono text-emerald-400 font-semibold">
-                    {(selectedItemData as any).createdAt ? new Date((selectedItemData as any).createdAt).toLocaleDateString('vi-VN', { dateStyle: 'full' }) : 'Hôm nay / Phiên hiện tại'}
+                    {(uData.createdAt || userAccountMeta?.createdAt)
+                      ? new Date(uData.createdAt || userAccountMeta?.createdAt!).toLocaleString('vi-VN')
+                      : 'Phiên hiện tại'}
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Số Điện Thoại (SĐT)</div>
-                  <div className="text-sm font-mono text-slate-200">
-                    {(selectedItemData as any).phone || (selectedItemData as any).phoneNumber || <span className="text-slate-500 italic">Chưa cập nhật SĐT</span>}
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-slate-400" />
+                    <span>Hoạt Động Gần Nhất & Điều Khoản</span>
+                  </div>
+                  <div className="text-xs text-slate-200 space-y-0.5">
+                    <div className="font-mono text-slate-300">
+                      {uData.lastSeen ? new Date(uData.lastSeen).toLocaleString('vi-VN') : 'Chưa ghi nhận'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Điều khoản: {uData.acceptedRules ? <span className="text-emerald-400 font-semibold">Đã chấp thuận</span> : <span className="text-slate-500">Chưa ghi nhận cờ</span>}
+                    </div>
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Gmail / Email Liên Kết</div>
-                  <div className="text-sm font-semibold text-slate-200 truncate font-mono">
-                    {(selectedItemData as any).email || <span className="text-slate-500 italic">Chưa liên kết</span>}
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <MapPin className="w-3 h-3 text-cyan-400" />
+                    <span>Trình Duyệt & Khu Vực Gần Nhất</span>
+                  </div>
+                  <div className="text-xs text-slate-200 space-y-0.5">
+                    <div className="truncate font-medium">{effectiveBrowser || 'Chưa ghi nhận trình duyệt'}</div>
+                    <div className="text-[11px] text-slate-400 truncate">{effectiveLocation || 'Không rõ khu vực'}</div>
                   </div>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
-                  <div className="text-[11px] text-slate-400 font-medium">Tổng Tin Nhắn Hoạt Động</div>
-                  <div className="text-sm font-bold text-emerald-400 font-mono">
-                    {userMessages.length} tin nhắn (qua hệ thống)
+                  <div className="text-[11px] text-slate-400 font-medium">Tổng Tin Nhắn & Phòng Tham Gia</div>
+                  <div className="text-xs font-bold text-emerald-400 font-mono">
+                    {userMessages.length} tin nhắn • {joinedRooms.length} phòng
+                  </div>
+                  {currentRoomObj && (
+                    <div className="text-[10px] text-sky-300 truncate">
+                      Đang ở phòng: #{currentRoomObj.name} ({currentRoomObj.code})
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <HardDrive className="w-3 h-3 text-purple-400" />
+                    <span>Kho Cloud Drive Cá Nhân</span>
+                  </div>
+                  <div className="text-xs font-bold text-purple-300 font-mono">
+                    {userCloudFiles.length} tệp • {formatFileSize(cloudTotalBytes)}
+                  </div>
+                  {userCloudFiles.length > 0 && (
+                    <div className="text-[10px] text-slate-400 truncate">
+                      Gần nhất: {userCloudFiles[0].name}
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+                  <div className="text-[11px] text-slate-400 font-medium flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-rose-400" />
+                    <span>Hồ Sơ Kỷ Luật & Liên Kết UID</span>
+                  </div>
+                  <div className="text-xs text-slate-200 space-y-0.5">
+                    {userSanction?.isBanned ? (
+                      <div className="text-rose-400 font-bold">⛔ Đang BANNED ({userSanction.lastSanctionType})</div>
+                    ) : userSanction?.isChatLocked ? (
+                      <div className="text-amber-400 font-bold">🔇 Đang khóa chat ({userSanction.violationCount} lần)</div>
+                    ) : userSanction?.violationCount ? (
+                      <div className="text-amber-300">⚠️ {userSanction.violationCount} lần cảnh cáo trước đó</div>
+                    ) : (
+                      <div className="text-emerald-400 font-semibold">✅ Sạch — Chưa có tiền án</div>
+                    )}
+                    <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                      <Link2 className="w-3 h-3" />
+                      <span>UID liên kết: {effectiveLinkedUids.length}</span>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              {/* Bio cá nhân & danh sách tệp Cloud gần nhất (nếu có) */}
+              {(uData.customBio || effectiveLinkedUids.length > 0 || userCloudFiles.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {(uData.customBio || effectiveLinkedUids.length > 0) && (
+                    <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
+                      {uData.customBio && (
+                        <div>
+                          <div className="text-[11px] text-slate-400 font-medium mb-1">Giới thiệu (Bio cá nhân)</div>
+                          <div className="text-xs text-slate-200 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 whitespace-pre-wrap">
+                            {uData.customBio}
+                          </div>
+                        </div>
+                      )}
+                      {effectiveLinkedUids.length > 0 && (
+                        <div>
+                          <div className="text-[11px] text-slate-400 font-medium mb-1">Các UID đồng bộ liên kết ({effectiveLinkedUids.length})</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {effectiveLinkedUids.map((lUid) => (
+                              <span key={lUid} className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-sky-300">
+                                {lUid}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {userCloudFiles.length > 0 && (
+                    <div className="p-3.5 rounded-2xl bg-slate-900/60 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] text-purple-300 font-bold flex items-center gap-1.5">
+                          <HardDrive className="w-3.5 h-3.5" />
+                          <span>Tệp Cloud Drive gần đây ({userCloudFiles.length})</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">{formatFileSize(cloudTotalBytes)}</span>
+                      </div>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                        {userCloudFiles.slice(0, 6).map((cf) => (
+                          <div key={cf.id} className="flex items-center justify-between gap-2 text-[11px] bg-slate-950/70 px-2.5 py-1.5 rounded-lg border border-slate-800/80">
+                            <span className="text-slate-200 truncate">{cf.name}</span>
+                            <span className="text-slate-400 font-mono shrink-0">{formatFileSize(cf.size || 0)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Bảng danh sách phiên đăng nhập hoạt động (sessions) */}
+              {userSessions.length > 0 && (
+                <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-emerald-400">
+                      <Monitor className="w-4 h-4" />
+                      <h4 className="text-xs sm:text-sm font-bold">Phiên Đăng Nhập Đang Lưu ({userSessions.length})</h4>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">sessions collection</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                    {userSessions.map((sess) => (
+                      <div key={sess.id} className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-200 truncate">{sess.deviceName}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 font-mono">{sess.deviceType}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-300 truncate">{sess.browser || 'Trình duyệt'} • {sess.location || 'Không rõ vị trí'}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Đăng nhập: {sess.loginAt ? new Date(sess.loginAt).toLocaleString('vi-VN') : '-'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Bảng danh sách thiết bị đã đăng nhập của người dùng */}
               <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 space-y-3">
@@ -4252,7 +4890,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                 </div>
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* TAB 2: NHẬT KÝ TOÀN BỘ TIN NHẮN CỦA NGƯỜI DÙNG */}
           {userDetailsTab === 'messages' && (
@@ -4340,6 +4979,18 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                   {/* Ô tìm kiếm nhanh & nút tác vụ */}
                   <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    {activeTask === 'violators_banned' && isCurrentDev && (
+                      <button
+                        type="button"
+                        onClick={() => openManualBanModalForUser(null)}
+                        className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 whitespace-nowrap cursor-pointer"
+                        title="Tự chọn bất kỳ tài khoản nào để Ban hoặc Mở khóa ngay (chỉ DEV)"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Ban / Mở Khóa (DEV)</span>
+                      </button>
+                    )}
+
                     {activeTask === 'violators_banned' && (
                       <button
                         type="button"
@@ -4396,32 +5047,87 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                 {/* Thanh chuyển nhanh Phòng Chat / Người Dùng ngay trong header danh sách */}
                 {activeTask === 'rooms_users' && (
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-900/90 border border-slate-800">
-                      <button
-                        type="button"
-                        onClick={() => { setRoomsUsersSubTab('rooms'); setSelectedItemId(null); }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                          roomsUsersSubTab === 'rooms'
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Phòng Chat ({roomsWithViolations.length})</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setRoomsUsersSubTab('users'); setSelectedItemId(null); }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
-                          roomsUsersSubTab === 'users'
-                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
-                            : 'text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <Users className="w-3.5 h-3.5" />
-                        <span>Người Dùng ({evaluatedUsersWithViolations.length})</span>
-                      </button>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => { setRoomsUsersSubTab('rooms'); setSelectedItemId(null); }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                            roomsUsersSubTab === 'rooms'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Phòng Chat ({roomsWithViolations.length})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setRoomsUsersSubTab('users'); setSelectedItemId(null); }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                            roomsUsersSubTab === 'users'
+                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                              : 'text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                          <span>Người Dùng ({evaluatedUsersWithViolations.length})</span>
+                        </button>
+                      </div>
+
+                      {roomsUsersSubTab === 'users' && (
+                        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none p-1 rounded-xl bg-slate-900/90 border border-slate-800">
+                          {[
+                            {
+                              key: 'all' as const,
+                              label: 'Tất cả',
+                              count: userProviderCounts.all,
+                              activeClass: 'bg-sky-500/20 text-sky-300 border border-sky-500/40',
+                            },
+                            {
+                              key: 'google' as const,
+                              label: 'Google',
+                              count: userProviderCounts.google,
+                              activeClass: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+                            },
+                            {
+                              key: 'github' as const,
+                              label: 'GitHub',
+                              count: userProviderCounts.github,
+                              activeClass: 'bg-violet-500/20 text-violet-300 border border-violet-500/40',
+                            },
+                            {
+                              key: 'facebook' as const,
+                              label: 'Facebook',
+                              count: userProviderCounts.facebook,
+                              activeClass: 'bg-blue-500/20 text-blue-300 border border-blue-500/40',
+                            },
+                            {
+                              key: 'other' as const,
+                              label: 'Khác (TK/SĐT)',
+                              count: userProviderCounts.other,
+                              activeClass: 'bg-amber-500/20 text-amber-300 border border-amber-500/40',
+                            },
+                          ].map((tab) => (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              onClick={() => {
+                                setUserProviderFilter(tab.key);
+                                setSelectedItemId(null);
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all whitespace-nowrap tabular-nums cursor-pointer ${
+                                userProviderFilter === tab.key
+                                  ? tab.activeClass
+                                  : 'text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              {tab.label} ({tab.count})
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -4450,7 +5156,17 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                             : 'text-slate-400 hover:text-slate-200'
                         }`}
                       >
-                        Đã Khóa ({sanctions.filter(s => s.isBanned).length})
+                        Đã Khóa ({(() => {
+                          const seen = new Set<string>();
+                          return sanctions.filter(s => {
+                            const { activeBan, activeChatLock } = checkSanctionActiveState(s);
+                            if (!activeBan && !activeChatLock) return false;
+                            const key = s.uid || s.email?.toLowerCase();
+                            if (!key || seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                          }).length;
+                        })()})
                       </button>
                     </div>
 
@@ -4513,19 +5229,31 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const targetId = worstViolatorUser.uid || worstViolatorUser.id;
-                      setViolatorTarget('users');
-                      setSelectedItemId(targetId);
-                      fetchViolationDetailsForTarget(targetId, 'users');
-                      setShowDetailModal(true);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shrink-0 flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all"
-                  >
-                    <span>Xem Chi Tiết Vi Phạm &gt;</span>
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {isCurrentDev && !isDevUser(worstViolatorUser.email) && (
+                      <button
+                        type="button"
+                        onClick={() => openManualBanModalForUser(worstViolatorUser)}
+                        className="px-3 py-1.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs shrink-0 flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Ban Ngay</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetId = worstViolatorUser.uid || worstViolatorUser.id;
+                        setViolatorTarget('users');
+                        setSelectedItemId(targetId);
+                        fetchViolationDetailsForTarget(targetId, 'users');
+                        setShowDetailModal(true);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shrink-0 flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all"
+                    >
+                      <span>Xem Chi Tiết Vi Phạm &gt;</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -4629,7 +5357,21 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         )}
 
                         {/* TH2: HIỂN THỊ NGƯỜI DÙNG (NHỮNG NGƯỜI DÙNG - TAB 2) */}
-                        {activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && (
+                        {activeTask === 'rooms_users' && roomsUsersSubTab === 'users' && (() => {
+                          const loginProv = resolveUserLoginProvider(item);
+                          const provMeta =
+                            loginProv === 'facebook'
+                              ? { label: 'Facebook', cls: 'bg-blue-500/15 text-blue-300 border-blue-500/30' }
+                              : loginProv === 'github'
+                              ? { label: 'GitHub', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' }
+                              : loginProv === 'google'
+                              ? { label: 'Google', cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' }
+                              : loginProv === 'phone'
+                              ? { label: 'SĐT OTP', cls: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30' }
+                              : loginProv === 'guest'
+                              ? { label: 'Khách', cls: 'bg-slate-700/60 text-slate-300 border-slate-600' }
+                              : { label: 'Tài khoản', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+                          return (
                           <div className="flex items-center justify-between w-full min-w-0">
                             <div className="flex items-center gap-3 min-w-0">
                               {/* Ảnh Avatar người dùng */}
@@ -4637,21 +5379,30 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                                 className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-inner relative border border-white/10 overflow-hidden"
                                 style={{ backgroundColor: item.avatarColor || '#10b981' }}
                               >
-                                {(item.customAvatarUrl || item.avatarUrl || item.photoURL) ? (
-                                  <img src={item.customAvatarUrl || item.avatarUrl || item.photoURL} alt={item.displayName} className="w-full h-full object-cover" />
-                                ) : (
-                                  item.displayName?.charAt(0).toUpperCase() || 'U'
+                                <span>{item.displayName?.charAt(0).toUpperCase() || 'U'}</span>
+                                {(item.customAvatarUrl || item.avatarUrl || item.photoURL) && (
+                                  <img
+                                    src={item.customAvatarUrl || item.avatarUrl || item.photoURL}
+                                    alt={item.displayName}
+                                    onError={(e) => {
+                                      e.currentTarget.style.display = 'none';
+                                    }}
+                                    className="w-full h-full object-cover absolute inset-0 z-10"
+                                  />
                                 )}
                                 {item.onlineCheck?.isOnline && (
-                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 animate-pulse" />
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-slate-900 absolute -bottom-0.5 -right-0.5 z-20 animate-pulse" />
                                 )}
                               </div>
 
-                              {/* Tên, thiết bị & check online thực tế */}
+                              {/* Tên, thiết bị, nguồn đăng nhập & check online thực tế */}
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-xs sm:text-sm text-slate-100 truncate">
                                     {item.displayName}
+                                  </span>
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-md border ${provMeta.cls}`}>
+                                    {provMeta.label}
                                   </span>
                                   <span className="text-[10px] text-slate-400 font-mono hidden sm:inline-block">
                                     ({item.deviceName || 'Thiết bị'})
@@ -4681,7 +5432,8 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                               <ChevronRight className="w-4 h-4 text-slate-500" />
                             </div>
                           </div>
-                        )}
+                          );
+                        })()}
 
                         {/* TH3: HIỂN THỊ CÁC VI PHẠM (CÁC VI PHẠM - TAB 3 TẬP TRUNG) */}
                         {activeTask === 'violators_banned' && violatorsBannedSubTab === 'violators' && (
@@ -4809,8 +5561,38 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                             )}
 
                             <div className="flex items-center gap-2 shrink-0">
+                              {violatorTarget === 'users' && isCurrentDev && !isDevUser(item.email) && (
+                                <div className="flex items-center gap-1.5">
+                                  {item.isActiveSanction && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUnbanUser(item.uid || item.id, item.email);
+                                      }}
+                                      className="px-2 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                                      title="Mở khóa tài khoản này ngay"
+                                    >
+                                      <ShieldCheck className="w-3 h-3" />
+                                      <span className="hidden md:inline">Mở Khóa</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openManualBanModalForUser(item);
+                                    }}
+                                    className="px-2 py-1 rounded-lg bg-rose-600/20 hover:bg-rose-600/35 text-rose-300 border border-rose-500/40 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                                    title="Ban / Khóa tài khoản này ngay (DEV)"
+                                  >
+                                    <Ban className="w-3 h-3" />
+                                    <span className="hidden md:inline">Ban</span>
+                                  </button>
+                                </div>
+                              )}
                               <span className="text-[11px] text-amber-400 font-medium hidden sm:inline hover:underline">
-                                Xem chi tiết vi phạm &gt;
+                                Xem chi tiết &gt;
                               </span>
                               <ChevronRight className="w-4 h-4 text-slate-500" />
                             </div>
@@ -4819,37 +5601,56 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
 
                         {/* TH4: HIỂN THỊ NGƯỜI DÙNG ĐÃ BỊ BANNED */}
                         {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && (
-                          <div className="flex items-center justify-between w-full min-w-0">
+                          <div className="flex items-center justify-between w-full min-w-0 gap-2">
                             <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-9 h-9 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center font-bold text-xs shrink-0">
-                                <Ban className="w-4 h-4" />
+                              <div className={`w-9 h-9 rounded-full border flex items-center justify-center font-bold text-xs shrink-0 ${
+                                item.isBanned
+                                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-400'
+                                  : 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                              }`}>
+                                {item.isBanned ? <Ban className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
                               </div>
                               <div className="min-w-0">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-xs sm:text-sm text-rose-300 truncate">
                                     {item.displayName || 'Người dùng'}
                                   </span>
-                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 border border-rose-500/40">
-                                    {item.lastSanctionType === 'ban_perm' ? 'CẤM VĨNH VIỄN' : 'TẠM KHÓA'}
+                                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border ${
+                                    item.lastSanctionType === 'ban_perm'
+                                      ? 'bg-red-600/25 text-red-300 border-red-500/50'
+                                      : item.isBanned
+                                      ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                                      : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  }`}>
+                                    {item.lastSanctionType === 'ban_perm'
+                                      ? 'CẤM VĨNH VIỄN'
+                                      : item.isBanned
+                                      ? 'TẠM KHÓA TK'
+                                      : 'KHÓA CHAT'}
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-400 truncate mt-0.5">
                                   {item.email || 'Không có email'} • {item.reason || 'Vi phạm nội quy'}
+                                  {(item.banExpiresAt || item.chatLockExpiresAt) && (
+                                    <span> • Hết hạn: {new Date((item.banExpiresAt || item.chatLockExpiresAt)!).toLocaleString('vi-VN')}</span>
+                                  )}
                                 </div>
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUnbanUser(item.uid, item.email);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-xs font-semibold shrink-0 transition-all active:scale-95 flex items-center gap-1 shadow-sm"
-                              title="Gỡ lệnh cấm ngay lập tức"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Gỡ Cấm</span>
-                            </button>
+                            {isCurrentDev && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUnbanUser(item.uid, item.email);
+                                }}
+                                className="px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/40 text-xs font-semibold shrink-0 transition-all active:scale-95 flex items-center gap-1 shadow-sm cursor-pointer"
+                                title="Mở khóa / Gỡ lệnh cấm ngay lập tức"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Mở Khóa</span>
+                              </button>
+                            )}
                           </div>
                         )}
 
@@ -5226,6 +6027,65 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                         )}
                       </div>
 
+                      {/* Khối Ban / Mở Khóa Thủ Công trực tiếp bởi DEV (Không cần AI) */}
+                      {!isRoomTarget && isCurrentDev && !isDevUser(item.email) && (
+                        <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-rose-500/35 space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                              <Ban className="w-4 h-4 text-rose-400" />
+                              <span>Ban / Mở Khóa Thủ Công (Chỉ DEV)</span>
+                            </div>
+                            {item.isActiveSanction && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleUnbanUser(targetId, item.email);
+                                  setShowDetailModal(false);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 shadow-sm cursor-pointer"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>Mở Khóa Tài Khoản Ngay (Unban)</span>
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <select
+                              value={detailManualTier}
+                              onChange={(e) => setDetailManualTier(e.target.value as SanctionTierKey)}
+                              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-rose-500"
+                            >
+                              <option value="lock_15m">Khóa chat 15 phút</option>
+                              <option value="lock_1h">Khóa chat 1 giờ</option>
+                              <option value="ban_1d">Tạm ban 1 ngày</option>
+                              <option value="ban_3d">Tạm ban 3 ngày</option>
+                              <option value="ban_7d">Tạm ban 7 ngày</option>
+                              <option value="ban_14d">Tạm ban 14 ngày</option>
+                              <option value="ban_6m">Tạm ban 6 tháng</option>
+                              <option value="level_perm">Cấm vĩnh viễn</option>
+                            </select>
+                            <input
+                              type="text"
+                              value={detailManualReason}
+                              onChange={(e) => setDetailManualReason(e.target.value)}
+                              placeholder="Lý do ban / ghi chú nhắc nhở (tùy chọn)..."
+                              className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-rose-500"
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isApplyingManualBan}
+                            onClick={() => handleExecuteManualBan(item, detailManualTier, detailManualReason)}
+                            className="w-full py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all cursor-pointer"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>{isApplyingManualBan ? 'Đang thực thi...' : 'Áp Dụng Lệnh Ban / Khóa Ngay'}</span>
+                          </button>
+                        </div>
+                      )}
+
                       {/* Nhóm nút xử lý trực tiếp tại modal */}
                       <div className="pt-2 flex flex-col sm:flex-row gap-2">
                         <button
@@ -5258,10 +6118,10 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                                     level: 'warn',
                                     read: false
                                   });
-                                  alert(`✅ Đã gửi thông báo cảnh cáo chính thức tới tài khoản [${item.displayName || item.name || 'người dùng'}]!`);
+                                  showDevToast(`✅ Đã gửi thông báo cảnh cáo chính thức tới tài khoản [${item.displayName || item.name || 'người dùng'}]!`, 'success');
                                 } catch (err) {
                                   console.error('Error sending warning notification:', err);
-                                  alert('Đã gửi thông báo cảnh cáo vi phạm.');
+                                  showDevToast('Không thể gửi thông báo cảnh cáo lúc này.', 'error');
                                 }
                               }
                               setShowDetailModal(false);
@@ -5343,17 +6203,17 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
                     </div>
 
                     <div className="pt-2 flex flex-col gap-2">
-                      {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && (
+                      {activeTask === 'violators_banned' && violatorsBannedSubTab === 'banned' && isCurrentDev && (
                         <button
                           type="button"
                           onClick={() => {
                             handleUnbanUser(item.uid, item.email);
                             setShowDetailModal(false);
                           }}
-                          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95"
+                          className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Gỡ Ban Tài Khoản Này (Unban)</span>
+                          <span>Mở Khóa Tài Khoản Này (Unban)</span>
                         </button>
                       )}
                     </div>
@@ -5422,6 +6282,336 @@ export const DevDatastorePage: React.FC<DevDatastorePageProps> = ({ onBackToApp 
         isOpen={showStorageAvatarsModal} 
         onClose={() => setShowStorageAvatarsModal(false)} 
       />
+
+      {/* In-App Dev Toast Banner */}
+      {devToast && (
+        <div className="fixed bottom-4 right-4 z-[90] max-w-md animate-in fade-in slide-in-from-bottom-2">
+          <div className={`px-4 py-3 rounded-2xl border shadow-2xl flex items-start gap-2.5 text-xs font-semibold backdrop-blur-md ${
+            devToast.type === 'error'
+              ? 'bg-rose-950/95 border-rose-500/50 text-rose-200'
+              : devToast.type === 'success'
+              ? 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
+              : 'bg-slate-900/95 border-slate-700 text-slate-200'
+          }`}>
+            <span className="flex-1 leading-relaxed">{devToast.text}</span>
+            <button type="button" onClick={() => setDevToast(null)} className="text-slate-400 hover:text-white shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Confirmation Modal */}
+      {confirmDialog && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700 p-5 shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${confirmDialog.danger ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'}`}>
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-white">{confirmDialog.title}</h4>
+                <p className="text-xs text-slate-300 mt-1 whitespace-pre-line leading-relaxed">{confirmDialog.message}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isConfirmRunning}
+                onClick={() => setConfirmDialog(null)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={isConfirmRunning}
+                onClick={async () => {
+                  setIsConfirmRunning(true);
+                  try {
+                    await confirmDialog.onConfirm();
+                  } finally {
+                    setIsConfirmRunning(false);
+                    setConfirmDialog(null);
+                  }
+                }}
+                className={`px-4 py-2 rounded-xl text-white text-xs font-bold shadow-md transition-all disabled:opacity-50 ${confirmDialog.danger ? 'bg-rose-600 hover:bg-rose-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+              >
+                {isConfirmRunning ? 'Đang xử lý...' : confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* MODAL BAN / MỞ KHÓA THỦ CÔNG (CHỈ DÀNH CHO DEV) */}
+      {isCurrentDev && showManualBanModal && (
+        <div
+          className="fixed inset-0 z-[85] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150"
+          onClick={() => setShowManualBanModal(false)}
+        >
+          <div
+            className="w-full max-w-2xl bg-slate-900 border border-rose-500/40 rounded-3xl overflow-hidden flex flex-col shadow-2xl max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Ban className="w-4 h-4 text-rose-400" />
+                <h3 className="text-sm font-bold text-slate-100">
+                  Ban / Mở Khóa Tài Khoản Thủ Công (DEV)
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Không cần AI
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManualBanModal(false)}
+                className="p-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              {/* Chọn / Tìm kiếm tài khoản */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-300">
+                    1. Chọn tài khoản người dùng
+                  </label>
+                  {manualBanTargetUser && (
+                    <button
+                      type="button"
+                      onClick={() => setManualBanTargetUser(null)}
+                      className="text-[11px] text-sky-400 hover:underline cursor-pointer"
+                    >
+                      Đổi người dùng khác
+                    </button>
+                  )}
+                </div>
+
+                {!manualBanTargetUser ? (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={manualBanSearch}
+                        onChange={(e) => setManualBanSearch(e.target.value)}
+                        placeholder="Tìm theo tên, @username, email, SĐT hoặc UID..."
+                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-rose-500/60"
+                      />
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+                      {evaluatedUsersWithViolations
+                        .filter((u: any) => {
+                          if (isDevUser(u.email) || (currentUser?.uid && u.uid === currentUser.uid)) return false;
+                          if (!manualBanSearch.trim()) return true;
+                          const q = manualBanSearch.toLowerCase();
+                          return (
+                            (u.displayName || '').toLowerCase().includes(q) ||
+                            (u.username || '').toLowerCase().includes(q) ||
+                            (u.email || '').toLowerCase().includes(q) ||
+                            (u.phone || '').toLowerCase().includes(q) ||
+                            (u.uid || '').toLowerCase().includes(q)
+                          );
+                        })
+                        .map((u: any) => {
+                          const avatarSrc = u.customAvatarUrl || u.avatarUrl || u.photoURL;
+                          const provider = resolveUserLoginProvider(u);
+                          return (
+                            <div
+                              key={u.uid}
+                              onClick={() => setManualBanTargetUser(u)}
+                              className="p-2.5 rounded-xl bg-slate-950/70 hover:bg-slate-800/80 border border-slate-800 hover:border-rose-500/40 cursor-pointer flex items-center justify-between gap-3 transition-all"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 relative overflow-hidden"
+                                  style={{ backgroundColor: u.avatarColor || '#0284c7' }}
+                                >
+                                  <span>{(u.displayName || 'U').charAt(0).toUpperCase()}</span>
+                                  {avatarSrc && (
+                                    <img
+                                      src={avatarSrc}
+                                      alt={u.displayName}
+                                      onError={(e) => {
+                                        e.currentTarget.style.display = 'none';
+                                      }}
+                                      className="w-full h-full object-cover absolute inset-0"
+                                    />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-xs font-bold text-slate-100 truncate">{u.displayName}</span>
+                                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                      {provider}
+                                    </span>
+                                    {u.isActiveSanction && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                        {u.sanction?.isBanned ? 'Đang bị Ban' : 'Khóa chat'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400 truncate">
+                                    {u.email || u.phone || u.uid}
+                                  </div>
+                                </div>
+                              </div>
+                              <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                ) : (
+                  (() => {
+                    const freshTarget =
+                      evaluatedUsersWithViolations.find((u: any) => u.uid === (manualBanTargetUser.uid || manualBanTargetUser.id)) ||
+                      manualBanTargetUser;
+                    const targetSanction = freshTarget.sanction;
+                    const { activeBan, activeChatLock } = checkSanctionActiveState(targetSanction);
+                    const hasSanction = activeBan || activeChatLock;
+
+                    return (
+                      <div className="space-y-4">
+                        {/* Thẻ thông tin người dùng đang chọn */}
+                        <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
+                              <span>{freshTarget.displayName}</span>
+                              {hasSanction ? (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold">
+                                  {activeBan ? '⛔ Đang BANNED' : '🔇 Đang Khóa Chat'}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                                  ✅ Đang hoạt động
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] font-mono text-slate-400 truncate mt-0.5">
+                              {freshTarget.email || freshTarget.phone || freshTarget.uid}
+                            </div>
+                            {hasSanction && targetSanction?.reason && (
+                              <div className="text-[11px] text-rose-300 mt-1">
+                                Lý do hiện tại: {targetSanction.reason}
+                              </div>
+                            )}
+                          </div>
+
+                          {hasSanction && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleUnbanUser(freshTarget.uid || freshTarget.id, freshTarget.email);
+                                setShowManualBanModal(false);
+                                setManualBanTargetUser(null);
+                              }}
+                              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer"
+                            >
+                              <ShieldCheck className="w-4 h-4" />
+                              <span>Mở Khóa Tài Khoản Ngay</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Chọn mức phạt */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-300 block">
+                            2. Chọn hình thức Ban / Khóa chat
+                          </label>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {[
+                              { key: 'lock_15m' as SanctionTierKey, label: 'Khóa chat 15p' },
+                              { key: 'lock_1h' as SanctionTierKey, label: 'Khóa chat 1h' },
+                              { key: 'ban_1d' as SanctionTierKey, label: 'Ban 1 ngày' },
+                              { key: 'ban_3d' as SanctionTierKey, label: 'Ban 3 ngày' },
+                              { key: 'ban_7d' as SanctionTierKey, label: 'Ban 7 ngày' },
+                              { key: 'ban_14d' as SanctionTierKey, label: 'Ban 14 ngày' },
+                              { key: 'ban_6m' as SanctionTierKey, label: 'Ban 6 tháng' },
+                              { key: 'level_perm' as SanctionTierKey, label: 'Cấm vĩnh viễn' },
+                            ].map((opt) => (
+                              <button
+                                key={opt.key}
+                                type="button"
+                                onClick={() => setManualBanTier(opt.key)}
+                                className={`px-2.5 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                                  manualBanTier === opt.key
+                                    ? opt.key === 'level_perm'
+                                      ? 'bg-red-600 text-white border-red-400 shadow-sm'
+                                      : 'bg-rose-600/30 text-rose-200 border-rose-500 shadow-sm'
+                                    : 'bg-slate-950/70 text-slate-300 border-slate-800 hover:border-slate-700'
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Lý do */}
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-slate-300 block">
+                            3. Lý do ban / nhắc nhở gửi đến người dùng (tùy chọn)
+                          </label>
+                          <div className="flex flex-wrap gap-1.5">
+                            {[
+                              'Spam / Gây rối phòng chat',
+                              'Ngôn từ thô tục / Xúc phạm người khác',
+                              'Mạo danh / Lừa đảo',
+                              'Phát tán nội dung không phù hợp',
+                            ].map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setManualBanReason(preset)}
+                                className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 border border-slate-700 cursor-pointer"
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                          <textarea
+                            rows={2}
+                            value={manualBanReason}
+                            onChange={(e) => setManualBanReason(e.target.value)}
+                            placeholder="Nhập lý do cụ thể (nếu bỏ trống sẽ dùng thông điệp mặc định theo cấp độ)..."
+                            className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-rose-500/60"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            </div>
+
+            <div className="px-5 py-3 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowManualBanModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Đóng
+              </button>
+              {manualBanTargetUser && (
+                <button
+                  type="button"
+                  disabled={isApplyingManualBan}
+                  onClick={() => handleExecuteManualBan(manualBanTargetUser, manualBanTier, manualBanReason, true)}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  <span>{isApplyingManualBan ? 'Đang xử lý...' : 'Ban / Khóa Tài Khoản Ngay'}</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

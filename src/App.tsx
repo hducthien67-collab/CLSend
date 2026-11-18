@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { LanguageProvider } from './context/LanguageContext';
+import { LanguageProvider, useLanguage, pickLang, normalizeLanguageCode } from './context/LanguageContext';
 import { AuthModal } from './components/auth/AuthModal';
 import { Navbar } from './components/Navbar';
 import { SendView } from './components/SendView';
@@ -58,6 +58,8 @@ import { setTabNotificationBadge, registerUnreadCountListener } from './utils/ta
 
 function MainApp() {
   const { currentUser, loading, settings, verifyEmailCodeAndLink, userProfile } = useAuth();
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isDevConsoleOpen, setIsDevConsoleOpen] = useState(false);
   const [isRulesOpen, setIsRulesOpen] = useState(false);
@@ -488,15 +490,15 @@ function MainApp() {
               if (settings?.soundEnabled) {
                 playReceiveSound();
               }
-              const previewText = msg.text || (msg.attachments?.length ? `Đã gửi ${msg.attachments.length} tệp đính kèm` : 'Đã gửi một tin nhắn mới');
+              const previewText = msg.text || (msg.attachments?.length ? pick('Đã gửi {count} tệp đính kèm', 'Sent {count} attachment(s)', '发送了 {count} 个附件').replace('{count}', String(msg.attachments.length)) : pick('Đã gửi một tin nhắn mới', 'Sent a new message', '发送了一条新消息'));
               setChatNotification({
                 id: change.doc.id,
-                senderName: msg.senderName || 'Bạn bè',
+                senderName: msg.senderName || pick('Bạn bè', 'Friend', '好友'),
                 text: previewText
               });
               // Send native desktop notification (supported on both Windows Electron & Web PWA)
               sendDesktopMessageNotification({
-                senderName: msg.senderName || 'Bạn bè',
+                senderName: msg.senderName || pick('Bạn bè', 'Friend', '好友'),
                 text: previewText,
                 onClick: () => {
                   setActiveTab('chat');
@@ -769,8 +771,8 @@ function MainApp() {
             }
             setIncomingTransferNotice({
               id: docId,
-              senderName: data.senderName || 'Người dùng',
-              senderDevice: data.senderDevice || 'Thiết bị',
+              senderName: data.senderName || pick('Người dùng', 'User', '用户'),
+              senderDevice: data.senderDevice || pick('Thiết bị', 'Device', '设备'),
               fileName: data.fileName,
               fileSize: data.fileSize,
               textContent: data.textContent,
@@ -779,7 +781,7 @@ function MainApp() {
             // Native desktop notification for incoming transfer/message
             if (data.textContent) {
               sendDesktopMessageNotification({
-                senderName: data.senderName || 'Người dùng',
+                senderName: data.senderName || pick('Người dùng', 'User', '用户'),
                 text: data.textContent,
                 onClick: () => {
                   setActiveTab('receive');
@@ -825,7 +827,7 @@ function MainApp() {
         </div>
         <div className="flex items-center gap-2 text-sm text-slate-300 font-medium">
           <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-          <span>Đang kết nối Firebase Relay...</span>
+          <span>{pick('Đang kết nối Firebase Relay...', 'Connecting to Firebase Relay...', '正在连接 Firebase 中继...')}</span>
         </div>
       </div>
     );
@@ -845,12 +847,12 @@ function MainApp() {
           <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center mb-4 shadow-lg shadow-rose-500/10">
             <ShieldAlert className="w-8 h-8" />
           </div>
-          <h1 className="text-xl font-bold text-white mb-2">403 - Quyền Truy Cập Bị Từ Chối</h1>
+          <h1 className="text-xl font-bold text-white mb-2">{pick('403 - Quyền Truy Cập Bị Từ Chối', '403 - Access Denied', '403 - 拒绝访问')}</h1>
           <p className="text-sm text-slate-400 max-w-md mb-2">
-            Trang Quản Trị & DataStore chỉ dành riêng cho Quản trị viên và Nhà phát triển hệ thống ClSend.
+            {pick('Trang Quản Trị & DataStore chỉ dành riêng cho Quản trị viên và Nhà phát triển hệ thống ClSend.', 'The Admin & DataStore page is strictly reserved for ClSend Administrators and Developers.', '管理与 DataStore 页面仅限 ClSend 管理员和开发人员访问。')}
           </p>
           <p className="text-xs text-rose-300 font-mono bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-500/20 mb-6">
-            Tài khoản hiện tại của bạn ({currentUser.email || 'Khách'}) không có quyền truy cập chức năng này.
+            {pick('Tài khoản hiện tại của bạn ({account}) không có quyền truy cập chức năng này.', 'Your current account ({account}) does not have permission to access this feature.', '您当前的账号 ({account}) 无权访问此功能。').replace('{account}', currentUser.email || pick('Khách', 'Guest', '访客'))}
           </p>
           <button
             type="button"
@@ -860,7 +862,7 @@ function MainApp() {
             }}
             className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all shadow-md active:scale-95"
           >
-            Quay lại ứng dụng CloudSend
+            {pick('Quay lại ứng dụng CloudSend', 'Back to ClSend App', '返回 ClSend 应用')}
           </button>
         </div>
       );
@@ -880,7 +882,7 @@ function MainApp() {
   // Priority: Trang Riêng Biệt - Trình Phát Video Siêu Mượt (?page=player or ?page=watch)
   if (isPlayerPage) {
     return (
-      <React.Suspense fallback={<div className="min-h-screen bg-[#030712] flex items-center justify-center text-white text-xs">Đang tải Trình phát Video...</div>}>
+      <React.Suspense fallback={<div className="min-h-screen bg-[#030712] flex items-center justify-center text-white text-xs">{pick('Đang tải Trình phát Video...', 'Loading Video Player...', '正在加载视频播放器...')}</div>}>
         <VideoPlayerPage
           onBack={(returnTab) => {
             setIsPlayerPage(false);
@@ -1096,6 +1098,49 @@ function MainApp() {
             setIsDesktopModalOpen(false);
           }}
         />
+
+        {activeToast && (
+          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[100] w-[92%] max-w-md pointer-events-none">
+            <div
+              className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 ${
+                activeToast.type === 'error'
+                  ? 'bg-rose-950/90 border-rose-500/40 text-rose-100'
+                  : activeToast.type === 'info'
+                  ? 'bg-slate-900/95 border-sky-500/40 text-sky-100'
+                  : 'bg-slate-900/95 border-emerald-500/40 text-emerald-100'
+              }`}
+            >
+              <div
+                className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                  activeToast.type === 'error'
+                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    : activeToast.type === 'info'
+                    ? 'bg-sky-500/15 border-sky-500/30 text-sky-400'
+                    : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+                }`}
+              >
+                {activeToast.type === 'error' ? (
+                  <ShieldAlert className="w-4 h-4" />
+                ) : (
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                )}
+              </div>
+              <p className="text-xs font-semibold truncate flex-1 leading-snug">
+                {activeToast.text}
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveToast(null)}
+                className="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800/60 cursor-pointer shrink-0"
+                title={pick('Đóng thông báo', 'Close notification', '关闭通知')}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <PerfDebugWidget />
       </>
     );
   }
@@ -1143,7 +1188,7 @@ function MainApp() {
                   type="button"
                   onClick={() => setIncomingTransferNotice(null)}
                   className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
-                  title="Đóng thông báo"
+                  title={pick('Đóng thông báo', 'Close notification', '关闭通知')}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1152,7 +1197,7 @@ function MainApp() {
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold inline-flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  {incomingTransferNotice.textContent ? 'Tin nhắn từ tab Gửi' : 'Tệp tin từ tab Gửi'}
+                  {incomingTransferNotice.textContent ? pick('Tin nhắn từ tab Gửi', 'Message from Send tab', '来自发送页的消息') : pick('Tệp tin từ tab Gửi', 'File from Send tab', '来自发送页的文件')}
                 </span>
               </div>
             </div>
@@ -1190,17 +1235,17 @@ function MainApp() {
                   }
                 }}
                 className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
-                title="Sao chép toàn bộ nội dung tin nhắn vào bộ nhớ tạm"
+                title={pick('Sao chép toàn bộ nội dung tin nhắn vào bộ nhớ tạm', 'Copy full message content to clipboard', '复制全部消息内容到剪贴板')}
               >
                 {copiedNoticeText ? (
                   <>
                     <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-300">Đã chép!</span>
+                    <span className="text-emerald-300">{pick('Đã chép!', 'Copied!', '已复制！')}</span>
                   </>
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Sao chép</span>
+                    <span>{pick('Sao chép', 'Copy', '复制')}</span>
                   </>
                 )}
               </button>
@@ -1219,7 +1264,7 @@ function MainApp() {
               className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>{incomingTransferNotice.textContent ? 'Đã xem' : 'Nhận tệp'}</span>
+              <span>{incomingTransferNotice.textContent ? pick('Đã xem', 'Mark seen', '已查看') : pick('Nhận tệp', 'Receive file', '接收文件')}</span>
             </button>
 
             <button
@@ -1230,7 +1275,7 @@ function MainApp() {
               }}
               className="flex-1 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium text-center transition-all cursor-pointer truncate"
             >
-              Xem trong tab Nhận →
+              {pick('Xem trong tab Nhận →', 'View in Receive tab →', '在接收页查看 →')}
             </button>
           </div>
         </div>
@@ -1245,7 +1290,7 @@ function MainApp() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-emerald-300 truncate">
-                {chatNotification.senderName} vừa nhắn:
+                {pick('{name} vừa nhắn:', '{name} sent a message:', '{name} 发来消息：').replace('{name}', chatNotification.senderName)}
               </span>
               <button
                 type="button"
@@ -1266,7 +1311,7 @@ function MainApp() {
               }}
               className="mt-2 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
             >
-              <span>Mở phòng chat xem ngay →</span>
+              <span>{pick('Mở phòng chat xem ngay →', 'Open chat room now →', '立即打开聊天室 →')}</span>
             </button>
           </div>
         </div>
@@ -1277,7 +1322,7 @@ function MainApp() {
         <React.Suspense fallback={
           <div className="w-full h-full flex flex-col items-center justify-center p-12 text-slate-400">
             <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" />
-            <span className="text-xs font-mono">Đang tải mô-đun siêu tốc...</span>
+            <span className="text-xs font-mono">{pick('Đang tải mô-đun siêu tốc...', 'Loading high-speed module...', '正在加载高速模块...')}</span>
           </div>
         }>
           <div 
@@ -1437,7 +1482,7 @@ function MainApp() {
               type="button"
               onClick={() => setActiveToast(null)}
               className="text-slate-400 hover:text-white transition-colors p-1 rounded-lg hover:bg-slate-800/60 cursor-pointer shrink-0"
-              title="Đóng thông báo"
+              title={pick('Đóng thông báo', 'Close notification', '关闭通知')}
             >
               <X className="w-4 h-4" />
             </button>
@@ -1471,20 +1516,21 @@ function MainApp() {
 import { AppHealthCheck } from './components/AppHealthCheck';
 
 export default function App() {
+  const initialLang = typeof window !== 'undefined' ? normalizeLanguageCode(localStorage.getItem('app_language')) : 'vi';
   return (
-    <AppHealthCheck>
-      <LanguageProvider>
+    <LanguageProvider>
+      <AppHealthCheck>
         <AuthProvider>
           <React.Suspense fallback={
             <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white">
               <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" />
-              <span className="text-xs text-slate-400 font-mono">Đang khởi chạy ClSend...</span>
+              <span className="text-xs text-slate-400 font-mono">{pickLang(initialLang, 'Đang khởi chạy ClSend...', 'Starting ClSend...', '正在启动 ClSend...')}</span>
             </div>
           }>
             <MainApp />
           </React.Suspense>
         </AuthProvider>
-      </LanguageProvider>
-    </AppHealthCheck>
+      </AppHealthCheck>
+    </LanguageProvider>
   );
 }

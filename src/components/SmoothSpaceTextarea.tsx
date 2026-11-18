@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface SmoothSpaceTextareaProps {
   id?: string;
@@ -21,10 +22,12 @@ export const SmoothSpaceTextarea: React.FC<SmoothSpaceTextareaProps> = ({
   value,
   onChange,
   onKeyDown,
-  placeholder = "Nhập văn bản hoặc link (https://...)...",
+  placeholder,
   rows = 3,
   className = ""
 }) => {
+  const { currentLang } = useLanguage();
+  const resolvedPlaceholder = placeholder ?? pickLang(currentLang, "Nhập văn bản hoặc link (https://...)...", "Enter text or link (https://...)...", "输入文本或链接 (https://...)...");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
@@ -127,7 +130,7 @@ export const SmoothSpaceTextarea: React.FC<SmoothSpaceTextareaProps> = ({
         }}
         onBlur={() => setIsFocused(false)}
         onKeyDown={onKeyDown}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         className="relative z-10 w-full p-4 pb-11 bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 font-mono leading-relaxed resize-none transition-colors selection:bg-emerald-500/30 selection:text-white"
         style={{
           boxSizing: 'border-box',

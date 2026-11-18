@@ -1,4 +1,5 @@
 import { fetchSpecificLocation } from './device';
+import { getActiveLanguage, pickActiveLang } from '../context/LanguageContext';
 
 export interface GpsLocationInfo {
   latitude: number;
@@ -51,9 +52,10 @@ export function isPermissionsPolicyBlocked(): boolean {
  */
 async function reverseGeocode(lat: number, lon: number): Promise<string> {
   try {
+    const activeLang = getActiveLanguage();
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`, {
       headers: {
-        'Accept-Language': 'vi,en'
+        'Accept-Language': `${activeLang},en`
       },
       signal: AbortSignal.timeout(6000)
     });
@@ -170,7 +172,7 @@ async function fallbackToNetworkLocation(): Promise<GpsLocationInfo> {
     latitude: 0,
     longitude: 0,
     accuracy: 0,
-    address: address || 'Khu vực mạng an toàn',
+    address: address || pickActiveLang('Khu vực mạng an toàn', 'Safe network region', '安全网络区域'),
     timestamp: Date.now(),
     isNetworkFallback: true
   };

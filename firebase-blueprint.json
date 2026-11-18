@@ -14,6 +14,17 @@
         "linkedEmail": { "type": "string" },
         "phone": { "type": "string" },
         "linkedPhone": { "type": "string" },
+        "username": { "type": "string" },
+        "dob": { "type": "string" },
+        "gender": { "type": "string" },
+        "authProvider": { "type": "string" },
+        "isEmailVerified": { "type": "boolean" },
+        "isPhoneVerified": { "type": "boolean" },
+        "customBio": { "type": "string" },
+        "customBadgeText": { "type": "string" },
+        "lastBrowser": { "type": "string" },
+        "lastLocation": { "type": "string" },
+        "lastSeen": { "type": "string" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "displayName"]

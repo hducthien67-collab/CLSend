@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Radio
 } from 'lucide-react';
+import { useLanguage, pickLang, LanguageCode } from '../context/LanguageContext';
 
 export interface StorageFacilityAvatar {
   id: 'photos' | 'docs' | 'video' | 'audio';
@@ -887,8 +888,31 @@ export const FacilityAvatarCard: React.FC<{
   facility: StorageFacilityAvatar;
   isCompact?: boolean;
 }> = ({ facility, isCompact = false }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [downloadingPng, setDownloadingPng] = useState(false);
   const [copiedChannel, setCopiedChannel] = useState(false);
+  const [pngError, setPngError] = useState<string | null>(null);
+
+  const facilityCopy: Record<StorageFacilityAvatar['id'], { name: string; subtitle: string }> = {
+    photos: {
+      name: pick('Cơ Sở Hình Ảnh (Photos)', 'Photos Storage Hub', '图片存储中心 (Photos)'),
+      subtitle: pick('Chuyên trách hình ảnh, album ảnh gốc & đồ họa', 'Dedicated to photos, original albums & graphics', '专用于图片、原图相册与视觉素材'),
+    },
+    docs: {
+      name: pick('Cơ Sở Tệp & Tài Liệu (Docs)', 'Files & Docs Storage Hub', '文件与文档中心 (Docs)'),
+      subtitle: pick('Chuyên trách tệp nén, PDF, Word, Excel, mã nguồn & file dữ liệu', 'Dedicated to archives, PDF, Word, Excel, source code & data files', '专用于压缩包、PDF、Office 文档、源码与数据文件'),
+    },
+    video: {
+      name: pick('Cơ Sở Video & Phim (Media)', 'Video & Media Storage Hub', '视频与影视中心 (Media)'),
+      subtitle: pick('Chuyên trách video clip, phim HD, quay màn hình & animation', 'Dedicated to video clips, HD movies, screen recordings & animations', '专用于短视频、高清影片、录屏与动画'),
+    },
+    audio: {
+      name: pick('Cơ Sở Âm Thanh (Audio)', 'Audio Storage Hub', '音频存储中心 (Audio)'),
+      subtitle: pick('Chuyên trách bản thu âm thanh, nhạc chuông, podcast & lossless FLAC/MP3', 'Dedicated to audio recordings, ringtones, podcasts & lossless FLAC/MP3', '专用于录音、铃声、播客与无损 FLAC/MP3 音频'),
+    },
+  };
+  const localizedFacility = facilityCopy[facility.id];
 
   const handleCopyChannel = () => {
     navigator.clipboard.writeText(facility.channel);
@@ -898,11 +922,12 @@ export const FacilityAvatarCard: React.FC<{
 
   const handleDownloadPng = async () => {
     setDownloadingPng(true);
+    setPngError(null);
     try {
       await downloadFacilityPng(facility);
     } catch (e) {
       console.error('Error downloading PNG:', e);
-      alert('Không thể tạo ảnh PNG 512px. Vui lòng thử lại.');
+      setPngError(pick('Không thể tạo ảnh PNG 512px. Vui lòng thử lại.', 'Unable to generate 512px PNG image. Please try again.', '无法生成 512px PNG 图片，请重试。'));
     } finally {
       setDownloadingPng(false);
     }
@@ -936,7 +961,7 @@ export const FacilityAvatarCard: React.FC<{
       {/* Info details */}
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-1">
-          <h4 className="text-xs font-bold text-white truncate">{facility.name}</h4>
+          <h4 className="text-xs font-bold text-white truncate">{localizedFacility.name}</h4>
           <span 
             className="text-[9.5px] font-mono px-1.5 py-0.2 rounded-md font-bold"
             style={{ 
@@ -945,13 +970,17 @@ export const FacilityAvatarCard: React.FC<{
               border: `1px solid ${facility.accentColor}40`
             }}
           >
-            5 Bots
+            {pick('5 Bot', '5 Bots', '5 个机器人')}
           </span>
         </div>
         <p className="text-[10.5px] text-slate-400 leading-snug line-clamp-2">
-          {facility.subtitle}
+          {localizedFacility.subtitle}
         </p>
       </div>
+
+      {pngError && (
+        <p className="text-[10px] text-rose-400">{pngError}</p>
+      )}
 
       {/* Download action buttons */}
       <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
@@ -960,17 +989,17 @@ export const FacilityAvatarCard: React.FC<{
             type="button"
             onClick={handleDownloadPng}
             disabled={downloadingPng}
-            title="Tải ảnh PNG 512x512 độ phân giải cao chuẩn Telegram"
+            title={pick('Tải ảnh PNG 512x512 độ phân giải cao chuẩn Telegram', 'Download Telegram-ready high-res 512x512 PNG', '下载符合 Telegram 标准的高清 512x512 PNG 头像')}
             className="px-2 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[11px] font-bold flex items-center justify-center gap-1 shadow-md shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
           >
             <Download className="w-3 h-3" />
-            <span>{downloadingPng ? 'Đang tạo...' : 'PNG 512px'}</span>
+            <span>{downloadingPng ? pick('Đang tạo...', 'Creating...', '生成中...') : 'PNG 512px'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => downloadFacilitySvg(facility)}
-            title="Tải file vector SVG gốc cực nét"
+            title={pick('Tải file vector SVG gốc cực nét', 'Download crisp original SVG vector', '下载超高清原始 SVG 矢量文件')}
             className="px-2 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 hover:text-white border border-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1 active:scale-95 transition-all cursor-pointer"
           >
             <Download className="w-3 h-3" />
@@ -985,7 +1014,7 @@ export const FacilityAvatarCard: React.FC<{
             className="px-2 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-850 text-slate-300 hover:text-white text-[10px] font-mono flex items-center justify-center gap-1 border border-slate-800 transition-colors cursor-pointer"
           >
             {copiedChannel ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-            <span>{copiedChannel ? 'Đã chép' : facility.channel}</span>
+            <span>{copiedChannel ? pick('Đã chép', 'Copied', '已复制') : facility.channel}</span>
           </button>
 
           <a
@@ -996,11 +1025,11 @@ export const FacilityAvatarCard: React.FC<{
             }
             target="_blank"
             rel="noopener noreferrer"
-            title={`Mở kênh ${facility.channel} trên Telegram`}
+            title={pick('Mở kênh {channel} trên Telegram', 'Open {channel} channel on Telegram', '在 Telegram 上打开 {channel} 频道').replace('{channel}', facility.channel)}
             className="px-2 py-1.5 rounded-lg bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 hover:text-sky-200 text-[10px] font-semibold flex items-center justify-center gap-1 border border-sky-500/30 transition-all cursor-pointer"
           >
             <ExternalLink className="w-3 h-3 text-sky-400" />
-            <span>Mở Telegram</span>
+            <span>{pick('Mở Telegram', 'Open Telegram', '打开 Telegram')}</span>
           </a>
         </div>
       </div>
@@ -1015,6 +1044,8 @@ export const DataStorageAvatarsModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
 }> = ({ isOpen, onClose }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [downloadingAll, setDownloadingAll] = useState(false);
 
   if (!isOpen) return null;
@@ -1048,14 +1079,14 @@ export const DataStorageAvatarsModal: React.FC<{
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base sm:text-lg font-bold text-white tracking-tight">
-                  Kho Ảnh Đại Diện 4 Cơ Sở Dữ Liệu DataStorage
+                  {pick('Kho Ảnh Đại Diện 4 Cơ Sở Dữ Liệu DataStorage', 'DataStorage 4-Hub Avatar Gallery', 'DataStorage 四大存储中心头像库')}
                 </h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold">
-                  Dev Certified
+                  {pick('Chuẩn Dev', 'Dev Certified', '开发认证')}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Thiết kế riêng cho 4 kênh Telegram (Hình ảnh, Tệp, Video, Âm thanh) kèm icon vẽ riêng ở góc dưới để dễ phân biệt
+                {pick('Thiết kế riêng cho 4 kênh Telegram (Hình ảnh, Tệp, Video, Âm thanh) kèm icon vẽ riêng ở góc dưới để dễ phân biệt', 'Custom-designed for 4 Telegram channels (Photos, Docs, Video, Audio) with distinct corner icons', '专为 4 个 Telegram 频道（图片、文件、视频、音频）设计，附带专属角标便于区分')}
               </p>
             </div>
           </div>
@@ -1073,7 +1104,7 @@ export const DataStorageAvatarsModal: React.FC<{
         <div className="px-4 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 text-slate-300">
             <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>Ảnh xuất ra chuẩn <strong>512x512 PNG</strong> (kích thước vàng làm avatar Channel & Bot Telegram)</span>
+            <span>{pick('Ảnh xuất ra chuẩn 512x512 PNG (kích thước vàng làm avatar Channel & Bot Telegram)', 'Exports standard 512x512 PNG (ideal size for Telegram Channel & Bot avatars)', '导出标准 512x512 PNG（Telegram 频道与机器人头像最佳尺寸）')}</span>
           </div>
 
           <button
@@ -1083,7 +1114,7 @@ export const DataStorageAvatarsModal: React.FC<{
             className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{downloadingAll ? 'Đang tải lần lượt...' : 'Tải trọn bộ 4 Avatar (PNG 512px)'}</span>
+            <span>{downloadingAll ? pick('Đang tải lần lượt...', 'Downloading sequentially...', '正在依次下载...') : pick('Tải trọn bộ 4 Avatar (PNG 512px)', 'Download All 4 Avatars (512px PNG)', '下载全套 4 个头像 (512px PNG)')}</span>
           </button>
         </div>
 
@@ -1099,12 +1130,12 @@ export const DataStorageAvatarsModal: React.FC<{
           <div className="mt-5 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 space-y-2">
             <div className="flex items-center gap-2 text-emerald-400 font-bold">
               <ShieldCheck className="w-4 h-4" />
-              <span>Hướng dẫn gán Avatar lên Telegram</span>
+              <span>{pick('Hướng dẫn gán Avatar lên Telegram', 'How to set Avatars on Telegram', 'Telegram 头像设置指南')}</span>
             </div>
             <ol className="list-decimal list-inside space-y-1 text-slate-300">
-              <li>Nhấn <strong>PNG 512px</strong> ở từng ô để tải ảnh đại diện tương ứng về máy tính hoặc điện thoại.</li>
-              <li>Mở Telegram &rarr; Vào Channel tương ứng (<code className="text-emerald-300">@Clsend_Photos</code>, <code className="text-amber-300">@Clsend_Docs</code>, <code className="text-rose-300">@Clsend_Video</code>, <code className="text-indigo-300">@Clsend_Audio</code>).</li>
-              <li>Nhấn <strong>Edit Channel &rarr; Set Photo</strong> và chọn ảnh vừa tải về để đồng bộ nhận diện thương hiệu.</li>
+              <li>{pick('Nhấn PNG 512px ở từng ô để tải ảnh đại diện tương ứng về máy tính hoặc điện thoại.', 'Click PNG 512px on each card to download the corresponding avatar to your computer or phone.', '点击每张卡片的 PNG 512px 下载对应头像到电脑或手机。')}</li>
+              <li>{pick('Mở Telegram → Vào Channel tương ứng (@Clsend_Photos, @Clsend_Docs, @Clsend_Video, @Clsend_Audio).', 'Open Telegram -> Go to the matching channel (@Clsend_Photos, @Clsend_Docs, @Clsend_Video, @Clsend_Audio).', '打开 Telegram -> 进入对应频道（@Clsend_Photos、@Clsend_Docs、@Clsend_Video、@Clsend_Audio）。')}</li>
+              <li>{pick('Nhấn Edit Channel → Set Photo và chọn ảnh vừa tải về để đồng bộ nhận diện thương hiệu.', 'Tap Edit Channel -> Set Photo and pick the downloaded image to sync branding.', '点击 Edit Channel -> Set Photo 并选择刚下载的图片以同步品牌视觉。')}</li>
             </ol>
           </div>
         </div>

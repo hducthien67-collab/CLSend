@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../context/LanguageContext';
 import { db } from '../firebase/config';
 import {
   collection,
@@ -63,7 +63,8 @@ const MAX_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB personal storage quota
 
 const CloudDriveViewComponent: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [files, setFiles] = useState<CloudDriveFile[]>(() => {
     try {
       const userRaw = localStorage.getItem('cloudsend_custom_session');
@@ -123,7 +124,7 @@ const CloudDriveViewComponent: React.FC = () => {
       const newFileDoc = {
         userId: currentUser?.uid,
         userEmail: (currentUser?.email || '').trim().toLowerCase(),
-        userName: currentUser?.displayName || settings.deviceName || 'Người dùng',
+        userName: currentUser?.displayName || settings.deviceName || pick('Người dùng', 'User', '用户'),
         name: fileName,
         size: 0,
         type: isImage ? 'image/jpeg' : isVideo ? 'video/mp4' : 'text/uri-list',
@@ -137,10 +138,10 @@ const CloudDriveViewComponent: React.FC = () => {
       setCloudUrlModalValue('');
       setIsCloudUrlModalOpen(false);
       setUploading(false);
-      showBottomToast(`🔗 Đã lưu URL "${fileName}" vào Cloud Drive thành công!`);
+      showBottomToast(pick('🔗 Đã lưu URL "{name}" vào Cloud Drive thành công!', '🔗 Saved URL "{name}" to Cloud Drive successfully!', '🔗 已成功将 URL “{name}” 保存到云盘！').replace('{name}', fileName));
     } catch (err) {
       setUploading(false);
-      showBottomToast('⚠️ Không thể thêm URL này. Vui lòng kiểm tra lại định dạng.', true);
+      showBottomToast(pick('⚠️ Không thể thêm URL này. Vui lòng kiểm tra lại định dạng.', '⚠️ Unable to add this URL. Please check the format.', '⚠️ 无法添加此 URL，请检查格式。'), true);
     }
   };
 
@@ -340,7 +341,7 @@ const CloudDriveViewComponent: React.FC = () => {
           id: docId,
           userId: currentUser.uid,
           userEmail: currentUser.email || '',
-          userName: currentUser.displayName || settings.deviceName || 'Người dùng',
+          userName: currentUser.displayName || settings.deviceName || pick('Người dùng', 'User', '用户'),
           name: file.name,
           size: file.size,
           type: file.type || 'application/octet-stream',
@@ -387,22 +388,27 @@ const CloudDriveViewComponent: React.FC = () => {
       await Promise.all(workers);
 
       setUploadProgress(100);
-      if (totalFailed === 0) {
+      if (totalFailed === 0 && completedCount > 0) {
         setStatusMessage({
           type: 'success',
-          text: `Đã lưu thành công ${completedCount} tệp vào Kho Cloud siêu tốc!`
+          text: pick('Đã lưu thành công {count} tệp vào Kho Cloud siêu tốc!', 'Successfully saved {count} file(s) to High-Speed Cloud Drive!', '已成功将 {count} 个文件保存到高速云盘！').replace('{count}', String(completedCount))
+        });
+      } else if (completedCount === 0) {
+        setStatusMessage({
+          type: 'error',
+          text: pick('Không thể tải tệp lên Kho Cloud. Vui lòng kiểm tra kết nối và thử lại.', 'Could not upload files to Cloud Drive. Please check your connection and try again.', '无法上传文件到云盘，请检查网络连接后重试。')
         });
       } else {
         setStatusMessage({
           type: 'info',
-          text: `Đã lưu ${completedCount}/${totalFiles} tệp vào Kho Cloud.`
+          text: pick('Đã lưu {saved}/{total} tệp vào Kho Cloud.', 'Saved {saved}/{total} file(s) to Cloud Drive.', '已将 {saved}/{total} 个文件保存到云盘。').replace('{saved}', String(completedCount)).replace('{total}', String(totalFiles))
         });
       }
     } catch (err: any) {
       console.error('Upload to Cloud error:', err);
       setStatusMessage({
         type: 'error',
-        text: err.message || 'Đã có lỗi xảy ra trong quá trình tải tệp lên Cloud.'
+        text: err.message || pick('Đã có lỗi xảy ra trong quá trình tải tệp lên Cloud.', 'An error occurred while uploading files to Cloud.', '上传文件到云端时发生错误。')
       });
     } finally {
       setUploading(false);
@@ -436,10 +442,10 @@ const CloudDriveViewComponent: React.FC = () => {
         name: finalName
       });
       setEditingFileId(null);
-      showBottomToast(`Đã đổi tên tệp thành "${finalName}"`);
+      showBottomToast(pick('Đã đổi tên tệp thành "{name}"', 'Renamed file to "{name}"', '已将文件重命名为 “{name}”').replace('{name}', finalName));
     } catch (err) {
       console.error('Error renaming file:', err);
-      showBottomToast('Không thể đổi tên tệp. Vui lòng thử lại.', true);
+      showBottomToast(pick('Không thể đổi tên tệp. Vui lòng thử lại.', 'Unable to rename file. Please try again.', '无法重命名文件，请重试。'), true);
     }
   };
 
@@ -461,7 +467,7 @@ const CloudDriveViewComponent: React.FC = () => {
     setUploadProgress(5);
     setStatusMessage({
       type: 'info',
-      text: `Đang tải bù dữ liệu phân mảnh cho tệp "${reuploadingFile.name}"...`
+      text: pick('Đang tải bù dữ liệu phân mảnh cho tệp "{name}"...', 'Re-uploading chunked data for "{name}"...', '正在为“{name}”重新上传分片数据...').replace('{name}', reuploadingFile.name)
     });
 
     try {
@@ -470,7 +476,7 @@ const CloudDriveViewComponent: React.FC = () => {
       });
 
       if (!uploaded.url || !uploaded.url.trim()) {
-        throw new Error('Máy chủ chưa trả về đường dẫn tải.');
+        throw new Error(pick('Máy chủ chưa trả về đường dẫn tải.', 'Server did not return a download link.', '服务器未返回下载链接。'));
       }
 
       const safeUrl = uploaded.url;
@@ -491,16 +497,16 @@ const CloudDriveViewComponent: React.FC = () => {
 
       setStatusMessage({
         type: 'success',
-        text: `Đã khôi phục và cập nhật dữ liệu thành công cho tệp "${file.name}"!`
+        text: pick('Đã khôi phục và cập nhật dữ liệu thành công cho tệp "{name}"!', 'Restored and updated data for "{name}" successfully!', '已成功恢复并更新“{name}”的数据！').replace('{name}', file.name)
       });
-      showBottomToast(`Đã khôi phục dữ liệu cho "${file.name}"`);
+      showBottomToast(pick('Đã khôi phục dữ liệu cho "{name}"', 'Restored data for "{name}"', '已为“{name}”恢复数据').replace('{name}', file.name));
     } catch (err: any) {
       console.error('Lỗi khi tải bù tệp:', err);
       setStatusMessage({
         type: 'error',
-        text: err.message || 'Lỗi khi tải lại tệp lên máy chủ.'
+        text: err.message || pick('Lỗi khi tải lại tệp lên máy chủ.', 'Error re-uploading file to server.', '重新上传文件到服务器出错。')
       });
-      showBottomToast(`Không thể tải lại tệp: ${err.message || 'Vui lòng thử lại'}`, true);
+      showBottomToast(pick('Không thể tải lại tệp: {msg}', 'Unable to re-upload file: {msg}', '无法重新上传文件：{msg}').replace('{msg}', err.message || pick('Vui lòng thử lại', 'Please try again', '请重试')), true);
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -512,7 +518,7 @@ const CloudDriveViewComponent: React.FC = () => {
   const performDirectReupload = async (targetFile: CloudDriveFile, file: File) => {
     setUploading(true);
     setUploadProgress(5);
-    showBottomToast(`Đang đồng bộ tệp "${file.name}" vào Kho Cloud...`);
+    showBottomToast(pick('Đang đồng bộ tệp "{name}" vào Kho Cloud...', 'Syncing "{name}" to Cloud Drive...', '正在将“{name}”同步到云盘...').replace('{name}', file.name));
 
     try {
       const uploaded = await uploadFileToServer(file, (pct) => {
@@ -520,7 +526,7 @@ const CloudDriveViewComponent: React.FC = () => {
       });
 
       if (!uploaded.url || !uploaded.url.trim()) {
-        throw new Error('Máy chủ chưa trả về đường dẫn tải.');
+        throw new Error(pick('Máy chủ chưa trả về đường dẫn tải.', 'Server did not return a download link.', '服务器未返回下载链接。'));
       }
 
       const safeUrl = uploaded.url;
@@ -549,10 +555,10 @@ const CloudDriveViewComponent: React.FC = () => {
         thumbnail: safeThumbnail || undefined
       } : prev);
 
-      showBottomToast(`Đã lưu tệp "${file.name}" vĩnh viễn vào Kho Cloud!`);
+      showBottomToast(pick('Đã lưu tệp "{name}" vĩnh viễn vào Kho Cloud!', 'Saved "{name}" permanently to Cloud Drive!', '已将“{name}”永久保存到云盘！').replace('{name}', file.name));
     } catch (err: any) {
       console.warn('Direct reupload error:', err);
-      showBottomToast(`Lỗi khi lưu lên Cloud: ${err.message || 'Thử lại sau'}`, true);
+      showBottomToast(pick('Lỗi khi lưu lên Cloud: {msg}', 'Error saving to Cloud: {msg}', '保存到云端出错：{msg}').replace('{msg}', err.message || pick('Thử lại sau', 'Try again later', '请稍后重试')), true);
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -567,7 +573,7 @@ const CloudDriveViewComponent: React.FC = () => {
       for (const f of broken) {
         await deleteDoc(doc(db, 'cloud_files', f.id)).catch(() => {});
       }
-      showBottomToast(`Đã dọn dẹp ${broken.length} tệp bị gián đoạn.`);
+      showBottomToast(pick('Đã dọn dẹp {count} tệp bị gián đoạn.', 'Cleaned up {count} interrupted file(s).', '已清理 {count} 个中断的文件。').replace('{count}', String(broken.length)));
     } catch (err) {
       console.error('Lỗi khi dọn tệp lỗi:', err);
     }
@@ -628,10 +634,10 @@ const CloudDriveViewComponent: React.FC = () => {
         setPreviewFile(null);
       }
 
-      showBottomToast(`Bạn đã xóa "${file.name}" khỏi Kho Cloud`);
+      showBottomToast(pick('Bạn đã xóa "{name}" khỏi Kho Cloud', 'Deleted "{name}" from Cloud Drive', '已从云盘删除“{name}”').replace('{name}', file.name));
     } catch (err) {
       console.error('Error deleting file:', err);
-      showBottomToast(`Không thể xóa tệp "${file.name}". Vui lòng thử lại.`, true);
+      showBottomToast(pick('Không thể xóa tệp "{name}". Vui lòng thử lại.', 'Unable to delete "{name}". Please try again.', '无法删除“{name}”，请重试。').replace('{name}', file.name), true);
     }
   };
 
@@ -656,13 +662,13 @@ const CloudDriveViewComponent: React.FC = () => {
     if (targetFiles.length === 0) return;
     const count = targetFiles.length;
     const catLabel = scope === 'category'
-      ? (selectedCategory === 'image' ? 'hình ảnh'
-        : selectedCategory === 'video' ? 'video'
-        : selectedCategory === 'audio' ? 'âm thanh'
-        : selectedCategory === 'document' ? 'tài liệu'
-        : selectedCategory === 'favorite' ? 'tệp yêu thích'
-        : 'tệp')
-      : 'tất cả tệp (Hình ảnh, Video, Âm thanh, Tài liệu...)';
+      ? (selectedCategory === 'image' ? pick('hình ảnh', 'images', '图片')
+        : selectedCategory === 'video' ? pick('video', 'videos', '视频')
+        : selectedCategory === 'audio' ? pick('âm thanh', 'audio files', '音频')
+        : selectedCategory === 'document' ? pick('tài liệu', 'documents', '文档')
+        : selectedCategory === 'favorite' ? pick('tệp yêu thích', 'favorite files', '收藏文件')
+        : pick('tệp', 'files', '文件'))
+      : pick('tất cả tệp (Hình ảnh, Video, Âm thanh, Tài liệu...)', 'all files (Images, Videos, Audio, Documents...)', '所有文件（图片、视频、音频、文档...）');
 
     setBulkPendingDelete({ count, catLabel, targetFiles });
   };
@@ -682,10 +688,14 @@ const CloudDriveViewComponent: React.FC = () => {
         }
       });
       await Promise.all(batchPromises);
-      showBottomToast(`Bạn đã xóa toàn bộ ${count} ${catLabel} khỏi Kho Cloud`);
+      showBottomToast(
+        pick('Bạn đã xóa toàn bộ {count} {label} khỏi Kho Cloud', 'Deleted all {count} {label} from Cloud Drive', '已从云盘删除全部 {count} 个{label}')
+          .replace('{count}', String(count))
+          .replace('{label}', catLabel)
+      );
     } catch (err: any) {
       console.error('Error deleting files:', err);
-      showBottomToast('Có lỗi xảy ra khi xóa tệp.', true);
+      showBottomToast(pick('Có lỗi xảy ra khi xóa tệp.', 'An error occurred while deleting files.', '删除文件时出错。'), true);
     }
   };
 
@@ -694,7 +704,7 @@ const CloudDriveViewComponent: React.FC = () => {
     e.stopPropagation();
     const fullUrl = `${window.location.origin}${file.url}`;
     navigator.clipboard.writeText(fullUrl).then(() => {
-      setCopyToast(`Đã sao chép link tải: ${file.name}`);
+      setCopyToast(pick('Đã sao chép link tải: {name}', 'Copied download link: {name}', '已复制下载链接：{name}').replace('{name}', file.name));
       setTimeout(() => setCopyToast(null), 3000);
     });
   };
@@ -761,7 +771,7 @@ const CloudDriveViewComponent: React.FC = () => {
               {uploading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
-                  <span>Đang tải lên {uploadProgress !== null ? `(${uploadProgress}%)` : '...'}</span>
+                  <span>{pick('Đang tải lên', 'Uploading', '正在上传')} {uploadProgress !== null ? `(${uploadProgress}%)` : '...'}</span>
                 </>
               ) : (
                 <>
@@ -990,10 +1000,14 @@ const CloudDriveViewComponent: React.FC = () => {
                 </div>
                 <div>
                   <h4 className="font-bold text-amber-300">
-                    Phát hiện tệp bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh)
+                    {pick('Phát hiện tệp bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh)', 'Detected interrupted file data (from upload before chunked upgrade)', '检测到数据中断的文件（来自升级分片上传前的上传）')}
                   </h4>
                   <p className="text-slate-400 text-[11px] mt-0.5">
-                    Hệ thống đã nâng cấp Phân mảnh (Chunked Upload) cho tệp lớn. Bạn có thể bấm nút <strong>"Tải lại"</strong> trên tệp để chọn file bù vào, hoặc dọn dẹp các tệp bị gián đoạn này.
+                    {pick(
+                      'Hệ thống đã nâng cấp Phân mảnh (Chunked Upload) cho tệp lớn. Bạn có thể bấm nút "Tải lại" trên tệp để chọn file bù vào, hoặc dọn dẹp các tệp bị gián đoạn này.',
+                      'The system has upgraded Chunked Upload for large files. You can click "Re-upload" on the file to patch it, or clean up these interrupted files.',
+                      '系统已升级大文件分片上传。您可以点击文件上的“重新上传”补充数据，或清理这些中断的文件。'
+                    )}
                   </p>
                 </div>
               </div>
@@ -1003,7 +1017,7 @@ const CloudDriveViewComponent: React.FC = () => {
                   onClick={handleCleanBrokenFiles}
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 font-semibold text-xs transition-colors"
                 >
-                  Dọn dẹp tệp lỗi
+                  {pick('Dọn dẹp tệp lỗi', 'Clean broken files', '清理损坏文件')}
                 </button>
               </div>
             </div>
@@ -1048,13 +1062,13 @@ const CloudDriveViewComponent: React.FC = () => {
                   ) : file.category === 'audio' ? (
                     <div className="flex flex-col items-center gap-1.5 text-slate-400">
                       <FileDocIcon fileName={file.name} mimeType={file.type} size="md" />
-                      <span className="text-[10px] text-slate-400">Nghe nhạc</span>
+                      <span className="text-[10px] text-slate-400">{pick('Nghe nhạc', 'Play Audio', '播放音频')}</span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-1.5">
                       <FileDocIcon fileName={file.name} mimeType={file.type} size="md" />
                       <span className="text-[10px] text-slate-400">
-                        {getDocumentTypeInfo(file.name, file.type).label}
+                        {getDocumentTypeInfo(file.name, file.type, currentLang).label}
                       </span>
                     </div>
                   )}
@@ -1062,7 +1076,7 @@ const CloudDriveViewComponent: React.FC = () => {
                   {/* Favorite star badge */}
                   <button
                     type="button"
-                    title={file.isFavorite ? 'Bỏ yêu thích' : 'Đánh dấu yêu thích'}
+                    title={file.isFavorite ? pick('Bỏ yêu thích', 'Remove from favorites', '取消收藏') : pick('Đánh dấu yêu thích', 'Add to favorites', '添加到收藏')}
                     onClick={(e) => handleToggleFavorite(file, e)}
                     className="absolute top-2 right-2 p-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-slate-400 hover:text-amber-400 transition-colors backdrop-blur-sm"
                   >
@@ -1087,7 +1101,7 @@ const CloudDriveViewComponent: React.FC = () => {
                       autoFocus
                       onChange={(e) => setEditFileBaseName(e.target.value)}
                       className="w-full bg-slate-950 border border-emerald-500 rounded px-2 py-0.5 text-xs text-white"
-                      placeholder="Tên tệp"
+                      placeholder={pick('Tên tệp', 'File name', '文件名')}
                     />
                     {editFileExtension && (
                       <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded shrink-0">
@@ -1098,7 +1112,7 @@ const CloudDriveViewComponent: React.FC = () => {
                       type="submit"
                       className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold shrink-0 cursor-pointer"
                     >
-                      Lưu
+                      {pick('Lưu', 'Save', '保存')}
                     </button>
                     <button
                       type="button"
@@ -1143,10 +1157,10 @@ const CloudDriveViewComponent: React.FC = () => {
                   <span>{formatFileSize(file.size)}</span>
                   {!file.url ? (
                     <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                      Lỗi tải lên
+                      {pick('Lỗi tải lên', 'Upload error', '上传错误')}
                     </span>
                   ) : (
-                    <span>{new Date(file.createdAt).toLocaleDateString()}</span>
+                    <span>{new Date(file.createdAt).toLocaleDateString(getLocaleTag(currentLang))}</span>
                   )}
                 </div>
               </div>
@@ -1162,7 +1176,7 @@ const CloudDriveViewComponent: React.FC = () => {
                     <button
                       type="button"
                       onClick={(e) => handleTriggerReupload(file, e)}
-                      title="Tệp bị gián đoạn - Bấm để tải bù dữ liệu cho tệp này"
+                      title={pick('Tệp bị gián đoạn - Bấm để tải bù dữ liệu cho tệp này', 'Interrupted file - Click to re-upload data for this file', '文件中断 - 点击补充上传此文件数据')}
                       className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       <RefreshCw className="w-3 h-3 text-amber-300" />
@@ -1171,7 +1185,7 @@ const CloudDriveViewComponent: React.FC = () => {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => downloadFileSafely(file.url, file.name)}
+                      onClick={() => downloadFileSafely(file.url, file.name, undefined, [file.id])}
                       title={t('drive.download_btn')}
                       className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-emerald-400 transition-colors cursor-pointer"
                     >
@@ -1195,7 +1209,7 @@ const CloudDriveViewComponent: React.FC = () => {
                       href={getVideoWebWatchUrl(file)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="Mở video trên tab Web riêng (siêu mượt)"
+                      title={pick('Mở video trên tab Web riêng (siêu mượt)', 'Open video in dedicated Web tab (ultra smooth)', '在独立网页标签中打开视频（超流畅）')}
                       className="p-1.5 rounded-lg hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 transition-colors"
                     >
                       <ExternalLink className="w-4 h-4" />
@@ -1248,7 +1262,7 @@ const CloudDriveViewComponent: React.FC = () => {
                     {previewFile.name}
                   </h3>
                   <p className="text-[11px] text-slate-400 font-mono">
-                    {formatFileSize(previewFile.size)} • {new Date(previewFile.createdAt).toLocaleTimeString('vi-VN')} {new Date(previewFile.createdAt).toLocaleDateString('vi-VN')}
+                    {formatFileSize(previewFile.size)} • {new Date(previewFile.createdAt).toLocaleTimeString(getLocaleTag(currentLang))} {new Date(previewFile.createdAt).toLocaleDateString(getLocaleTag(currentLang))}
                   </p>
                 </div>
               </div>
@@ -1258,15 +1272,15 @@ const CloudDriveViewComponent: React.FC = () => {
                   type="button"
                   onClick={() => {
                     if (!previewFile.url) {
-                      showBottomToast(`Tệp "${previewFile.name}" không có dữ liệu do lần tải trước bị gián đoạn. Bạn hãy tải lại nhé!`, true);
+                      showBottomToast(pick('Tệp "{name}" không có dữ liệu do lần tải trước bị gián đoạn. Bạn hãy tải lại nhé!', 'File "{name}" has no data due to interrupted upload. Please re-upload it!', '文件“{name}”因上次上传中断而无数据，请重新上传！').replace('{name}', previewFile.name), true);
                       return;
                     }
-                    downloadFileSafely(previewFile.url, previewFile.name);
+                    downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id]);
                   }}
                   className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Tải về</span>
+                  <span>{pick('Tải về', 'Download', '下载')}</span>
                 </button>
                 {previewFile.category === 'video' && (
                   <a
@@ -1274,15 +1288,15 @@ const CloudDriveViewComponent: React.FC = () => {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
-                    title="Mở xem trên Web riêng (Tab mới)"
+                    title={pick('Mở xem trên Web riêng (Tab mới)', 'Open in Dedicated Web Tab', '在新网页标签页中打开')}
                   >
                     <ExternalLink className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>Mở xem trên Web ↗</span>
+                    <span>{pick('Mở xem trên Web ↗', 'Open in Web ↗', '在网页中打开 ↗')}</span>
                   </a>
                 )}
                 <button
                   type="button"
-                  title="Xóa tệp này khỏi Cloud"
+                  title={pick('Xóa tệp này khỏi Cloud', 'Delete this file from Cloud', '从云端删除此文件')}
                   onClick={() => handleDeleteFile(previewFile)}
                   className="p-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-colors cursor-pointer"
                 >
@@ -1292,7 +1306,7 @@ const CloudDriveViewComponent: React.FC = () => {
                   type="button"
                   onClick={() => setPreviewFile(null)}
                   className="p-2 rounded-xl bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-                  title="Đóng xem trước"
+                  title={pick('Đóng xem trước', 'Close preview', '关闭预览')}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1314,7 +1328,7 @@ const CloudDriveViewComponent: React.FC = () => {
                   fileId={previewFile.id}
                   fileName={previewFile.name}
                   fileSize={previewFile.size}
-                  onDownload={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                  onDownload={() => downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id])}
                   onReupload={() => {
                     const target = previewFile;
                     setPreviewFile(null);
@@ -1334,12 +1348,12 @@ const CloudDriveViewComponent: React.FC = () => {
                   </div>
                   <p className="text-base text-white font-bold mb-1">{previewFile.name}</p>
                   <p className="text-xs text-slate-400 mb-5">
-                    {getDocumentTypeInfo(previewFile.name, previewFile.type).label} • {formatFileSize(previewFile.size)}
+                    {getDocumentTypeInfo(previewFile.name, previewFile.type, currentLang).label} • {formatFileSize(previewFile.size)}
                   </p>
                   {!previewFile.url ? (
                     <div className="flex flex-col items-center gap-3">
                       <span className="text-amber-400 text-xs font-semibold">
-                        Tệp này bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh).
+                        {pick('Tệp này bị gián đoạn dữ liệu (từ lần tải trước khi nâng cấp phân mảnh).', 'This file has interrupted data (from upload before chunked upgrade).', '此文件数据中断（来自升级分片上传前的上传）。')}
                       </span>
                       <div className="flex items-center gap-2">
                         <button
@@ -1352,7 +1366,7 @@ const CloudDriveViewComponent: React.FC = () => {
                           className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center gap-2 shadow-lg transition-all cursor-pointer"
                         >
                           <RefreshCw className="w-4 h-4" />
-                          <span>Tải bù dữ liệu ngay</span>
+                          <span>{pick('Tải bù dữ liệu ngay', 'Re-upload Data Now', '立即补充上传数据')}</span>
                         </button>
                         <button
                           type="button"
@@ -1364,18 +1378,18 @@ const CloudDriveViewComponent: React.FC = () => {
                           className="px-4 py-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold text-xs inline-flex items-center gap-2 transition-all cursor-pointer"
                         >
                           <Trash2 className="w-4 h-4" />
-                          <span>Xóa tệp này</span>
+                          <span>{pick('Xóa tệp này', 'Delete this file', '删除此文件')}</span>
                         </button>
                       </div>
                     </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => downloadFileSafely(previewFile.url, previewFile.name)}
+                      onClick={() => downloadFileSafely(previewFile.url, previewFile.name, undefined, [previewFile.id])}
                       className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-2 shadow-lg hover:shadow-emerald-600/20 transition-all cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
-                      <span>Tải tệp về máy để xem</span>
+                      <span>{pick('Tải tệp về máy để xem', 'Download file to view', '下载到本地查看')}</span>
                     </button>
                   )}
                 </div>
@@ -1416,10 +1430,10 @@ const CloudDriveViewComponent: React.FC = () => {
 
               <div className="space-y-1">
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  Xác nhận xóa tệp?
+                  {pick('Xác nhận xóa tệp?', 'Confirm file deletion?', '确认删除文件？')}
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-300">
-                  Bạn có chắc chắn là muốn xóa nó không?
+                  {pick('Bạn có chắc chắn là muốn xóa nó không?', 'Are you sure you want to delete it?', '您确定要删除它吗？')}
                 </p>
               </div>
             </div>
@@ -1430,7 +1444,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 {filePendingDelete.name}
               </div>
               <div className="text-[11px] text-slate-400 font-mono">
-                {formatFileSize(filePendingDelete.size)} • {getDocumentTypeInfo(filePendingDelete.name, filePendingDelete.type).label}
+                {formatFileSize(filePendingDelete.size)} • {getDocumentTypeInfo(filePendingDelete.name, filePendingDelete.type, currentLang).label}
               </div>
             </div>
 
@@ -1443,7 +1457,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 className="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900 cursor-pointer"
               />
               <span className="text-xs text-slate-300 group-hover:text-white transition-colors">
-                Xóa liên tục mà không cần hỏi lại lần sau
+                {pick('Xóa liên tục mà không cần hỏi lại lần sau', 'Delete without asking again next time', '下次删除不再询问')}
               </span>
             </label>
 
@@ -1454,7 +1468,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 onClick={() => setFilePendingDelete(null)}
                 className="py-2.5 px-4 rounded-xl bg-slate-800/90 hover:bg-slate-750 text-slate-300 hover:text-white font-semibold text-xs border border-slate-700/60 transition-all cursor-pointer active:scale-95"
               >
-                Thoát
+                {pick('Thoát', 'Cancel', '取消')}
               </button>
               <button
                 type="button"
@@ -1462,7 +1476,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 via-rose-500 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/50 transition-all cursor-pointer active:scale-95 border border-rose-400/30"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Chấp nhận</span>
+                <span>{pick('Chấp nhận', 'Confirm', '确认')}</span>
               </button>
             </div>
           </div>
@@ -1487,10 +1501,12 @@ const CloudDriveViewComponent: React.FC = () => {
               </div>
               <div className="space-y-1">
                 <h3 className="text-base sm:text-lg font-bold text-white">
-                  Xác nhận xóa {bulkPendingDelete.count} {bulkPendingDelete.catLabel}?
+                  {pick('Xác nhận xóa {count} {label}?', 'Confirm deletion of {count} {label}?', '确认删除 {count} 个{label}？')
+                    .replace('{count}', String(bulkPendingDelete.count))
+                    .replace('{label}', bulkPendingDelete.catLabel)}
                 </h3>
                 <p className="text-xs text-slate-300">
-                  Bạn có chắc chắn muốn xóa vĩnh viễn không? Hành động này sẽ giải phóng dung lượng và không thể hoàn tác.
+                  {pick('Bạn có chắc chắn muốn xóa vĩnh viễn không? Hành động này sẽ giải phóng dung lượng và không thể hoàn tác.', 'Are you sure you want to permanently delete? This will free up space and cannot be undone.', '您确定要永久删除吗？此操作将释放空间且无法撤销。')}
                 </p>
               </div>
             </div>
@@ -1501,7 +1517,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 onClick={() => setBulkPendingDelete(null)}
                 className="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 font-semibold text-xs transition-colors cursor-pointer"
               >
-                Thoát
+                {pick('Thoát', 'Cancel', '取消')}
               </button>
               <button
                 type="button"
@@ -1509,7 +1525,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 className="py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-rose-950/50 transition-all cursor-pointer active:scale-95"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Xác nhận xóa</span>
+                <span>{pick('Xác nhận xóa', 'Confirm Delete', '确认删除')}</span>
               </button>
             </div>
           </div>
@@ -1531,7 +1547,7 @@ const CloudDriveViewComponent: React.FC = () => {
             <div className="flex items-center justify-between">
               <h3 className="text-sm sm:text-base font-bold text-white tracking-wide flex items-center gap-2">
                 <LinkIcon className="w-4 h-4 text-indigo-400" />
-                <span>Thêm tệp từ URL vào Cloud</span>
+                <span>{pick('Thêm tệp từ URL vào Cloud', 'Add File from URL to Cloud', '从 URL 添加文件到云端')}</span>
               </h3>
               <button
                 type="button"
@@ -1542,7 +1558,7 @@ const CloudDriveViewComponent: React.FC = () => {
               </button>
             </div>
             <p className="text-xs text-slate-300">
-              Nhập hoặc dán URL (hình ảnh, tài liệu, video hoặc liên kết) để lưu trực tiếp vào Cloud Drive của bạn:
+              {pick('Nhập hoặc dán URL (hình ảnh, tài liệu, video hoặc liên kết) để lưu trực tiếp vào Cloud Drive của bạn:', 'Enter or paste a URL (image, document, video, or link) to save directly to your Cloud Drive:', '输入或粘贴 URL（图片、文档、视频或链接）直接保存到您的云盘：')}
             </p>
             <div className="rounded-xl overflow-hidden bg-[#242b3b] border border-slate-700/70 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-400/20 transition-all p-2.5">
               <input
@@ -1566,7 +1582,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 onClick={() => setIsCloudUrlModalOpen(false)}
                 className="px-3.5 py-1.5 text-xs sm:text-sm font-medium text-slate-300 hover:text-white transition-colors cursor-pointer rounded-lg hover:bg-slate-800"
               >
-                Thoát
+                {pick('Thoát', 'Cancel', '取消')}
               </button>
               <button
                 type="button"
@@ -1575,7 +1591,7 @@ const CloudDriveViewComponent: React.FC = () => {
                 className="px-5 py-1.5 rounded-full bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs sm:text-sm font-bold shadow-md transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
               >
                 {uploading ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <LinkIcon className="w-3.5 h-3.5" />}
-                <span>Lưu vào Cloud</span>
+                <span>{pick('Lưu vào Cloud', 'Save to Cloud', '保存到云端')}</span>
               </button>
             </div>
           </div>

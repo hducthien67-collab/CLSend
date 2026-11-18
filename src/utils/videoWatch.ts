@@ -54,12 +54,9 @@ export function getVideoWebWatchUrl(file: VideoWatchSource): string {
   return `/watch/${encodeURIComponent(file.id || 'video')}${nameParam ? `?${nameParam}` : ''}`;
 }
 
-export function openVideoInWebTab(file: VideoWatchSource): Window | null {
+import { openSafeExternalTab } from './fileDownload';
+
+export function openVideoInWebTab(file: VideoWatchSource): void {
   const watchUrl = getVideoWebWatchUrl(file);
-  try {
-    return window.open(watchUrl, '_blank', 'noopener,noreferrer');
-  } catch (err) {
-    console.error('Could not open video tab:', err);
-    return null;
-  }
+  openSafeExternalTab(watchUrl);
 }

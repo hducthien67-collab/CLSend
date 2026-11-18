@@ -5,6 +5,8 @@
  * Full Support for Audio Streaming (sendAudio), Video Streaming (sendVideo), Documents (sendDocument), Photos, and General Files.
  */
 
+import { pickActiveLang } from '../context/LanguageContext';
+
 export interface TelegramStorageConfig {
   enabled: boolean;
   botToken: string;
@@ -686,7 +688,7 @@ export function getBotForFile(fileName: string, mimeType?: string): TelegramStor
 export async function testTelegramBot(botToken: string): Promise<{ ok: boolean; username?: string; name?: string; error?: string }> {
   try {
     if (!botToken || !botToken.trim()) {
-      return { ok: false, error: 'Chưa nhập Token Bot' };
+      return { ok: false, error: pickActiveLang('Chưa nhập Token Bot', 'Bot Token is missing', '未输入 Bot Token') };
     }
     const res = await fetch(`https://api.telegram.org/bot${botToken.trim()}/getMe`);
     const data = await res.json();
@@ -697,9 +699,9 @@ export async function testTelegramBot(botToken: string): Promise<{ ok: boolean; 
         name: data.result.first_name
       };
     }
-    return { ok: false, error: data.description || 'Token không hợp lệ' };
+    return { ok: false, error: data.description || pickActiveLang('Token không hợp lệ', 'Invalid token', 'Token 无效') };
   } catch (err: any) {
-    return { ok: false, error: err.message || 'Không thể kết nối đến máy chủ Telegram' };
+    return { ok: false, error: err.message || pickActiveLang('Không thể kết nối đến máy chủ Telegram', 'Unable to connect to Telegram server', '无法连接到 Telegram 服务器') };
   }
 }
 
@@ -1006,7 +1008,7 @@ async function sendSingleBlobToTelegram(
     }
   }
 
-  throw lastError || new Error('Tất cả Telegram Bot đều bận hoặc không thể tải dữ liệu.');
+  throw lastError || new Error(pickActiveLang('Tất cả Telegram Bot đều bận hoặc không thể tải dữ liệu.', 'All Telegram bots are busy or unable to upload.', '所有 Telegram 机器人都忙或无法上传数据。'));
 }
 
 /**
@@ -1029,7 +1031,7 @@ export async function uploadToTelegram(
 
   const candidates = buildTelegramCandidateBots(file.name, effectiveMime, customConfig);
   if (candidates.length === 0) {
-    throw new Error('Chưa cấu hình Telegram Bot Token hoặc Chat ID.');
+    throw new Error(pickActiveLang('Chưa cấu hình Telegram Bot Token hoặc Chat ID.', 'Telegram Bot Token or Chat ID is not configured.', '尚未配置 Telegram Bot Token 或 Chat ID。'));
   }
 
   if (onProgress) onProgress(5);

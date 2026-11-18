@@ -12,6 +12,7 @@ import { AppUser, CloudDriveFile, UserDevice } from '../types';
 import { uploadFileToServer, generateVideoThumbnail, formatFileSize } from './fileUpload';
 import { saveVideoToIndexedDB } from '../components/AllInOneVideoPlayer';
 import { storeFileBlobLocally } from './idbStorage';
+import { pickActiveLang } from '../context/LanguageContext';
 
 /**
  * Subscribe to all cloud_files belonging to the active ClSend account,
@@ -96,7 +97,7 @@ export function subscribeUserCloudFiles(
       userId: data.userId || currentUser.uid,
       userEmail: data.userEmail,
       userName: data.userName,
-      name: data.name || 'Không tên',
+      name: data.name || pickActiveLang('Không tên', 'Untitled', '未命名'),
       size: Number(data.size) || 0,
       type: data.type || 'application/octet-stream',
       url: data.url || '',
@@ -250,7 +251,7 @@ export async function syncVideoFileToCloud(params: {
     id: docId,
     userId: user.uid,
     userEmail: (user.email || '').trim().toLowerCase(),
-    userName: user.displayName || deviceName || 'Người dùng',
+    userName: user.displayName || deviceName || pickActiveLang('Người dùng', 'User', '用户'),
     name: cleanName,
     size: resolvedSize,
     type: resolvedType,

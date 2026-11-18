@@ -7,7 +7,9 @@
  * 3. Graceful restoration to pristine default favicon and title when viewed
  */
 
-let originalTitle = typeof document !== 'undefined' ? document.title : 'ClSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến';
+import { pickActiveLang } from '../context/LanguageContext';
+
+let originalTitle = typeof document !== 'undefined' ? document.title : pickActiveLang('ClSend - Truyền Tệp Siêu Tốc & Phòng Chat Trực Tuyến', 'ClSend - Super-Fast File Transfer & Online Chat', 'ClSend - 超高速文件传输与在线聊天');
 let originalFaviconHref = '/favicon.svg';
 let cachedBaseFaviconImage: HTMLImageElement | null = null;
 let isImageLoading = false;

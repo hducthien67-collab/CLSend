@@ -1,4 +1,5 @@
 import { DeviceType } from '../types';
+import { LanguageCode, pickLang, pickActiveLang } from '../context/LanguageContext';
 
 export function isSmartTv(): boolean {
   if (typeof window === 'undefined') return false;
@@ -84,8 +85,6 @@ export function detectDeviceType(): DeviceType {
   return 'desktop';
 }
 
-import { LanguageCode, pickLang } from '../context/LanguageContext';
-
 export function getDeviceTypeInfo(type: DeviceType, lang: LanguageCode | string = 'vi'): {
   type: DeviceType;
   label: string;
@@ -134,16 +133,25 @@ export function getDeviceTypeInfo(type: DeviceType, lang: LanguageCode | string 
 }
 
 export function generateDefaultDeviceName(type: DeviceType): string {
-  const adjectives = ['Bạc Hà', 'Biển Xanh', 'Hổ Phách', 'Ngọc Bích', 'Sao Băng', 'Tia Chớp', 'Bình Minh', 'Đêm Trăng'];
+  const adjectives = [
+    pickActiveLang('Bạc Hà', 'Mint', '薄荷'),
+    pickActiveLang('Biển Xanh', 'Ocean', '碧海'),
+    pickActiveLang('Hổ Phách', 'Amber', '琥珀'),
+    pickActiveLang('Ngọc Bích', 'Jade', '翡翠'),
+    pickActiveLang('Sao Băng', 'Meteor', '流星'),
+    pickActiveLang('Tia Chớp', 'Spark', '闪电'),
+    pickActiveLang('Bình Minh', 'Dawn', '晨曦'),
+    pickActiveLang('Đêm Trăng', 'Moonlight', '月夜')
+  ];
   const randomAdj = adjectives[Math.floor(Math.random() * adjectives.length)];
   const typeMap: Record<DeviceType, string> = {
     laptop: 'Laptop',
     desktop: 'PC',
-    mobile: 'Điện Thoại',
+    mobile: pickActiveLang('Điện Thoại', 'Phone', '手机'),
     tablet: 'Tablet',
     tv: 'Smart TV'
   };
-  return `${typeMap[type] || 'Thiết Bị'} ${randomAdj}`;
+  return `${typeMap[type] || pickActiveLang('Thiết Bị', 'Device', '设备')} ${randomAdj}`;
 }
 
 export const AVATAR_COLORS = [
@@ -170,7 +178,7 @@ export function formatFileSize(bytes?: number): string {
 }
 
 export function detectBrowserInfo(): string {
-  if (typeof window === 'undefined' || !navigator) return 'Thiết bị';
+  if (typeof window === 'undefined' || !navigator) return pickActiveLang('Thiết bị', 'Device', '设备');
   const ua = navigator.userAgent;
   const maxTouchPoints = navigator.maxTouchPoints || 0;
   const screenW = typeof window.screen !== 'undefined' ? window.screen.width : window.innerWidth;
@@ -218,7 +226,7 @@ export function detectBrowserInfo(): string {
     return 'Linux PC';
   }
 
-  return 'Thiết bị';
+  return pickActiveLang('Thiết bị', 'Device', '设备');
 }
 
 // Global cached location variable
@@ -260,7 +268,7 @@ export async function fetchDetailedLocation(): Promise<DetailedLocation> {
           longitude: typeof data.longitude === 'number' ? data.longitude : 108.0383,
           city: data.city,
           region: data.region,
-          country: data.country || 'Việt Nam',
+          country: data.country || pickActiveLang('Việt Nam', 'Vietnam', '越南'),
           isGps: false
         };
         cachedSpecificLocation = data.location;
@@ -282,7 +290,7 @@ export async function fetchDetailedLocation(): Promise<DetailedLocation> {
       if (data.success) {
         const city = data.city || '';
         const region = data.region || '';
-        const country = data.country || 'Việt Nam';
+        const country = data.country || pickActiveLang('Việt Nam', 'Vietnam', '越南');
         const loc = city && region && city !== region ? `${city}, ${region}, ${country}` : city ? `${city}, ${country}` : country;
         const detail: DetailedLocation = {
           location: loc,
@@ -310,7 +318,7 @@ export async function fetchDetailedLocation(): Promise<DetailedLocation> {
     location: fallbackLoc,
     latitude: 12.6800,
     longitude: 108.0383,
-    country: 'Việt Nam',
+    country: pickActiveLang('Việt Nam', 'Vietnam', '越南'),
     isGps: false
   };
   return fallbackDetail;
@@ -330,24 +338,24 @@ export function detectLocationInfo(): string {
 
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (!tz) return 'Việt Nam';
+    if (!tz) return pickActiveLang('Việt Nam', 'Vietnam', '越南');
     if (tz.includes('Ho_Chi_Minh') || tz.includes('Saigon')) {
-      return 'TP. Hồ Chí Minh, Việt Nam';
+      return pickActiveLang('TP. Hồ Chí Minh, Việt Nam', 'Ho Chi Minh City, Vietnam', '越南胡志明市');
     }
     if (tz.includes('Hanoi')) {
-      return 'Hà Nội, Việt Nam';
+      return pickActiveLang('Hà Nội, Việt Nam', 'Hanoi, Vietnam', '越南河内');
     }
     if (tz.includes('Bangkok')) {
-      return 'Hà Nội / TP.HCM, Việt Nam';
+      return pickActiveLang('Hà Nội / TP.HCM, Việt Nam', 'Hanoi / HCMC, Vietnam', '越南河内 / 胡志明市');
     }
-    if (tz.includes('Tokyo')) return 'Tokyo, Nhật Bản';
-    if (tz.includes('Seoul')) return 'Seoul, Hàn Quốc';
+    if (tz.includes('Tokyo')) return pickActiveLang('Tokyo, Nhật Bản', 'Tokyo, Japan', '日本东京');
+    if (tz.includes('Seoul')) return pickActiveLang('Seoul, Hàn Quốc', 'Seoul, South Korea', '韩国首尔');
     if (tz.includes('Singapore')) return 'Singapore';
-    if (tz.includes('London')) return 'London, Vương Quốc Anh';
-    if (tz.includes('New_York') || tz.includes('America')) return 'Hoa Kỳ (US Region)';
+    if (tz.includes('London')) return pickActiveLang('London, Vương Quốc Anh', 'London, United Kingdom', '英国伦敦');
+    if (tz.includes('New_York') || tz.includes('America')) return pickActiveLang('Hoa Kỳ (US Region)', 'United States (US Region)', '美国区域');
     return tz.replace(/_/g, ' ');
   } catch {
-    return 'Việt Nam';
+    return pickActiveLang('Việt Nam', 'Vietnam', '越南');
   }
 }
 

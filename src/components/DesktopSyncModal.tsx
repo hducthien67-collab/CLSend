@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 import { 
   X, 
   Monitor, 
@@ -26,6 +27,9 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
   initialCode = '',
 }) => {
   const { currentUser, userProfile, settings } = useAuth();
+  const { currentLang } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh?: T) => pickLang(currentLang, vi, en, zh);
+
   const [syncCode, setSyncCode] = useState(initialCode);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -54,7 +58,7 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
       verifySyncCode(clean).then((res) => {
         if (res.valid && res.data) {
           setErrorMsg(null);
-          setTargetDeviceInfo(res.data.desktopDeviceName || 'Ứng dụng ClSend Desktop');
+          setTargetDeviceInfo(res.data.desktopDeviceName || pick('Ứng dụng ClSend Desktop', 'ClSend Desktop App', 'ClSend 桌面客户端'));
         } else {
           setTargetDeviceInfo(null);
         }
@@ -73,12 +77,12 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
 
     const clean = syncCode.replace(/[^0-9]/g, '');
     if (clean.length !== 6) {
-      setErrorMsg('Vui lòng nhập đúng mã đồng bộ 6 chữ số hiển thị trên ứng dụng máy tính.');
+      setErrorMsg(pick('Vui lòng nhập đúng mã đồng bộ 6 chữ số hiển thị trên ứng dụng máy tính.', 'Please enter the exact 6-digit sync code displayed on the desktop app.', '请输入桌面端显示的 6 位同步码。'));
       return;
     }
 
     if (!currentUser || !userProfile) {
-      setErrorMsg('Bạn chưa đăng nhập tài khoản trên trang web này.');
+      setErrorMsg(pick('Bạn chưa đăng nhập tài khoản trên trang web này.', 'You are not signed in on this web page yet.', '您尚未在此网页登录账号。'));
       return;
     }
 
@@ -94,7 +98,7 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
         setErrorMsg(res.message);
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Không thể đồng bộ phiên đăng nhập. Vui lòng kiểm tra lại mã.');
+      setErrorMsg(err?.message || pick('Không thể đồng bộ phiên đăng nhập. Vui lòng kiểm tra lại mã.', 'Unable to sync login session. Please check your code.', '无法同步登录会话，请检查代码。'));
     } finally {
       setIsLoading(false);
     }
@@ -117,8 +121,8 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
               <Monitor className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base leading-tight">Đồng bộ sang App Desktop</h3>
-              <p className="text-xs text-slate-400">Cấp quyền đăng nhập tức thì cho máy tính</p>
+              <h3 className="font-bold text-white text-base leading-tight">{pick('Đồng bộ sang App Desktop', 'Sync to Desktop App', '同步到桌面客户端')}</h3>
+              <p className="text-xs text-slate-400">{pick('Cấp quyền đăng nhập tức thì cho máy tính', 'Grant instant sign-in access to your computer', '立即为电脑端授予登录权限')}</p>
             </div>
           </div>
           <button
@@ -148,14 +152,14 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-xs text-slate-400 flex items-center gap-1.5">
-              <span>Tài khoản đồng bộ</span>
+              <span>{pick('Tài khoản đồng bộ', 'Sync Account', '同步账号')}</span>
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             </div>
             <div className="text-sm font-bold text-white truncate">
-              {currentUser?.displayName || userProfile?.displayName || 'Người dùng'}
+              {currentUser?.displayName || userProfile?.displayName || pick('Người dùng', 'User', '用户')}
             </div>
             <div className="text-[11px] text-slate-400 font-mono truncate">
-              {currentUser?.email || userProfile?.email || 'Đã đăng nhập'}
+              {currentUser?.email || userProfile?.email || pick('Đã đăng nhập', 'Signed in', '已登录')}
             </div>
           </div>
         </div>
@@ -166,16 +170,16 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
             <div className="w-14 h-14 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/20">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h4 className="text-lg font-bold text-white">Đăng nhập máy tính thành công!</h4>
+            <h4 className="text-lg font-bold text-white">{pick('Đăng nhập máy tính thành công!', 'Desktop Sign-In Successful!', '电脑端登录成功！')}</h4>
             <p className="text-xs text-slate-300 max-w-xs leading-relaxed">
-              {successMsg} Ứng dụng Desktop của bạn hiện đã được đăng nhập và đồng bộ đầy đủ dữ liệu.
+              {successMsg} {pick('Ứng dụng Desktop của bạn hiện đã được đăng nhập và đồng bộ đầy đủ dữ liệu.', 'Your Desktop app is now signed in and fully synced.', '您的桌面端应用现已登录并完成数据同步。')}
             </p>
           </div>
         ) : (
           <form onSubmit={handleAuthorize} className="mt-5 space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-200 mb-2">
-                Nhập Mã đồng bộ 6 chữ số trên ứng dụng máy tính:
+                {pick('Nhập Mã đồng bộ 6 chữ số trên ứng dụng máy tính:', 'Enter the 6-digit Sync Code shown on Desktop app:', '输入桌面端显示的数字同步码（6 位）：')}
               </label>
               <div className="relative">
                 <input
@@ -188,20 +192,20 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
                     setSyncCode(val);
                     setErrorMsg(null);
                   }}
-                  placeholder="Ví dụ: 824915"
+                  placeholder={pick('Ví dụ: 824915', 'e.g. 824915', '例如：824915')}
                   className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-2xl text-center text-2xl font-mono tracking-widest text-emerald-300 font-bold placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-all shadow-inner"
                 />
               </div>
               <p className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>Mở ứng dụng ClSend trên Desktop &gt; chọn tab <strong>Mã đồng bộ / QR</strong> để xem mã 6 số.</span>
+                <span>{pick('Mở ứng dụng ClSend trên Desktop > chọn tab Mã đồng bộ / QR để xem mã 6 số.', 'Open ClSend on Desktop > select the Web Sync / QR tab to view the 6-digit code.', '在桌面端打开 ClSend > 选择“网页同步 / 二维码”标签页查看 6 位代码。')}</span>
               </p>
             </div>
 
             {targetDeviceInfo && (
               <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
                 <Laptop className="w-4 h-4 shrink-0 text-emerald-400" />
-                <span>Đã phát hiện: <strong>{targetDeviceInfo}</strong></span>
+                <span>{pick('Đã phát hiện:', 'Detected:', '已检测到：')} <strong>{targetDeviceInfo}</strong></span>
               </div>
             )}
 
@@ -220,12 +224,12 @@ export const DesktopSyncModal: React.FC<DesktopSyncModalProps> = ({
               {isLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Đang cấp quyền đăng nhập...</span>
+                  <span>{pick('Đang cấp quyền đăng nhập...', 'Authorizing sign-in...', '正在授权登录...')}</span>
                 </>
               ) : (
                 <>
                   <ShieldCheck className="w-4 h-4" />
-                  <span>Xác nhận đăng nhập trên Desktop</span>
+                  <span>{pick('Xác nhận đăng nhập trên Desktop', 'Confirm Sign-In on Desktop', '确认在桌面端登录')}</span>
                   <ArrowRight className="w-4 h-4 ml-1" />
                 </>
               )}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Crown, Zap, Server, Trash2, Calendar, Check, AlertTriangle, X, ShieldAlert, Sparkles, RefreshCw } from 'lucide-react';
 import { resetRoomMessagesServer } from '../utils/devModeration';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 
@@ -23,6 +24,8 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
   isAutoWeeklyEnabled = false,
   onResetSuccess
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh: string) => pickLang(currentLang, vi, en, zh);
   const [selectedMode, setSelectedMode] = useState<'all' | 'older_than_7_days'>('older_than_7_days');
   const [autoWeekly, setAutoWeekly] = useState(isAutoWeeklyEnabled);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -47,7 +50,7 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
       }
 
       // 2. Execute server messages reset
-      const result = await resetRoomMessagesServer(roomId, selectedMode, 'DEV Quản Trị Viên');
+      const result = await resetRoomMessagesServer(roomId, selectedMode, pick('DEV Quản Trị Viên', 'DEV Administrator', 'DEV 管理员'));
       if (result.success) {
         setResultMessage({
           type: 'success',
@@ -68,7 +71,7 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
     } catch (err: any) {
       setResultMessage({
         type: 'error',
-        text: err.message || 'Lỗi không xác định khi reset máy chủ.'
+        text: err.message || pick('Lỗi không xác định khi reset máy chủ.', 'Unknown error while resetting server.', '重置服务器时发生未知错误。')
       });
     } finally {
       setIsProcessing(false);
@@ -88,14 +91,14 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <h3 className="text-sm sm:text-base font-extrabold text-white">Reset Máy Chủ Trò Chuyện</h3>
+                <h3 className="text-sm sm:text-base font-extrabold text-white">{pick('Reset Máy Chủ Trò Chuyện', 'Reset Chat Server', '重置聊天服务器')}</h3>
                 <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-0.5">
                   <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
                   DEV
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Phòng: <span className="text-emerald-400 font-semibold">{roomName}</span> ({totalMessagesCount} tin nhắn)
+                {pick('Phòng:', 'Room:', '房间：')} <span className="text-emerald-400 font-semibold">{roomName}</span> ({pick('{n} tin nhắn', '{n} messages', '{n} 条消息').replace('{n}', String(totalMessagesCount))})
               </p>
             </div>
           </div>
@@ -112,17 +115,21 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
         <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs space-y-1">
           <div className="flex items-center gap-1.5 font-bold text-amber-300">
             <Server className="w-3.5 h-3.5" />
-            <span>Tối ưu hóa máy chủ & Chống lag (Anti-Lag Engine)</span>
+            <span>{pick('Tối ưu hóa máy chủ & Chống lag (Anti-Lag Engine)', 'Server Optimization & Anti-Lag Engine', '服务器优化与防卡顿引擎')}</span>
           </div>
           <p className="text-[11px] text-amber-200/80 leading-relaxed">
-            Tin nhắn dồn ứ qua nhiều tuần sẽ làm máy chủ Firestore bị quá tải và gây giật lag khi tải chat. Bạn có thể chọn reset dọn dẹp các tin nhắn cũ để giải phóng máy chủ ngay lập tức.
+            {pick(
+              'Tin nhắn dồn ứ qua nhiều tuần sẽ làm máy chủ Firestore bị quá tải và gây giật lag khi tải chat. Bạn có thể chọn reset dọn dẹp các tin nhắn cũ để giải phóng máy chủ ngay lập tức.',
+              'Accumulated messages over multiple weeks can overload the database and cause lag when loading chats. You can clean up old messages to optimize server performance immediately.',
+              '数周积累的消息会加重数据库负载并导致加载聊天卡顿。您可以清理旧消息以立即释放服务器性能。'
+            )}
           </p>
         </div>
 
         {/* Mode Selector */}
         <div className="space-y-2">
           <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-            Chọn phương thức Reset:
+            {pick('Chọn phương thức Reset:', 'Select Reset Method:', '选择重置方式：')}
           </label>
 
           {/* Option 1: Clean > 7 days */}
@@ -139,13 +146,17 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-white">Dọn tin nhắn cũ hơn 1 tuần (7 ngày)</span>
+                <span className="text-xs font-bold text-white">{pick('Dọn tin nhắn cũ hơn 1 tuần (7 ngày)', 'Clear messages older than 1 week (7 days)', '清理超过 1 周（7 天）的旧消息')}</span>
                 <span className="text-[10px] text-emerald-400 font-semibold px-1.5 py-0.5 bg-emerald-500/10 rounded">
-                  Khuyên dùng
+                  {pick('Khuyên dùng', 'Recommended', '推荐')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Xóa các tin nhắn cũ hơn 7 ngày để giải phóng lag, đồng thời giữ lại các tin nhắn mới trong tuần gần nhất.
+                {pick(
+                  'Xóa các tin nhắn cũ hơn 7 ngày để giải phóng lag, đồng thời giữ lại các tin nhắn mới trong tuần gần nhất.',
+                  'Delete messages older than 7 days to reduce lag while keeping messages from the past week.',
+                  '删除 7 天前的消息以消除卡顿，同时保留最近一周的新消息。'
+                )}
               </p>
             </div>
           </div>
@@ -164,13 +175,17 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-rose-200">Reset Toàn Bộ (Xóa sạch tin nhắn phòng)</span>
+                <span className="text-xs font-bold text-rose-200">{pick('Reset Toàn Bộ (Xóa sạch tin nhắn phòng)', 'Full Reset (Purge all room messages)', '全部重置（清空房间所有消息）')}</span>
                 <span className="text-[10px] text-rose-400 font-mono font-bold px-1.5 py-0.5 bg-rose-500/10 rounded">
-                  100% Sạch
+                  {pick('100% Sạch', '100% Clean', '100% 清空')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                Xóa sạch toàn bộ tin nhắn đã nhắn trong phòng này. Máy chủ trở về trạng thái ban đầu, xóa bỏ 100% độ trễ và lag.
+                {pick(
+                  'Xóa sạch toàn bộ tin nhắn đã nhắn trong phòng này. Máy chủ trở về trạng thái ban đầu, xóa bỏ 100% độ trễ và lag.',
+                  'Erase all messages sent in this room. Returns the server to a fresh state with zero latency.',
+                  '清空此房间内的所有消息。使服务器恢复初始状态，彻底消除延迟与卡顿。'
+                )}
               </p>
             </div>
           </div>
@@ -185,9 +200,13 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500 bg-slate-800 border-slate-700 cursor-pointer"
           />
           <div className="text-[11px] min-w-0">
-            <span className="font-bold text-slate-200 block">Tự động reset dọn dẹp mỗi tuần (7 ngày)</span>
+            <span className="font-bold text-slate-200 block">{pick('Tự động reset dọn dẹp mỗi tuần (7 ngày)', 'Auto-cleanup weekly (every 7 days)', '每周自动清理（7 天）')}</span>
             <span className="text-slate-400 text-[10px]">
-              Hệ thống sẽ tự động quét và xóa tin nhắn cũ hơn 7 ngày khi mở phòng để máy chủ luôn mượt mà.
+              {pick(
+                'Hệ thống sẽ tự động quét và xóa tin nhắn cũ hơn 7 ngày khi mở phòng để máy chủ luôn mượt mà.',
+                'The system will automatically scan and remove messages older than 7 days when opening the room.',
+                '系统将在打开房间时自动扫描并删除超过 7 天的消息，以保持服务器流畅运行。'
+              )}
             </span>
           </div>
         </label>
@@ -212,7 +231,7 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             onClick={onClose}
             className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
           >
-            Đóng
+            {pick('Đóng', 'Close', '关闭')}
           </button>
           <button
             type="button"
@@ -227,12 +246,12 @@ export const ResetServerModal: React.FC<ResetServerModalProps> = ({
             {isProcessing ? (
               <>
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                <span>Đang xử lý dọn dẹp...</span>
+                <span>{pick('Đang xử lý dọn dẹp...', 'Cleaning up...', '正在清理...')}</span>
               </>
             ) : (
               <>
                 <Zap className="w-3.5 h-3.5 fill-current" />
-                <span>Thực hiện Reset Máy Chủ</span>
+                <span>{pick('Thực hiện Reset Máy Chủ', 'Execute Server Reset', '执行服务器重置')}</span>
               </>
             )}
           </button>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChatMessage } from './types';
 import { Flame, X, Clock, ShieldAlert, Trash2 } from 'lucide-react';
 import { playDestructSound } from '../utils/sound';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface SelfDestructViewerModalProps {
   isOpen: boolean;
@@ -16,6 +17,8 @@ export const SelfDestructViewerModal: React.FC<SelfDestructViewerModalProps> = (
   onClose,
   onDestruct
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh?: T) => pickLang(currentLang, vi, en, zh);
   const [remaining, setRemaining] = useState<number>(0);
   const [isDestructing, setIsDestructing] = useState(false);
 
@@ -76,20 +79,20 @@ export const SelfDestructViewerModal: React.FC<SelfDestructViewerModalProps> = (
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">Ảnh bảo mật tự hủy</h3>
+                <h3 className="text-base font-bold text-white">{pick('Ảnh bảo mật tự hủy', 'Self-Destructing Photo', '阅后即焚隐私图片')}</h3>
                 {isTimerMode ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-orange-500/20 border border-orange-500/40 text-orange-300 text-xs font-semibold">
                     <Clock className="w-3 h-3" />
-                    Tự hủy trong {remaining}s
+                    {pick('Tự hủy trong {sec}s', 'Self-destructs in {sec}s', '{sec} 秒后销毁').replace('{sec}', String(remaining))}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-semibold">
-                    Xem 1 lần (View-Once)
+                    {pick('Xem 1 lần (View-Once)', 'View-Once Photo', '仅限查看一次')}
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-400">
-                Gửi bởi: <span className="text-slate-200 font-medium">{message.senderName}</span>
+                {pick('Gửi bởi:', 'Sent by:', '发送者：')} <span className="text-slate-200 font-medium">{message.senderName}</span>
               </p>
             </div>
           </div>
@@ -100,7 +103,7 @@ export const SelfDestructViewerModal: React.FC<SelfDestructViewerModalProps> = (
             onClick={handleTriggerDestruct}
             disabled={isDestructing}
             className="p-2 rounded-xl bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white transition-colors"
-            title="Đóng và tiêu hủy ảnh ngay lập tức"
+            title={pick('Đóng và tiêu hủy ảnh ngay lập tức', 'Close and destroy photo immediately', '关闭并立即销毁图片')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -130,7 +133,7 @@ export const SelfDestructViewerModal: React.FC<SelfDestructViewerModalProps> = (
         <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <ShieldAlert className="w-4 h-4 text-orange-400 shrink-0" />
-            <span>Ảnh sẽ tự động bị xóa vĩnh viễn khỏi phòng chat ngay khi đóng hoặc hết giờ.</span>
+            <span>{pick('Ảnh sẽ tự động bị xóa vĩnh viễn khỏi phòng chat ngay khi đóng hoặc hết giờ.', 'This photo will be permanently deleted from chat as soon as closed or time expires.', '关闭或倒计时结束后，此图片将从聊天室永久销毁。')}</span>
           </div>
 
           <button
@@ -141,7 +144,7 @@ export const SelfDestructViewerModal: React.FC<SelfDestructViewerModalProps> = (
             className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-orange-600 to-rose-600 hover:from-orange-500 hover:to-rose-500 text-white text-xs sm:text-sm font-semibold shadow-lg shadow-orange-600/30 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-50"
           >
             <Trash2 className="w-4 h-4" />
-            <span>{isDestructing ? 'Đang tiêu hủy...' : 'Đã xem - Tiêu hủy ảnh ngay'}</span>
+            <span>{isDestructing ? pick('Đang tiêu hủy...', 'Destroying...', '正在销毁...') : pick('Đã xem - Tiêu hủy ảnh ngay', 'Viewed - Destroy Photo Now', '已查看 - 立即销毁图片')}</span>
           </button>
         </div>
       </div>

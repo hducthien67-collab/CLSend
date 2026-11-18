@@ -12,6 +12,7 @@ import {
   Presentation,
   BookOpen
 } from 'lucide-react';
+import { LanguageCode, useLanguage, pickLang } from '../context/LanguageContext';
 
 export type DocumentTypeInfo = {
   label: string;
@@ -26,7 +27,8 @@ export type DocumentTypeInfo = {
 /**
  * Returns precise metadata, labels, and color theme based on file extension and MIME type.
  */
-export function getDocumentTypeInfo(fileName?: string, mimeType?: string): DocumentTypeInfo {
+export function getDocumentTypeInfo(fileName?: string, mimeType?: string, lang: LanguageCode = 'en'): DocumentTypeInfo {
+  const pick = (vi: string, en: string, zh?: string) => pickLang(lang, vi, en, zh);
   const name = fileName || '';
   const ext = (name.split('.').pop() || '').toLowerCase();
   const mime = (mimeType || '').toLowerCase();
@@ -34,7 +36,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // PDF Document
   if (ext === 'pdf' || mime.includes('pdf')) {
     return {
-      label: 'PDF Document',
+      label: pick('Tài liệu PDF', 'PDF Document', 'PDF 文档'),
       badge: 'PDF',
       color: 'text-rose-400',
       bgLight: 'bg-rose-500/10',
@@ -47,7 +49,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Word Document
   if (['docx', 'doc', 'dot', 'dotx', 'odt', 'rtf'].includes(ext) || mime.includes('word') || mime.includes('officedocument.wordprocessingml')) {
     return {
-      label: 'Word Document',
+      label: pick('Tài liệu Word', 'Word Document', 'Word 文档'),
       badge: 'DOC',
       color: 'text-blue-400',
       bgLight: 'bg-blue-500/10',
@@ -60,7 +62,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Excel / Spreadsheet
   if (['xlsx', 'xls', 'csv', 'ods', 'tsv'].includes(ext) || mime.includes('excel') || mime.includes('spreadsheetml') || mime.includes('csv')) {
     return {
-      label: 'Bảng tính Excel',
+      label: pick('Bảng tính Excel', 'Excel Spreadsheet', 'Excel 电子表格'),
       badge: ext === 'csv' ? 'CSV' : 'XLS',
       color: 'text-emerald-400',
       bgLight: 'bg-emerald-500/10',
@@ -73,7 +75,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // PowerPoint / Presentation
   if (['pptx', 'ppt', 'odp', 'key'].includes(ext) || mime.includes('presentation') || mime.includes('powerpoint')) {
     return {
-      label: 'Bản trình chiếu',
+      label: pick('Bản trình chiếu', 'Presentation', '演示文稿'),
       badge: 'PPT',
       color: 'text-amber-400',
       bgLight: 'bg-amber-500/10',
@@ -86,7 +88,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Plain Text / Markdown / Log / Ebook
   if (['txt', 'md', 'markdown', 'log', 'nfo'].includes(ext) || mime.startsWith('text/plain')) {
     return {
-      label: ext === 'md' ? 'Markdown' : 'Tập tin văn bản',
+      label: ext === 'md' ? 'Markdown' : pick('Tập tin văn bản', 'Text File', '文本文件'),
       badge: ext.toUpperCase() || 'TXT',
       color: 'text-slate-300',
       bgLight: 'bg-slate-700/30',
@@ -99,7 +101,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // E-book formats
   if (['epub', 'mobi', 'azw3', 'djvu'].includes(ext)) {
     return {
-      label: 'Sách điện tử',
+      label: pick('Sách điện tử', 'E-Book', '电子书'),
       badge: ext.toUpperCase(),
       color: 'text-purple-400',
       bgLight: 'bg-purple-500/10',
@@ -112,7 +114,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Code / Source files
   if (['ts', 'tsx', 'js', 'jsx', 'json', 'html', 'css', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'sql', 'sh', 'yaml', 'yml', 'xml'].includes(ext)) {
     return {
-      label: 'Mã nguồn / Lập trình',
+      label: pick('Mã nguồn / Lập trình', 'Source Code', '源代码'),
       badge: ext.toUpperCase(),
       color: 'text-cyan-400',
       bgLight: 'bg-cyan-500/10',
@@ -125,7 +127,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Compressed / Archive
   if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'iso'].includes(ext) || mime.includes('zip') || mime.includes('compressed')) {
     return {
-      label: 'Tệp nén lưu trữ',
+      label: pick('Tệp nén lưu trữ', 'Compressed Archive', '压缩存档'),
       badge: ext.toUpperCase(),
       color: 'text-yellow-400',
       bgLight: 'bg-yellow-500/10',
@@ -138,7 +140,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Audio
   if (mime.startsWith('audio/') || ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'].includes(ext)) {
     return {
-      label: 'Tập tin âm thanh',
+      label: pick('Tập tin âm thanh', 'Audio File', '音频文件'),
       badge: ext.toUpperCase() || 'AUDIO',
       color: 'text-violet-400',
       bgLight: 'bg-violet-500/10',
@@ -151,7 +153,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Video
   if (mime.startsWith('video/') || ['mp4', 'mkv', 'mov', 'avi', 'webm'].includes(ext)) {
     return {
-      label: 'Tập tin Video',
+      label: pick('Tập tin Video', 'Video File', '视频文件'),
       badge: ext.toUpperCase() || 'VIDEO',
       color: 'text-pink-400',
       bgLight: 'bg-pink-500/10',
@@ -164,7 +166,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
   // Images
   if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) {
     return {
-      label: 'Hình ảnh',
+      label: pick('Hình ảnh', 'Image File', '图片文件'),
       badge: ext.toUpperCase() || 'IMG',
       color: 'text-teal-400',
       bgLight: 'bg-teal-500/10',
@@ -176,7 +178,7 @@ export function getDocumentTypeInfo(fileName?: string, mimeType?: string): Docum
 
   // Default fallback
   return {
-    label: ext ? `Tệp ${ext.toUpperCase()}` : 'Tập tin',
+    label: ext ? pick('Tệp {ext}', '{ext} File', '{ext} 文件').replace('{ext}', ext.toUpperCase()) : pick('Tập tin', 'File', '文件'),
     badge: ext ? ext.slice(0, 4).toUpperCase() : 'FILE',
     color: 'text-slate-400',
     bgLight: 'bg-slate-800/40',
@@ -203,7 +205,8 @@ export const FileDocIcon: React.FC<FileDocIconProps> = ({
   className = '',
   size = 'md'
 }) => {
-  const info = getDocumentTypeInfo(fileName, mimeType);
+  const { currentLang } = useLanguage();
+  const info = getDocumentTypeInfo(fileName, mimeType, currentLang);
   const ext = info.ext;
 
   const sizeClasses = {

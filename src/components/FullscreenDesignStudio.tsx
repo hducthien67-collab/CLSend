@@ -32,6 +32,7 @@ import {
   Plus
 } from 'lucide-react';
 import { UserDevice, AppSettings, AppUser } from './types';
+import { useLanguage, pickLang } from '../context/LanguageContext';
 
 interface FullscreenDesignStudioProps {
   isOpen: boolean;
@@ -154,6 +155,64 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
   settings,
   onSaveDesign,
 }) => {
+  const { currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
+
+  const translatedTemplates = React.useMemo(() => DESIGN_TEMPLATES.map((t) => {
+    switch (t.id) {
+      case 'cyberpunk':
+        return {
+          ...t,
+          tag: pick('Tương lai', 'Futuristic', '未来感'),
+          bio: pick('⚡ Kết nối mạng lượng tử tốc độ ánh sáng.', '⚡ Quantum network connection at light speed.', '⚡ 光速量子网络连接。'),
+        };
+      case 'emerald':
+        return {
+          ...t,
+          tag: pick('Quý phái', 'Luxury', '尊贵'),
+          bio: pick('🛡️ Truyền nhận dữ liệu an toàn tuyệt đối.', '🛡️ Ultra-secure data transfer & receiving.', '🛡️ 绝对安全的数据传输与接收。'),
+        };
+      case 'royal_purple':
+        return {
+          ...t,
+          tag: pick('Hoàng gia', 'Royal', '皇家'),
+          bio: pick('👑 Tinh hoa công nghệ truyền tải thế hệ mới.', '👑 Next-generation file transfer technology.', '👑 新一代数据传输技术精华。'),
+        };
+      case 'sunset_gold':
+        return {
+          ...t,
+          tag: pick('Hoàng hôn', 'Sunset', '日落'),
+          bio: pick('🌅 Tốc độ không giới hạn mọi khoảng cách.', '🌅 Unlimited speed across any distance.', '🌅 跨越任何距离的无限速度。'),
+        };
+      case 'sakura':
+        return {
+          ...t,
+          tag: pick('Nhẹ nhàng', 'Gentle', '温柔'),
+          bio: pick('🌸 Tinh tế trong từng gói dữ liệu truyền đi.', '🌸 Refined in every data packet sent.', '🌸 每一份传输的数据都精雕细琢。'),
+        };
+      case 'dark_oled':
+        return {
+          ...t,
+          tag: pick('Huyền bí', 'Stealth', '神秘'),
+          bio: pick('🕶️ Chế độ ẩn danh tốc độ cao trong bóng tối.', '🕶️ High-speed stealth mode in the dark.', '🕶️ 暗夜高速隐身模式。'),
+        };
+      case 'galaxy':
+        return {
+          ...t,
+          tag: pick('Vũ trụ', 'Cosmic', '宇宙'),
+          bio: pick('🌌 Vươn tới các vì sao với CloudSend Relay.', '🌌 Reach for the stars with CloudSend Relay.', '🌌 借助 CloudSend Relay 飞向星辰。'),
+        };
+      case 'golden_prestige':
+        return {
+          ...t,
+          tag: pick('Đẳng cấp', 'Prestige', '尊荣'),
+          bio: pick('💎 Đẳng cấp chất lượng truyền file hàng đầu.', '💎 Top-tier file transfer quality.', '💎 顶级文件传输品质。'),
+        };
+      default:
+        return t;
+    }
+  }), [currentLang]);
+
   // Canvas references
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -162,8 +221,8 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
   // Design state
   const [themeStyle, setThemeStyle] = useState<string>(settings.themeStyle || 'emerald');
   const [avatarColor, setAvatarColor] = useState<string>(settings.avatarColor || '#10B981');
-  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || 'Thành viên CloudSend');
-  const [customBio, setCustomBio] = useState<string>(settings.customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.');
+  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || pick('Thành viên ClSend', 'ClSend Member', 'ClSend 成员'));
+  const [customBio, setCustomBio] = useState<string>(settings.customBio || pick('Sẵn sàng truyền nhận dữ liệu tốc độ cao.', 'Ready for high-speed data transfer.', '随时准备高速收发数据。'));
   const [cardStyle, setCardStyle] = useState<'glass' | 'glow' | 'minimal' | 'solid'>(settings.cardStyle || 'glow');
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | undefined>(settings.customAvatarUrl);
 
@@ -559,14 +618,14 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-sm sm:text-base font-black text-white tracking-tight">
-                Studio Tự Thiết Kế Toàn Màn Hình
+                {pick('Studio Tự Thiết Kế Toàn Màn Hình', 'Fullscreen Design Studio', '全屏自由设计工作室')}
               </h1>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
                 PRO CANVAS
               </span>
             </div>
             <p className="text-xs text-slate-400 hidden sm:block">
-              Vẽ, kéo thả ảnh từ máy tính, đổi avatar và tạo khung thẻ danh tính độc bản
+              {pick('Vẽ, kéo thả ảnh từ máy tính, đổi avatar và tạo khung thẻ danh tính độc bản', 'Draw, drag & drop images, change avatar and craft a unique identity card', '绘画、拖放本地图片、更换头像并打造专属身份卡')}
             </p>
           </div>
         </div>
@@ -578,10 +637,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={() => setShowThemeModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-purple-300 hover:text-white text-xs font-bold border border-purple-500/30 shadow-sm transition-all active:scale-95"
-            title="Xem danh sách chủ đề mẫu có sẵn"
+            title={pick('Xem danh sách chủ đề mẫu có sẵn', 'Browse built-in theme templates', '浏览内置主题模板')}
           >
             <Sparkles className="w-4 h-4 text-purple-400" />
-            <span>Chủ Đề Mẫu</span>
+            <span>{pick('Chủ Đề Mẫu', 'Templates', '主题模板')}</span>
           </button>
 
           {/* NÚT ĐỔI ẢNH ĐẠI DIỆN */}
@@ -589,10 +648,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={() => setShowAvatarModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 hover:text-white text-xs font-bold border border-emerald-500/30 shadow-sm transition-all active:scale-95"
-            title="Thay đổi ảnh đại diện cá nhân"
+            title={pick('Thay đổi ảnh đại diện cá nhân', 'Change personal avatar', '更换个人头像')}
           >
             <Camera className="w-4 h-4 text-emerald-400" />
-            <span>Đổi Avatar</span>
+            <span>{pick('Đổi Avatar', 'Change Avatar', '更换头像')}</span>
           </button>
 
           {/* NÚT TẢI ẢNH VỀ MÁY */}
@@ -600,10 +659,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={handleDownloadPNG}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold border border-slate-700 transition-all active:scale-95"
-            title="Tải ảnh thiết kế về máy (PNG)"
+            title={pick('Tải ảnh thiết kế về máy (PNG)', 'Download design as PNG', '下载设计图 (PNG)')}
           >
             <Download className="w-4 h-4" />
-            <span className="hidden md:inline">Tải PNG</span>
+            <span className="hidden md:inline">{pick('Tải PNG', 'Download PNG', '下载 PNG')}</span>
           </button>
 
           {/* NÚT LƯU & ÁP DỤNG */}
@@ -620,7 +679,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             ) : (
               <Check className="w-4 h-4" />
             )}
-            <span>{saveSuccessNotice ? 'Đã Lưu!' : 'Lưu & Áp Dụng'}</span>
+            <span>{saveSuccessNotice ? pick('Đã Lưu!', 'Saved!', '已保存！') : pick('Lưu & Áp Dụng', 'Save & Apply', '保存并应用')}</span>
           </button>
 
           {/* NÚT THOÁT FULLSCREEN */}
@@ -628,7 +687,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors ml-1"
-            title="Đóng Studio"
+            title={pick('Đóng Studio', 'Close Studio', '关闭工作室')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -644,7 +703,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
         {isDraggingOver && (
           <div className="absolute inset-0 bg-purple-950/80 backdrop-blur-sm z-30 border-4 border-dashed border-purple-400 flex flex-col items-center justify-center gap-3 animate-pulse">
             <Upload className="w-16 h-16 text-purple-300" />
-            <div className="text-xl font-black text-white">Thả ảnh vào đây để chèn lên khung thiết kế</div>
+            <div className="text-xl font-black text-white">{pick('Thả ảnh vào đây để chèn lên khung thiết kế', 'Drop image here to insert onto canvas', '将图片拖放到此处插入画布')}</div>
           </div>
         )}
 
@@ -679,10 +738,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             </div>
             <div className="min-w-0">
               <div className="text-xs font-bold text-white truncate">
-                {currentUser?.displayName || 'Người dùng'}
+                {currentUser?.displayName || pick('Người dùng', 'User', '用户')}
               </div>
               <div className="text-[10px] text-emerald-400 truncate font-mono">
-                {customBadgeText || 'CloudSend'}
+                {customBadgeText || 'ClSend'}
               </div>
             </div>
           </div>
@@ -699,7 +758,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'brush' ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Bút vẽ tự do"
+            title={pick('Bút vẽ tự do', 'Freehand brush', '自由画笔')}
           >
             <Paintbrush className="w-4 h-4" />
           </button>
@@ -711,7 +770,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'glow_brush' ? 'bg-cyan-500 text-slate-950 font-bold shadow-lg shadow-cyan-500/30' : 'text-cyan-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Bút Neon phát sáng"
+            title={pick('Bút Neon phát sáng', 'Glowing Neon Brush', '霓虹发光画笔')}
           >
             <Zap className="w-4 h-4" />
           </button>
@@ -723,7 +782,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'eraser' ? 'bg-rose-600 text-white shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Cục tẩy xóa"
+            title={pick('Cục tẩy xóa', 'Eraser', '橡皮擦')}
           >
             <Eraser className="w-4 h-4" />
           </button>
@@ -737,7 +796,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'text' ? 'bg-amber-500 text-slate-950 font-bold shadow-lg' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Chèn văn bản nghệ thuật"
+            title={pick('Chèn văn bản nghệ thuật', 'Insert artistic text', '插入艺术字')}
           >
             <Type className="w-4 h-4" />
           </button>
@@ -749,7 +808,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'rect' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Vẽ khung chữ nhật"
+            title={pick('Vẽ khung chữ nhật', 'Draw rectangle', '绘制矩形')}
           >
             <Square className="w-4 h-4" />
           </button>
@@ -761,7 +820,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'circle' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Vẽ hình tròn"
+            title={pick('Vẽ hình tròn', 'Draw circle', '绘制圆形')}
           >
             <Circle className="w-4 h-4" />
           </button>
@@ -776,7 +835,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             className={`p-2.5 rounded-xl transition-all ${
               currentTool === 'sticker' ? 'bg-yellow-500 text-slate-950 font-bold' : 'text-yellow-400 hover:text-white hover:bg-slate-800'
             }`}
-            title="Chèn Sticker / Biểu tượng"
+            title={pick('Chèn Sticker / Biểu tượng', 'Insert Sticker / Emoji', '插入贴纸 / 表情')}
           >
             <Smile className="w-4 h-4" />
           </button>
@@ -788,7 +847,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-2.5 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition-colors"
-            title="Tải ảnh từ máy tính chèn vào canvas"
+            title={pick('Tải ảnh từ máy tính chèn vào canvas', 'Upload image from device to canvas', '从设备上传图片到画布')}
           >
             <ImageIcon className="w-4 h-4" />
           </button>
@@ -810,7 +869,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             onClick={handleUndo}
             disabled={historyStep <= 0}
             className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-30 transition-colors"
-            title="Hoàn tác nét vẽ (Undo)"
+            title={pick('Hoàn tác nét vẽ (Undo)', 'Undo', '撤销')}
           >
             <Undo2 className="w-4 h-4" />
           </button>
@@ -820,7 +879,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
             type="button"
             onClick={handleClearCanvas}
             className="p-2.5 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-slate-800 transition-colors"
-            title="Xóa trắng canvas làm lại"
+            title={pick('Xóa trắng canvas làm lại', 'Clear canvas', '清空画布')}
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -857,13 +916,13 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                 setAvatarColor(e.target.value);
               }}
               className="w-6 h-6 rounded-full cursor-pointer bg-transparent border-0"
-              title="Chọn màu bất kỳ"
+              title={pick('Chọn màu bất kỳ', 'Pick custom color', '选择自定义颜色')}
             />
           </div>
 
           {/* Brush Size Slider */}
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] text-slate-400 font-mono">Cỡ: {brushSize}px</span>
+            <span className="text-[11px] text-slate-400 font-mono">{pick('Cỡ:', 'Size:', '大小:')} {brushSize}px</span>
             <input
               type="range"
               min="2"
@@ -881,10 +940,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                 type="text"
                 value={textInputVal}
                 onChange={(e) => setTextInputVal(e.target.value)}
-                placeholder="Nhập chữ/biểu tượng..."
+                placeholder={pick('Nhập chữ/biểu tượng...', 'Enter text/symbol...', '输入文字/表情...')}
                 className="px-2.5 py-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 w-32"
               />
-              <span className="text-[10px] text-purple-400 font-mono">Bấm lên Canvas để dán</span>
+              <span className="text-[10px] text-purple-400 font-mono">{pick('Bấm lên Canvas để dán', 'Click Canvas to stamp', '点击画布粘贴')}</span>
             </div>
           )}
         </div>
@@ -902,8 +961,8 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                   <Sparkles className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">Thư Viện Chủ Đề Mẫu (Theme Templates)</h3>
-                  <p className="text-xs text-slate-400">Chọn một chủ đề thiết kế sẵn để bắt đầu sáng tạo nhanh</p>
+                  <h3 className="text-base font-bold text-white">{pick('Thư Viện Chủ Đề Mẫu (Theme Templates)', 'Theme Templates Gallery', '主题模板库')}</h3>
+                  <p className="text-xs text-slate-400">{pick('Chọn một chủ đề thiết kế sẵn để bắt đầu sáng tạo nhanh', 'Pick a preset design theme to start creating quickly', '选择一个预设主题快速开始创作')}</p>
                 </div>
               </div>
               <button
@@ -917,7 +976,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
 
             {/* Template Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 max-h-[60vh] overflow-y-auto pr-1">
-              {DESIGN_TEMPLATES.map((tmpl) => (
+              {translatedTemplates.map((tmpl) => (
                 <button
                   key={tmpl.id}
                   type="button"
@@ -955,8 +1014,8 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                   <Camera className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">Thay Đổi Ảnh Đại Diện</h3>
-                  <p className="text-xs text-slate-400">Tải ảnh đại diện từ máy tính hoặc chọn màu sắc</p>
+                  <h3 className="text-base font-bold text-white">{pick('Thay Đổi Ảnh Đại Diện', 'Change Avatar', '更换头像')}</h3>
+                  <p className="text-xs text-slate-400">{pick('Tải ảnh đại diện từ máy tính hoặc chọn màu sắc', 'Upload an avatar from your computer or pick a color', '从电脑上传头像或选择颜色')}</p>
                 </div>
               </div>
               <button
@@ -981,10 +1040,10 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                   (currentUser?.displayName || 'U')[0].toUpperCase()
                 )}
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-bold">
-                  Đổi ảnh
+                  {pick('Đổi ảnh', 'Change', '更换')}
                 </div>
               </div>
-              <p className="text-xs text-slate-400 text-center">Bấm vào ảnh đại diện hoặc nút bên dưới để chọn ảnh từ máy</p>
+              <p className="text-xs text-slate-400 text-center">{pick('Bấm vào ảnh đại diện hoặc nút bên dưới để chọn ảnh từ máy', 'Click the avatar or the button below to choose an image', '点击头像或下方按钮从设备选择图片')}</p>
             </div>
 
             <div className="space-y-2.5">
@@ -994,7 +1053,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                 className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
               >
                 <Upload className="w-4 h-4" />
-                <span>Tải ảnh từ máy tính</span>
+                <span>{pick('Tải ảnh từ máy tính', 'Upload from device', '从设备上传图片')}</span>
               </button>
 
               {currentUser?.photoURL && (
@@ -1009,7 +1068,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                   className="w-full py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition-all active:scale-95"
                 >
                   <Camera className="w-4 h-4" />
-                  <span>Dùng Ảnh Đại Diện Google</span>
+                  <span>{pick('Dùng Ảnh Đại Diện Google', 'Use Google Avatar', '使用 Google 头像')}</span>
                 </button>
               )}
 
@@ -1027,7 +1086,7 @@ export const FullscreenDesignStudio: React.FC<FullscreenDesignStudioProps> = ({
                   onClick={() => setCustomAvatarUrl(undefined)}
                   className="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-semibold transition-colors"
                 >
-                  Xóa ảnh đại diện tùy chỉnh (Dùng chữ cái mặc định)
+                  {pick('Xóa ảnh đại diện tùy chỉnh (Dùng chữ cái mặc định)', 'Remove custom avatar (Use default initials)', '移除自定义头像（使用默认字母）')}
                 </button>
               )}
             </div>

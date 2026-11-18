@@ -124,6 +124,11 @@ export const VI_DICT: Record<string, string> = {
   'drive.copy_link': 'Sao chép link',
   'drive.mobile_header': 'Kho Cloud Cá Nhân',
   'drive.mobile_sub': 'Đồng bộ không giới hạn thiết bị',
+  'drive.rename': 'Đổi tên',
+  'drive.reupload': 'Tải lại lên',
+  'drive.download_btn': 'Tải xuống',
+  'drive.preview': 'Xem trước',
+  'drive.delete_btn': 'Xóa tệp',
 
   // ChatRoom Creation & View
   'chat.title': 'Phòng Trò Chuyện Trực Tuyến',
@@ -204,6 +209,8 @@ export const VI_DICT: Record<string, string> = {
   'settings.tab_device': 'Thiết Bị & Mạng',
   'settings.tab_design': 'Hồ Sơ & Giao Diện',
   'settings.tab_account': 'Tài Khoản & Bảo Mật',
+  'settings.tab_appearance': 'Giao diện',
+  'settings.tab_security': 'Bảo mật',
   'settings.device_id': 'Định danh thiết bị',
   'settings.random_name': 'Tên ngẫu nhiên',
   'settings.device_name_label': 'Tên thiết bị hiển thị trong mạng',
@@ -460,6 +467,7 @@ export const VI_DICT: Record<string, string> = {
   'player.video_not_ready': 'Video chưa sẵn sàng để phát trực tuyến.',
   'player.stream_failed': 'Không thể tải luồng video trực tiếp.',
   'player.click_to_play': 'Bấm để phát video',
+  'player.loading_video': 'Đang tải video...',
 
   // Image Viewer Modal
   'viewer.default_name': 'Hình ảnh',
@@ -485,6 +493,7 @@ export const VI_DICT: Record<string, string> = {
   'perf.history_title': 'Lịch sử click (Lưu vĩnh viễn):',
   'perf.clear': 'Xóa',
   'perf.empty': 'Chưa có lượt click nào',
+  'common.loading': 'Đang tải...',
 };
 
 export const EN_DICT: Record<string, string> = {
@@ -613,6 +622,11 @@ export const EN_DICT: Record<string, string> = {
   'drive.copy_link': 'Copy link',
   'drive.mobile_header': 'Personal Cloud Storage',
   'drive.mobile_sub': 'Unlimited sync across all devices',
+  'drive.rename': 'Rename',
+  'drive.reupload': 'Re-upload',
+  'drive.download_btn': 'Download',
+  'drive.preview': 'Preview',
+  'drive.delete_btn': 'Delete file',
 
   // ChatRoom Creation & View
   'chat.title': 'Online Chat Room',
@@ -693,6 +707,8 @@ export const EN_DICT: Record<string, string> = {
   'settings.tab_device': 'Devices & Network',
   'settings.tab_design': 'Design Studio',
   'settings.tab_account': 'Account & Sessions',
+  'settings.tab_appearance': 'Appearance',
+  'settings.tab_security': 'Security',
   'settings.device_id': 'Device Identification',
   'settings.random_name': 'Random Name',
   'settings.device_name_label': 'Device Display Name in Network',
@@ -949,6 +965,7 @@ export const EN_DICT: Record<string, string> = {
   'player.video_not_ready': 'Video is not ready for streaming yet.',
   'player.stream_failed': 'Could not load video stream.',
   'player.click_to_play': 'Click to play video',
+  'player.loading_video': 'Loading video...',
 
   // Image Viewer Modal
   'viewer.default_name': 'Image',
@@ -974,6 +991,7 @@ export const EN_DICT: Record<string, string> = {
   'perf.history_title': 'Click history (Saved):',
   'perf.clear': 'Clear',
   'perf.empty': 'No clicks recorded yet',
+  'common.loading': 'Loading...',
 };
 
 export const ZH_CN_DICT: Record<string, string> = {
@@ -1102,6 +1120,11 @@ export const ZH_CN_DICT: Record<string, string> = {
   'drive.copy_link': '复制链接',
   'drive.mobile_header': '个人云盘空间',
   'drive.mobile_sub': '多设备无限同步',
+  'drive.rename': '重命名',
+  'drive.reupload': '重新上传',
+  'drive.download_btn': '下载',
+  'drive.preview': '预览',
+  'drive.delete_btn': '删除文件',
 
   // ChatRoom Creation & View
   'chat.title': '在线聊天室',
@@ -1182,6 +1205,8 @@ export const ZH_CN_DICT: Record<string, string> = {
   'settings.tab_device': '设备与网络',
   'settings.tab_design': '个人资料与外观',
   'settings.tab_account': '账号与安全',
+  'settings.tab_appearance': '外观',
+  'settings.tab_security': '安全',
   'settings.device_id': '设备标识',
   'settings.random_name': '随机名称',
   'settings.device_name_label': '网络中显示的设备名称',
@@ -1438,6 +1463,7 @@ export const ZH_CN_DICT: Record<string, string> = {
   'player.video_not_ready': '视频尚未准备好在线播放。',
   'player.stream_failed': '无法加载视频流。',
   'player.click_to_play': '点击播放视频',
+  'player.loading_video': '正在加载视频...',
 
   // Image Viewer Modal
   'viewer.default_name': '图片',
@@ -1463,4 +1489,5 @@ export const ZH_CN_DICT: Record<string, string> = {
   'perf.history_title': '点击记录（持久保存）：',
   'perf.clear': '清空',
   'perf.empty': '暂无点击记录',
+  'common.loading': '正在加载...',
 };

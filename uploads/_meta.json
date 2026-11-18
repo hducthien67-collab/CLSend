@@ -123,5 +123,26 @@
     "mimeType": "application/octet-stream",
     "createdAt": "2026-11-07T14:42:21.132Z",
     "isHeic": false
+  },
+  "1794838723649_wv7ee7f.bin": {
+    "originalName": "test_file.bin",
+    "size": 10030,
+    "mimeType": "application/octet-stream",
+    "createdAt": "2026-11-16T14:18:43.665Z",
+    "isHeic": false
+  },
+  "1794838723889_svx2q0t.mp4": {
+    "originalName": "chunk_test.mp4",
+    "size": 3145728,
+    "mimeType": "video/mp4",
+    "createdAt": "2026-11-16T14:18:43.936Z",
+    "isHeic": false
+  },
+  "1794920740316_3ynke5m.bin": {
+    "originalName": "smoke_test.bin",
+    "size": 34,
+    "mimeType": "application/octet-stream",
+    "createdAt": "2026-11-17T13:05:40.320Z",
+    "isHeic": false
   }
 }

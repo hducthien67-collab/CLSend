@@ -32,12 +32,13 @@ import { downloadFileSafely } from '../../utils/fileDownload';
 import { formatFileSize } from '../../utils/device';
 import { FileDocIcon } from '../FileDocIcon';
 import { renderClickableText } from '../../utils/textFormat';
-import { useLanguage } from '../../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../../context/LanguageContext';
 import { openMediaInLargeViewer } from '../../utils/mediaViewerSession';
 
 export const MobileReceiveView: React.FC = () => {
   const { currentUser, settings, updateSettings } = useAuth();
-  const { t } = useLanguage();
+  const { t, currentLang } = useLanguage();
+  const pick = (vi: string, en: string, zh?: string) => pickLang(currentLang, vi, en, zh);
   const [transfers, setTransfers] = useState<DirectTransfer[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -65,6 +66,8 @@ export const MobileReceiveView: React.FC = () => {
       });
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setTransfers(list);
+    }, (err) => {
+      console.warn('MobileReceiveView transfers listener notice:', err);
     });
 
     return () => unsubscribe();
@@ -78,13 +81,13 @@ export const MobileReceiveView: React.FC = () => {
       await updateDoc(doc(db, 'transfers', transfer.id), { status: 'completed' });
     } catch {}
 
-    downloadFileSafely(source, transfer.fileName);
+    downloadFileSafely(source, transfer.fileName, undefined, [transfer.id]);
   };
 
   const handleCopyText = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
-    showToast('Đã sao chép nội dung văn bản!');
+    showToast(pick('Đã sao chép nội dung văn bản!', 'Copied text content!', '已复制文本内容！'));
     setTimeout(() => setCopiedId(null), 2500);
 
     try {
@@ -95,9 +98,9 @@ export const MobileReceiveView: React.FC = () => {
   const handleDeleteTransfer = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'transfers', id));
-      showToast('Đã xóa mục khỏi danh sách');
+      showToast(pick('Đã xóa mục khỏi danh sách', 'Removed item from list', '已从列表中删除'));
     } catch {
-      showToast('Không thể xóa mục');
+      showToast(pick('Không thể xóa mục', 'Unable to delete item', '无法删除此项'));
     }
   };
 
@@ -105,9 +108,9 @@ export const MobileReceiveView: React.FC = () => {
     try {
       const promises = transfers.map((t) => deleteDoc(doc(db, 'transfers', t.id)));
       await Promise.all(promises);
-      showToast('Đã xóa toàn bộ lịch sử nhận');
+      showToast(pick('Đã xóa toàn bộ lịch sử nhận', 'Cleared all receive history', '已清空接收记录'));
     } catch {
-      showToast('Không thể xóa lịch sử');
+      showToast(pick('Không thể xóa lịch sử', 'Unable to clear history', '无法清空记录'));
     }
   };
 
@@ -180,14 +183,14 @@ export const MobileReceiveView: React.FC = () => {
                     <div className="min-w-0">
                       <h4 className="text-[11px] font-bold text-white truncate">{item.senderName}</h4>
                       <p className="text-[9px] text-slate-400 truncate">
-                        Từ: {item.senderDevice || 'Thiết bị'}
+                        {pick('Từ:', 'From:', '来自：')} {item.senderDevice || pick('Thiết bị', 'Device', '设备')}
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-1.5">
                     <span className="text-[9px] text-slate-500">
-                      {new Date(item.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(item.createdAt).toLocaleTimeString(getLocaleTag(currentLang), { hour: '2-digit', minute: '2-digit' })}
                     </span>
                     <button
                       type="button"
@@ -238,8 +241,8 @@ export const MobileReceiveView: React.FC = () => {
                           source: 'cloud',
                           activeItem: {
                             id: item.id,
-                            name: item.fileName || (isVid ? 'Video' : 'Hình ảnh'),
-                            title: item.fileName || (isVid ? 'Video' : 'Hình ảnh'),
+                            name: item.fileName || (isVid ? t('player.video_label') : t('player.image_label')),
+                            title: item.fileName || (isVid ? t('player.video_label') : t('player.image_label')),
                             src: mediaSrc,
                             thumbnail: item.fileData?.startsWith('data:image') ? item.fileData : null,
                             size: item.fileSize,
@@ -287,10 +290,10 @@ export const MobileReceiveView: React.FC = () => {
                                   type="button"
                                   onClick={openReceivedMedia}
                                   className="py-1 px-2.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 font-semibold text-[11px] flex items-center justify-center gap-1 active:scale-95 transition-all"
-                                  title={isVid ? 'Xem video' : 'Xem ảnh'}
+                                  title={isVid ? pick('Xem video', 'Watch video', '观看视频') : pick('Xem ảnh', 'View image', '查看图片')}
                                 >
                                   <Eye className="w-3.5 h-3.5" />
-                                  <span>{isVid ? 'Xem' : 'Xem'}</span>
+                                  <span>{pick('Xem', 'View', '查看')}</span>
                                 </button>
                               )}
 
@@ -343,7 +346,7 @@ export const MobileReceiveView: React.FC = () => {
             onClick={() => setPreviewImage(null)}
             className="absolute top-4 right-4 p-2 rounded-full bg-slate-800/80 text-white font-bold"
           >
-            Đóng ✕
+            {pick('Đóng', 'Close', '关闭')} ✕
           </button>
         </div>
       )}

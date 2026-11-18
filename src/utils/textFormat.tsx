@@ -1,5 +1,6 @@
 import React from 'react';
 import { ExternalLink, Globe } from 'lucide-react';
+import { pickActiveLang } from '../context/LanguageContext';
 
 /**
  * Biểu thức chính quy phát hiện liên kết URL thông minh:
@@ -262,7 +263,7 @@ export const renderClickableText = (
           e.stopPropagation();
         }}
         className={customLinkClass || defaultLinkClass}
-        title={`Mở liên kết: ${cleanLink}`}
+        title={pickActiveLang('Mở liên kết: {url}', 'Open link: {url}', '打开链接：{url}').replace('{url}', cleanLink)}
       >
         <span className="break-all">{rawMatch}</span>
         <ExternalLink className="w-3 h-3 shrink-0 opacity-80" />

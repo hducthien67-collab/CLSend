@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useLanguage, pickLang } from '../../context/LanguageContext';
 import { CloudSendLogo } from '../CloudSendLogo';
 import { Settings, Copy, Check, Monitor, Smartphone, ShieldCheck, Sparkles, Crown } from 'lucide-react';
 import { PresenceDevice } from '../../types';
 import { isDevUser } from '../../utils/devModeration';
+import { useLogoDevUnlock } from '../../utils/localDevMode';
 
 interface MobileHeaderProps {
   onOpenSettings: () => void;
@@ -19,8 +21,11 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
   onOpenInstall
 }) => {
   const { currentUser, userProfile, settings } = useAuth();
+  const { currentLang, t } = useLanguage();
+  const pick = <T,>(vi: T, en: T, zh?: T) => pickLang(currentLang, vi, en, zh);
   const [copiedCode, setCopiedCode] = useState(false);
   const isDev = isDevUser(currentUser?.email);
+  const handleLogoTap = useLogoDevUnlock(isDev);
 
   const connectCode = userProfile?.uid
     ? userProfile.uid.substring(0, 6).toUpperCase()
@@ -32,7 +37,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const displayName = userProfile?.displayName || currentUser?.displayName || settings?.deviceName || 'Thiết bị di động';
+  const displayName = userProfile?.displayName || currentUser?.displayName || settings?.deviceName || t('mobile_send.device_mobile');
   const avatarColor = userProfile?.avatarColor || settings?.avatarColor || 'emerald';
   const customAvatarUrl = userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL;
 
@@ -52,7 +57,10 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
       <div className="max-w-lg mx-auto w-full flex items-center justify-between gap-1.5">
         {/* Brand & Live Online Indicator / DEV Badge */}
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="flex items-center gap-1">
+          <div
+            onClick={handleLogoTap}
+            className="flex items-center gap-1 cursor-pointer select-none active:scale-95 transition-transform"
+          >
             <CloudSendLogo className="w-4 h-4" />
             <span className="font-black text-xs tracking-tight bg-gradient-to-r from-emerald-400 via-teal-300 to-sky-400 bg-clip-text text-transparent">
               ClSend
@@ -63,7 +71,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
               type="button"
               onClick={onOpenDevPage || onOpenSettings}
               className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/35 border border-amber-500/50 text-[8.5px] font-bold text-amber-300 shadow-sm active:scale-95 transition-all cursor-pointer"
-              title="Nhấn để mở Quản trị DEV DataStore trực tiếp trên điện thoại"
+              title={pick('Nhấn để mở Quản trị DEV DataStore trực tiếp trên điện thoại', 'Tap to open DEV DataStore console directly on mobile', '点击直接打开 DEV DataStore 管理后台')}
             >
               <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
               <span>DEV</span>
@@ -71,7 +79,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
           ) : (
             <div className="flex items-center gap-0.5 px-1.5 py-0.2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[8px] font-semibold text-emerald-400">
               <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Mobile</span>
+              <span>{t('mobile_send.device_type_mobile')}</span>
             </div>
           )}
         </div>
@@ -84,10 +92,10 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
               type="button"
               onClick={onOpenInstall}
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/30 border border-emerald-500/40 text-[9px] font-bold text-emerald-300 transition-all active:scale-95 shadow-sm cursor-pointer"
-              title="Cài đặt ClSend về màn hình chính điện thoại (1-Chạm)"
+              title={pick('Cài đặt ClSend về màn hình chính điện thoại (1-Chạm)', 'Install ClSend to your phone home screen (1-Tap)', '一键将 ClSend 安装到手机主屏幕')}
             >
               <Smartphone className="w-2.5 h-2.5 text-emerald-400" />
-              <span>Tải App</span>
+              <span>{pick('Tải App', 'Get App', '下载应用')}</span>
             </button>
           )}
 
@@ -96,9 +104,9 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
             type="button"
             onClick={handleCopyCode}
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/80 text-[9px] text-slate-300 font-mono transition-all active:scale-95 shadow-sm"
-            title="Bấm để sao chép mã kết nối nhanh"
+            title={pick('Bấm để sao chép mã kết nối nhanh', 'Tap to copy quick connect code', '点击复制快速连接码')}
           >
-            <span className="text-slate-400 font-sans text-[8.5px]">Mã:</span>
+            <span className="text-slate-400 font-sans text-[8.5px]">{pick('Mã:', 'Code:', '代码：')}</span>
             <span className="font-bold text-white tracking-wider">{connectCode}</span>
             {copiedCode ? (
               <Check className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
@@ -112,7 +120,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
             type="button"
             onClick={onOpenSettings}
             className={`relative flex items-center justify-center w-6 h-6 rounded-full ${isDev ? 'border border-amber-400 shadow-sm shadow-amber-500/20' : 'border border-slate-700'} overflow-hidden active:scale-95 transition-transform shrink-0`}
-            title={isDev ? "Hồ sơ DEV chính chủ & Cài đặt" : "Mở Cài đặt & Hồ sơ"}
+            title={isDev ? pick('Hồ sơ DEV chính chủ & Cài đặt', 'Verified DEV Profile & Settings', '认证 DEV 资料与设置') : pick('Mở Cài đặt & Hồ sơ', 'Open Settings & Profile', '打开设置与资料')}
           >
             {customAvatarUrl ? (
               <img src={customAvatarUrl} alt={displayName} className="w-full h-full object-cover" />

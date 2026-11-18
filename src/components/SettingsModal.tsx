@@ -32,7 +32,8 @@ import {
   HardDrive,
   Bell,
   Phone,
-  Globe
+  Globe,
+  Code2
 } from 'lucide-react';
 import { LoginSession } from './types';
 import { AVATAR_COLORS, getDeviceTypeInfo, generateDefaultDeviceName } from '../utils/device';
@@ -41,6 +42,8 @@ import { triggerIncomingChatMessageNotification } from '../utils/tabNotification
 import { getPwaStorageEstimate, cleanAllPwaCachesAndBloat, StorageEstimateInfo } from '../utils/pwaStorageCleaner';
 
 import { isDevUser } from '../utils/devModeration';
+import { useLocalDevMode } from '../utils/localDevMode';
+import { DeveloperModePanel } from './DeveloperModePanel';
 import { MobileSettingsView } from './mobile/MobileSettingsView';
 
 interface SettingsModalProps {
@@ -53,7 +56,7 @@ interface SettingsModalProps {
   forceMobileLayout?: boolean;
 }
 
-type SettingsTab = 'account' | 'appearance' | 'notifications';
+type SettingsTab = 'account' | 'appearance' | 'notifications' | 'developer';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ 
   isOpen, 
@@ -98,6 +101,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   
   // Tab Management
   const [activeTab, setActiveTab] = useState<SettingsTab>('account');
+  const isDev = isDevUser(currentUser?.email);
+  const { canAccessDevTab } = useLocalDevMode(isDev);
+
+  useEffect(() => {
+    if (activeTab === 'developer' && !canAccessDevTab) {
+      setActiveTab('account');
+    }
+  }, [activeTab, canAccessDevTab]);
 
   // Device & Preference Form States
   const [deviceName, setDeviceName] = useState(settings.deviceName);
@@ -106,8 +117,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   
   // Profile & Appearance Form States
   const [avatarColor, setAvatarColor] = useState(settings.avatarColor);
-  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || 'Thành viên ClSend');
-  const [customBio, setCustomBio] = useState<string>(settings.customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.');
+  const [customBadgeText, setCustomBadgeText] = useState<string>(settings.customBadgeText || pick('Thành viên ClSend', 'ClSend Member', 'ClSend 成员'));
+  const [customBio, setCustomBio] = useState<string>(settings.customBio || pick('Sẵn sàng truyền nhận dữ liệu tốc độ cao.', 'Ready for high-speed file transfer.', '随时准备高速收发文件。'));
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | undefined>(settings.customAvatarUrl);
   const [customBannerUrl, setCustomBannerUrl] = useState<string | undefined>(settings.bannerUrl);
   const [isDraggingAvatarFile, setIsDraggingAvatarFile] = useState(false);
@@ -197,8 +208,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setAvatarColor(settings.avatarColor);
       setAutoAccept(settings.autoAccept);
       setSoundEnabled(settings.soundEnabled);
-      setCustomBadgeText(settings.customBadgeText || 'Thành viên ClSend');
-      setCustomBio(settings.customBio || 'Sẵn sàng truyền nhận dữ liệu tốc độ cao.');
+      setCustomBadgeText(settings.customBadgeText || pick('Thành viên ClSend', 'ClSend Member', 'ClSend 成员'));
+      setCustomBio(settings.customBio || pick('Sẵn sàng truyền nhận dữ liệu tốc độ cao.', 'Ready for high-speed file transfer.', '随时准备高速收发文件。'));
       setCustomAvatarUrl(settings.customAvatarUrl);
       setCustomBannerUrl(settings.bannerUrl);
       setEditDisplayName(currentUser?.displayName || userProfile?.displayName || '');
@@ -305,7 +316,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)');
+      setDisplayNameError(pick('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)', 'Please select a valid image file (PNG, JPG, WebP...)', '请选择有效的图片文件（PNG、JPG、WebP 等）'));
       return;
     }
     const result = await compressProfileImage(file, 256, 0.85);
@@ -320,7 +331,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith('image/')) {
-      alert('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)');
+      setDisplayNameError(pick('Vui lòng chọn tệp hình ảnh hợp lệ (PNG, JPG, WebP...)', 'Please select a valid image file (PNG, JPG, WebP...)', '请选择有效的图片文件（PNG、JPG、WebP 等）'));
       return;
     }
     const result = await compressProfileImage(file, 800, 0.82);
@@ -338,7 +349,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const { freedMb } = await cleanAllPwaCachesAndBloat();
       const updated = await getPwaStorageEstimate();
       setStorageInfo(updated);
-      setStorageCleanSuccess(`Đã giải phóng ${freedMb > 0 ? freedMb + ' MB' : 'toàn bộ'} bộ nhớ đệm.`);
+      setStorageCleanSuccess(
+        pick('Đã giải phóng {size} bộ nhớ đệm.', 'Freed {size} of cache storage.', '已释放 {size} 缓存空间。').replace(
+          '{size}',
+          freedMb > 0 ? `${freedMb} MB` : pick('toàn bộ', 'all', '全部')
+        )
+      );
       setTimeout(() => setStorageCleanSuccess(null), 3500);
     } catch (e: any) {
       console.warn('Storage clean error:', e);
@@ -407,28 +423,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setPasswordSuccess(null);
 
     if (!currentPassword) {
-      setPasswordError('Vui lòng nhập mật khẩu hiện tại.');
+      setPasswordError(pick('Vui lòng nhập mật khẩu hiện tại.', 'Please enter your current password.', '请输入当前密码。'));
       return;
     }
     if (!newPassword || newPassword.length < 6) {
-      setPasswordError('Mật khẩu mới phải có ít nhất 6 ký tự.');
+      setPasswordError(pick('Mật khẩu mới phải có ít nhất 6 ký tự.', 'New password must be at least 6 characters.', '新密码至少需要 6 个字符。'));
       return;
     }
     if (newPassword !== confirmNewPassword) {
-      setPasswordError('Mật khẩu xác nhận mới không khớp.');
+      setPasswordError(pick('Mật khẩu xác nhận mới không khớp.', 'New confirm password does not match.', '两次输入的新密码不一致。'));
       return;
     }
 
     setIsUpdatingPassword(true);
     try {
       await changePassword(currentPassword, newPassword);
-      setPasswordSuccess('Đổi mật khẩu tài khoản thành công!');
+      setPasswordSuccess(pick('Đổi mật khẩu tài khoản thành công!', 'Password updated successfully!', '账号密码修改成功！'));
       setCurrentPassword('');
       setNewPassword('');
       setConfirmNewPassword('');
       setTimeout(() => setPasswordSuccess(null), 3000);
     } catch (err: any) {
-      setPasswordError(err?.message || 'Không thể đổi mật khẩu. Vui lòng kiểm tra lại mật khẩu cũ.');
+      setPasswordError(err?.message || pick('Không thể đổi mật khẩu. Vui lòng kiểm tra lại mật khẩu cũ.', 'Failed to update password. Please verify your current password.', '无法修改密码，请检查当前密码是否正确。'));
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -482,7 +498,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const saved = await linkPhoneNumber(phoneInput);
       setPhoneInput(saved);
-      setPhoneLinkSuccess(pick(`Đã liên kết SĐT ${saved} thành công!`, `Linked phone ${saved} successfully!`, `已成功绑定手机号 ${saved}！`));
+      setPhoneLinkSuccess(pick('Đã liên kết SĐT {val} thành công!', 'Linked phone {val} successfully!', '已成功绑定手机号 {val}！').replace('{val}', saved));
       setTimeout(() => setPhoneLinkSuccess(null), 4000);
     } catch (err: any) {
       setPhoneLinkError(err?.message || pick('Không thể liên kết số điện thoại.', 'Unable to link phone number.', '无法绑定手机号。'));
@@ -498,7 +514,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsLinkingEmailDirect(true);
     try {
       await linkEmail(linkEmailInput);
-      setLinkEmailSuccess(pick(`Đã liên kết Email ${linkEmailInput.trim().toLowerCase()} thành công!`, `Linked Email ${linkEmailInput.trim().toLowerCase()} successfully!`, `已成功绑定邮箱 ${linkEmailInput.trim().toLowerCase()}！`));
+      setLinkEmailSuccess(pick('Đã liên kết Email {val} thành công!', 'Linked Email {val} successfully!', '已成功绑定邮箱 {val}！').replace('{val}', linkEmailInput.trim().toLowerCase()));
       setTimeout(() => setLinkEmailSuccess(null), 4000);
     } catch (err: any) {
       setLinkEmailError(err?.message || pick('Không thể liên kết Email.', 'Unable to link email.', '无法绑定邮箱。'));
@@ -515,7 +531,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const res = await linkWithGoogleAccount();
       if (res?.email) {
         setLinkEmailInput(res.email);
-        setLinkEmailSuccess(pick(`Đã đồng bộ Google (${res.email}) thành công!`, `Synced Google (${res.email}) successfully!`, `已成功同步 Google (${res.email})！`));
+        setLinkEmailSuccess(pick('Đã đồng bộ Google ({val}) thành công!', 'Synced Google ({val}) successfully!', '已成功同步 Google ({val})！').replace('{val}', res.email));
         setTimeout(() => setLinkEmailSuccess(null), 4000);
       }
     } catch (err: any) {
@@ -555,7 +571,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     );
   }
 
-  const displayName = currentUser?.displayName || userProfile?.displayName || 'Đức Thiện';
+  const displayName = currentUser?.displayName || userProfile?.displayName || pick('Người dùng ClSend', 'ClSend User', 'ClSend 用户');
   const displayUsername = rawUsername || 'hducthien';
   const displayAvatar = customAvatarUrl || currentUser?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(displayName)}`;
 
@@ -610,7 +626,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <User className="w-4 h-4" />
-                <span>Tài khoản & Thiết bị</span>
+                <span>{t('settings.tab_account')}</span>
               </button>
 
               <button
@@ -623,7 +639,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Palette className="w-4 h-4" />
-                <span>Hồ sơ & Giao diện</span>
+                <span>{t('settings.tab_appearance')}</span>
               </button>
 
               <button
@@ -636,8 +652,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }`}
               >
                 <Bell className="w-4 h-4" />
-                <span>Thông báo & Bảo mật</span>
+                <span>{t('settings.tab_security')}</span>
               </button>
+
+              {canAccessDevTab && (
+                <button
+                  id="settings-tab-developer"
+                  type="button"
+                  onClick={() => setActiveTab('developer')}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-3 rounded-xl text-xs font-medium transition-colors text-left cursor-pointer ${
+                    activeTab === 'developer'
+                      ? 'bg-emerald-600 text-white shadow-sm font-bold'
+                      : 'text-emerald-300/90 hover:bg-emerald-500/15 hover:text-emerald-200 border border-emerald-500/25'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Code2 className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{pick('Chế độ Nhà phát triển', 'Developer Mode', '开发者模式')}</span>
+                  </div>
+                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded shrink-0 ${
+                    activeTab === 'developer' ? 'bg-black/25 text-white' : 'bg-emerald-500/15 text-emerald-300'
+                  }`}>
+                    {isDev ? 'DEV' : 'LOCAL'}
+                  </span>
+                </button>
+              )}
             </nav>
           </div>
 
@@ -670,22 +709,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <User className="w-4 h-4 text-emerald-400" />
-                  <span>Cài đặt Tài khoản & Thiết bị</span>
+                  <span>{pick('Cài đặt Tài khoản & Thiết bị', 'Account & Device Settings', '账号与设备设置')}</span>
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">Quản lý tên thiết bị, mã ghép nối và tùy chọn truyền tệp.</p>
+                <p className="text-xs text-slate-400 mt-0.5">{pick('Quản lý tên thiết bị, mã ghép nối và tùy chọn truyền tệp.', 'Manage device name, pairing code and transfer preferences.', '管理设备名称、配对码与传输偏好设置。')}</p>
               </div>
 
               {/* Tên Thiết Bị */}
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-white">Tên thiết bị trong mạng</label>
+                  <label className="text-xs font-bold text-white">{t('settings.device_name_label')}</label>
                   <button
                     type="button"
                     onClick={handleRandomizeDeviceName}
                     className="text-[11px] text-slate-400 hover:text-emerald-400 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800"
                   >
                     <Shuffle className="w-3 h-3" />
-                    <span>Tên ngẫu nhiên</span>
+                    <span>{pick('Tên ngẫu nhiên', 'Random name', '随机名称')}</span>
                   </button>
                 </div>
                 <input
@@ -714,7 +753,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 <div className="bg-slate-950/60 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between">
                   <div>
-                    <div className="text-[10px] text-slate-400 font-medium">Mã Ghép Nối PIN</div>
+                    <div className="text-[10px] text-slate-400 font-medium">{pick('Mã Ghép Nối PIN', 'Pairing PIN Code', '配对 PIN 码')}</div>
                     <div className="text-xs font-mono font-black text-emerald-400 tracking-wider mt-0.5">#{pairingCode}</div>
                   </div>
                   <button
@@ -723,7 +762,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-center gap-1.5"
                   >
                     {copiedPairingCode ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>Chép</span>
+                    <span>{copiedPairingCode ? pick('Đã chép', 'Copied', '已复制') : pick('Chép', 'Copy', '复制')}</span>
                   </button>
                 </div>
               </div>
@@ -732,8 +771,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3.5">
                 <label className="flex items-center justify-between cursor-pointer">
                   <div>
-                    <div className="text-xs font-semibold text-white">Tự động chấp nhận nhận tệp</div>
-                    <div className="text-[10px] text-slate-400">Lưu trực tiếp tệp gửi tới mà không cần bấm thủ công</div>
+                    <div className="text-xs font-semibold text-white">{t('settings.auto_accept_title')}</div>
+                    <div className="text-[10px] text-slate-400">{t('settings.auto_accept_desc')}</div>
                   </div>
                   <input
                     type="checkbox"
@@ -747,9 +786,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div>
                     <div className="text-xs font-semibold text-white flex items-center gap-1.5">
                       {soundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-500" />}
-                      <span>Âm thanh thông báo</span>
+                      <span>{t('settings.sound_title')}</span>
                     </div>
-                    <div className="text-[10px] text-slate-400">Phát âm chuông khi có tin nhắn hoặc tệp đến</div>
+                    <div className="text-[10px] text-slate-400">{t('settings.sound_desc')}</div>
                   </div>
                   <div className="flex items-center gap-2.5">
                     <button
@@ -757,7 +796,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={() => playReceiveSound()}
                       className="px-3 py-1 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
                     >
-                      Thử chuông
+                      {pick('Thử chuông', 'Test sound', '试听')}
                     </button>
                     <input
                       type="checkbox"
@@ -776,8 +815,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <HardDrive className="w-4 h-4" />
                   </div>
                   <div>
-                    <div className="text-xs font-bold text-white">Bộ nhớ đệm PWA ({storageInfo ? `${storageInfo.usageMb} MB` : 'Đang đo...'})</div>
-                    <div className="text-[10px] text-slate-400">Dọn dẹp tệp đệm tạm để giải phóng dung lượng máy</div>
+                    <div className="text-xs font-bold text-white">{pick('Bộ nhớ đệm PWA', 'PWA Cache Storage', 'PWA 缓存空间')} ({storageInfo ? `${storageInfo.usageMb} MB` : pick('Đang đo...', 'Calculating...', '正在检测...')})</div>
+                    <div className="text-[10px] text-slate-400">{storageCleanSuccess || pick('Dọn dẹp tệp đệm tạm để giải phóng dung lượng máy', 'Clean temporary caches to free up device storage', '清理临时缓存以释放设备存储空间')}</div>
                   </div>
                 </div>
                 <button
@@ -828,16 +867,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <Palette className="w-4 h-4 text-emerald-400" />
-                  <span>Cài đặt Hồ sơ & Giao diện</span>
+                  <span>{pick('Cài đặt Hồ sơ & Giao diện', 'Profile & Appearance Settings', '个人资料与外观设置')}</span>
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">Tùy chỉnh ảnh đại diện, ảnh bìa và thẻ thông tin cá nhân.</p>
+                <p className="text-xs text-slate-400 mt-0.5">{pick('Tùy chỉnh ảnh đại diện, ảnh bìa và thẻ thông tin cá nhân.', 'Customize avatar, banner image, and personal profile card.', '自定义头像、横幅图片和个人资料卡。')}</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
                 {/* Cột trái: Form chỉnh sửa */}
                 <div className="md:col-span-7 space-y-3.5">
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2">
-                    <label className="block text-xs font-bold text-white">Tên hiển thị</label>
+                    <label className="block text-xs font-bold text-white">{pick('Tên hiển thị', 'Display Name', '显示名称')}</label>
                     <input
                       type="text"
                       maxLength={32}
@@ -853,7 +892,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white">Ảnh Đại Diện (Avatar)</span>
+                      <span className="text-xs font-bold text-white">{pick('Ảnh Đại Diện (Avatar)', 'Avatar Image', '头像图片')}</span>
                       <div className="flex items-center gap-1.5">
                         <input type="file" ref={avatarFileInputRef} onChange={handleAvatarFileUpload} accept="image/*" className="hidden" />
                         <button
@@ -862,7 +901,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-center gap-1"
                         >
                           <Camera className="w-3 h-3" />
-                          <span>Tải ảnh</span>
+                          <span>{pick('Tải ảnh', 'Upload image', '上传头像')}</span>
                         </button>
                         {customAvatarUrl && (
                           <button
@@ -870,14 +909,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             onClick={() => { setCustomAvatarUrl(undefined); updateSettings({ customAvatarUrl: undefined }); }}
                             className="px-2.5 py-1 rounded-lg bg-rose-500/10 text-rose-300 text-xs font-semibold"
                           >
-                            Xóa
+                            {pick('Xóa', 'Remove', '移除')}
                           </button>
                         )}
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                      <span className="text-[10px] text-slate-400">Màu nhanh:</span>
+                      <span className="text-[10px] text-slate-400">{pick('Màu nhanh:', 'Quick colors:', '快捷颜色：')}</span>
                       {AVATAR_COLORS.map((col) => (
                         <button
                           key={col}
@@ -892,7 +931,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-white">Ảnh Bìa Thẻ (Banner)</span>
+                      <span className="text-xs font-bold text-white">{pick('Ảnh Bìa Thẻ (Banner)', 'Profile Banner Image', '个人资料横幅')}</span>
                       <input type="file" ref={bannerFileInputRef} onChange={handleBannerFileUpload} accept="image/*" className="hidden" />
                       <button
                         type="button"
@@ -900,14 +939,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-semibold flex items-center gap-1"
                       >
                         <Camera className="w-3 h-3" />
-                        <span>Tải ảnh bìa</span>
+                        <span>{pick('Tải ảnh bìa', 'Upload banner', '上传横幅')}</span>
                       </button>
                     </div>
                   </div>
 
                   <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-2.5">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Huy hiệu</label>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">{pick('Huy hiệu', 'Badge', '徽章')}</label>
                       <input
                         type="text"
                         value={customBadgeText}
@@ -916,7 +955,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-300 mb-1">Tiểu sử</label>
+                      <label className="block text-[11px] font-bold text-slate-300 mb-1">{pick('Tiểu sử', 'Bio', '个人简介')}</label>
                       <textarea
                         rows={2}
                         value={customBio}
@@ -931,7 +970,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="md:col-span-5 flex flex-col">
                   <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3 h-full">
                     <div className="text-xs font-bold text-slate-300 border-b border-slate-800 pb-2">
-                      Xem Trước Thẻ Hồ Sơ
+                      {pick('Xem Trước Thẻ Hồ Sơ', 'Profile Card Preview', '个人资料卡预览')}
                     </div>
 
                     <div className="my-auto py-2">
@@ -1080,7 +1119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Phiên đăng nhập */}
               <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-white">Thiết bị đang đăng nhập ({sessions.length})</h3>
+                  <h3 className="text-xs font-bold text-white">{pick('Thiết bị đang đăng nhập ({n})', 'Signed-in Devices ({n})', '已登录设备 ({n})').replace('{n}', String(sessions.length))}</h3>
                   <button type="button" onClick={fetchSessions} className="p-1 rounded bg-slate-900 text-slate-400 hover:text-white">
                     <RefreshCw className="w-3 h-3" />
                   </button>
@@ -1092,14 +1131,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {renderDeviceIconByType(sess.deviceType || 'laptop', 'w-4 h-4')}
                         <div>
                           <div className="text-xs font-bold text-white">{sess.deviceName}</div>
-                          <div className="text-[10px] text-slate-400">{sess.location || 'Việt Nam'} • {formatSessionTime(sess.loginAt)}</div>
+                          <div className="text-[10px] text-slate-400">{sess.location || pick('Việt Nam', 'Unknown Location', '未知位置')} • {formatSessionTime(sess.loginAt)}</div>
                         </div>
                       </div>
                       {sess.isCurrent ? (
-                        <span className="text-[10px] text-emerald-400 font-bold">Máy này</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">{pick('Máy này', 'This device', '本机')}</span>
                       ) : (
                         <button type="button" onClick={() => handleLogoutSession(sess.id)} className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-300 text-[10px]">
-                          Đăng xuất
+                          {t('nav.logout')}
                         </button>
                       )}
                     </div>
@@ -1110,16 +1149,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Đăng xuất */}
               <div className="bg-slate-950/60 border border-rose-500/20 rounded-xl p-4 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-bold text-white">Đăng xuất tài khoản</div>
-                  <div className="text-[10px] text-slate-400">Kết thúc phiên làm việc hiện tại trên thiết bị này</div>
+                  <div className="text-xs font-bold text-white">{pick('Đăng xuất tài khoản', 'Log Out Account', '退出账号登录')}</div>
+                  <div className="text-[10px] text-slate-400">{pick('Kết thúc phiên làm việc hiện tại trên thiết bị này', 'End the current session on this device', '结束此设备上的当前登录会话')}</div>
                 </div>
                 <button type="button" onClick={handleDirectLogout} className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5">
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Đăng xuất</span>
+                  <span>{t('nav.logout')}</span>
                 </button>
               </div>
 
             </div>
+          )}
+
+          {/* TAB 4 (ẨN): CHẾ ĐỘ NHÀ PHÁT TRIỂN CỤC BỘ */}
+          {activeTab === 'developer' && canAccessDevTab && (
+            <DeveloperModePanel
+              isDev={isDev}
+              onAfterLock={() => setActiveTab('account')}
+            />
           )}
 
         </main>

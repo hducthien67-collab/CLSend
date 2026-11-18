@@ -4,6 +4,7 @@ import { UserSanction, SanctionLevel } from '../types';
 
 import { decodeBase64 } from './base64Security';
 import { normalizePhoneNumber } from './authHelper';
+import { getActiveLanguage, getLocaleTag, pickActiveLang } from '../context/LanguageContext';
 
 export { normalizePhoneNumber };
 
@@ -42,113 +43,113 @@ export const SANCTION_TIERS = {
   lock_1m: {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 1 * 60 * 1000,
-    label: 'Cảnh báo nhẹ: Khóa chat 1 phút (1\')',
-    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Cảnh cáo lần 1 (1 phút).',
+    get label() { return pickActiveLang("Cảnh báo nhẹ: Khóa chat 1 phút (1')", "Light Warning: 1m Chat Lock (1')", "轻度警告：禁言 1 分钟 (1')"); },
+    get remind() { return pickActiveLang('Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Cảnh cáo lần 1 (1 phút).', 'ClSend safety system detected inappropriate language. First warning (1 minute).', 'ClSend 安全系统检测到您的发言不当。第 1 次警告（1 分钟）。'); },
     severity: 'light' as const,
   },
   lock_15m: {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 15 * 60 * 1000,
-    label: 'Cảnh báo: Khóa chat 15 phút (15\')',
-    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 15 phút.',
+    get label() { return pickActiveLang("Cảnh báo: Khóa chat 15 phút (15')", "Warning: 15m Chat Lock (15')", "警告：禁言 15 分钟 (15')"); },
+    get remind() { return pickActiveLang('Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 15 phút.', 'ClSend safety system detected inappropriate language. Chat locked for 15 minutes.', 'ClSend 安全系统检测到您的发言不当。已禁言 15 分钟。'); },
     severity: 'light' as const,
   },
   lock_30m: {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 30 * 60 * 1000,
-    label: 'Cảnh báo: Khóa chat 30 phút (30\')',
-    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 30 phút.',
+    get label() { return pickActiveLang("Cảnh báo: Khóa chat 30 phút (30')", "Warning: 30m Chat Lock (30')", "警告：禁言 30 分钟 (30')"); },
+    get remind() { return pickActiveLang('Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 30 phút.', 'ClSend safety system detected inappropriate language. Chat locked for 30 minutes.', 'ClSend 安全系统检测到您的发言不当。已禁言 30 分钟。'); },
     severity: 'light' as const,
   },
   lock_45m: {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 45 * 60 * 1000,
-    label: 'Cảnh báo: Khóa chat 45 phút (45\')',
-    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 45 phút.',
+    get label() { return pickActiveLang("Cảnh báo: Khóa chat 45 phút (45')", "Warning: 45m Chat Lock (45')", "警告：禁言 45 分钟 (45')"); },
+    get remind() { return pickActiveLang('Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 45 phút.', 'ClSend safety system detected inappropriate language. Chat locked for 45 minutes.', 'ClSend 安全系统检测到您的发言不当。已禁言 45 分钟。'); },
     severity: 'light' as const,
   },
   lock_1h: {
     type: 'chat_lock_1h' as SanctionLevel,
     durationMs: 60 * 60 * 1000,
-    label: 'Mức trung bình: Khóa chat 1 giờ (1H)',
-    remind: 'Bạn tiếp tục tái phạm nội quy chat. Khóa chat 1 giờ.',
+    get label() { return pickActiveLang('Mức trung bình: Khóa chat 1 giờ (1H)', 'Moderate: 1-Hour Chat Lock (1H)', '中度违规：禁言 1 小时 (1H)'); },
+    get remind() { return pickActiveLang('Bạn tiếp tục tái phạm nội quy chat. Khóa chat 1 giờ.', 'You continued violating chat rules. Chat locked for 1 hour.', '您再次违反聊天规则。已禁言 1 小时。'); },
     severity: 'medium' as const,
   },
   ban_1d: {
     type: 'ban_1d' as SanctionLevel,
     durationMs: 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 1 Ngày (1D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 1 ngày do vi phạm tiêu chuẩn cộng đồng.',
+    get label() { return pickActiveLang('Khóa tài khoản 1 Ngày (1D)', '1-Day Account Suspension (1D)', '封禁账号 1 天 (1D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 1 ngày do vi phạm tiêu chuẩn cộng đồng.', 'Your account is suspended for 1 day due to Community Standards violations.', '您的账号因违反社区规范被暂时封禁 1 天。'); },
     severity: 'high' as const,
   },
   ban_3d: {
     type: 'ban_3d' as SanctionLevel,
     durationMs: 3 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 3 Ngày (3D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 3 ngày do tái phạm.',
+    get label() { return pickActiveLang('Khóa tài khoản 3 Ngày (3D)', '3-Day Account Suspension (3D)', '封禁账号 3 天 (3D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 3 ngày do tái phạm.', 'Your account is suspended for 3 days for repeated violations.', '您的账号因重复违规被暂时封禁 3 天。'); },
     severity: 'high' as const,
   },
   ban_7d: {
     type: 'ban_7d' as SanctionLevel,
     durationMs: 7 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 7 Ngày (7D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 7 ngày.',
+    get label() { return pickActiveLang('Khóa tài khoản 7 Ngày (7D)', '7-Day Account Suspension (7D)', '封禁账号 7 天 (7D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 7 ngày.', 'Your account has been suspended for 7 days.', '您的账号已被暂时封禁 7 天。'); },
     severity: 'critical' as const,
   },
   ban_14d: {
     type: 'ban_7d' as SanctionLevel,
     durationMs: 14 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 14 Ngày (14D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 14 ngày.',
+    get label() { return pickActiveLang('Khóa tài khoản 14 Ngày (14D)', '14-Day Account Suspension (14D)', '封禁账号 14 天 (14D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 14 ngày.', 'Your account has been suspended for 14 days.', '您的账号已被暂时封禁 14 天。'); },
     severity: 'critical' as const,
   },
   ban_6m: {
     type: 'ban_6m' as SanctionLevel,
     durationMs: 180 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 6 Tháng (6M)',
-    remind: 'Tài khoản của bạn bị đình chỉ dài hạn 6 tháng.',
+    get label() { return pickActiveLang('Khóa tài khoản 6 Tháng (6M)', '6-Month Account Suspension (6M)', '封禁账号 6 个月 (6M)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị đình chỉ dài hạn 6 tháng.', 'Your account has received a long-term 6-month suspension.', '您的账号已被长期封禁 6 个月。'); },
     severity: 'permanent' as const,
   },
   ban_1y: {
     type: 'ban_6m' as SanctionLevel,
     durationMs: 365 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 1 Năm (1Y)',
-    remind: 'Tài khoản của bạn bị đình chỉ 1 năm do vi phạm nghiêm trọng.',
+    get label() { return pickActiveLang('Khóa tài khoản 1 Năm (1Y)', '1-Year Account Suspension (1Y)', '封禁账号 1 年 (1Y)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị đình chỉ 1 năm do vi phạm nghiêm trọng.', 'Your account has been suspended for 1 year due to severe violations.', '您的账号因严重违规被封禁 1 年。'); },
     severity: 'permanent' as const,
   },
   level_1: {
     type: 'chat_lock_15m' as SanctionLevel,
     durationMs: 15 * 60 * 1000,
-    label: 'Cảnh báo: Khóa chat 15 phút (15\')',
-    remind: 'Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 15 phút.',
+    get label() { return pickActiveLang("Cảnh báo: Khóa chat 15 phút (15')", "Warning: 15m Chat Lock (15')", "警告：禁言 15 分钟 (15')"); },
+    get remind() { return pickActiveLang('Hệ thống an toàn ClSend ghi nhận lời nói của bạn chưa phù hợp. Khóa chat 15 phút.', 'ClSend safety system detected inappropriate language. Chat locked for 15 minutes.', 'ClSend 安全系统检测到您的发言不当。已禁言 15 分钟。'); },
     severity: 'light' as const,
   },
   level_2: {
     type: 'chat_lock_1h' as SanctionLevel,
     durationMs: 60 * 60 * 1000,
-    label: 'Mức trung bình: Khóa chat 1 giờ (1H)',
-    remind: 'Bạn tiếp tục tái phạm nội quy chat. Khóa chat 1 giờ.',
+    get label() { return pickActiveLang('Mức trung bình: Khóa chat 1 giờ (1H)', 'Moderate: 1-Hour Chat Lock (1H)', '中度违规：禁言 1 小时 (1H)'); },
+    get remind() { return pickActiveLang('Bạn tiếp tục tái phạm nội quy chat. Khóa chat 1 giờ.', 'You continued violating chat rules. Chat locked for 1 hour.', '您再次违反聊天规则。已禁言 1 小时。'); },
     severity: 'medium' as const,
   },
   level_3: {
     type: 'ban_7d' as SanctionLevel,
     durationMs: 7 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 7 Ngày (7D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 7 ngày.',
+    get label() { return pickActiveLang('Khóa tài khoản 7 Ngày (7D)', '7-Day Account Suspension (7D)', '封禁账号 7 天 (7D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 7 ngày.', 'Your account has been suspended for 7 days.', '您的账号已被暂时封禁 7 天。'); },
     severity: 'critical' as const,
   },
   level_4: {
     type: 'ban_7d' as SanctionLevel,
     durationMs: 14 * 24 * 60 * 60 * 1000,
-    label: 'Khóa tài khoản 14 Ngày (14D)',
-    remind: 'Tài khoản của bạn bị tạm khóa 14 ngày.',
+    get label() { return pickActiveLang('Khóa tài khoản 14 Ngày (14D)', '14-Day Account Suspension (14D)', '封禁账号 14 天 (14D)'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn bị tạm khóa 14 ngày.', 'Your account has been suspended for 14 days.', '您的账号已被暂时封禁 14 天。'); },
     severity: 'critical' as const,
   },
   level_perm: {
     type: 'ban_perm' as SanctionLevel,
     durationMs: null,
-    label: 'Mức Tối Cao: Cấm tài khoản vĩnh viễn',
-    remind: 'Tài khoản của bạn (cùng các tài khoản đồng bộ chung Email / Số điện thoại) đã bị CẤM TRUY CẬP VĨNH VIỄN do vi phạm đặc biệt nghiêm trọng.',
+    get label() { return pickActiveLang('Mức Tối Cao: Cấm tài khoản vĩnh viễn', 'Maximum Tier: Permanent Account Ban', '最高级别：永久封禁账号'); },
+    get remind() { return pickActiveLang('Tài khoản của bạn (cùng các tài khoản đồng bộ chung Email / Số điện thoại) đã bị CẤM TRUY CẬP VĨNH VIỄN do vi phạm đặc biệt nghiêm trọng.', 'Your account (along with accounts sharing the same Email / Phone number) has been PERMANENTLY BANNED due to an extremely severe violation.', '您的账号（以及绑定同一邮箱/手机号的关联账号）因极其严重的违规行为已被永久禁止访问。'); },
     severity: 'permanent' as const,
   }
 };
@@ -320,16 +321,25 @@ export async function checkUserBanStatus(
           }
         }
         const banDurationLabel =
-          sanction.lastSanctionType === 'ban_1d' ? '1 NGÀY' :
-          sanction.lastSanctionType === 'ban_3d' ? '3 NGÀY' :
-          sanction.lastSanctionType === 'ban_7d' ? '7 NGÀY' :
-          sanction.lastSanctionType === 'ban_6m' ? '6 THÁNG' : 'VĨNH VIỄN';
+          sanction.lastSanctionType === 'ban_1d' ? pickActiveLang('1 NGÀY', '1 DAY', '1 天') :
+          sanction.lastSanctionType === 'ban_3d' ? pickActiveLang('3 NGÀY', '3 DAYS', '3 天') :
+          sanction.lastSanctionType === 'ban_7d' ? pickActiveLang('7 NGÀY', '7 DAYS', '7 天') :
+          sanction.lastSanctionType === 'ban_6m' ? pickActiveLang('6 THÁNG', '6 MONTHS', '6 个月') :
+          pickActiveLang('VĨNH VIỄN', 'PERMANENT', '永久');
+
+        const banReasonText = sanction.remindText || sanction.reason || pickActiveLang('Vi phạm tiêu chuẩn cộng đồng', 'Community Standards violation', '违反社区规范');
 
         return {
           isBanned: true,
           isChatLocked: true,
           sanction,
-          message: `Tài khoản (hoặc Email / SĐT liên kết) đã bị DEV CẤM (${banDurationLabel}). Nhắc nhở: "${sanction.remindText || sanction.reason || 'Vi phạm tiêu chuẩn cộng đồng'}". Hệ thống từ chối truy cập.`
+          message: pickActiveLang(
+            'Tài khoản (hoặc Email / SĐT liên kết) đã bị DEV CẤM ({duration}). Nhắc nhở: "{reason}". Hệ thống từ chối truy cập.',
+            'Account (or linked Email / Phone) has been BANNED by DEV ({duration}). Notice: "{reason}". Access denied.',
+            '账号（或关联邮箱/手机号）已被开发者封禁（{duration}）。提示：“{reason}”。系统拒绝访问。'
+          )
+            .replace('{duration}', banDurationLabel)
+            .replace('{reason}', banReasonText)
         };
       }
 
@@ -345,7 +355,11 @@ export async function checkUserBanStatus(
           isBanned: false,
           isChatLocked: true,
           sanction,
-          message: `Tài khoản đang bị tạm khóa chat. Nhắc nhở từ DEV: "${sanction.remindText || sanction.reason}".`
+          message: pickActiveLang(
+            'Tài khoản đang bị tạm khóa chat. Nhắc nhở từ DEV: "{reason}".',
+            'Account chat is temporarily locked. DEV notice: "{reason}".',
+            '账号聊天功能已被暂时锁定。开发者提示：“{reason}”。'
+          ).replace('{reason}', sanction.remindText || sanction.reason || '')
         };
       }
 
@@ -433,6 +447,8 @@ export async function checkUserBanStatus(
   return { isBanned: false, isChatLocked: false };
 }
 
+export type SanctionTierKey = keyof typeof SANCTION_TIERS;
+
 /**
  * Apply Dev Sanction with specific tier & custom Roblox payload
  */
@@ -441,7 +457,7 @@ export async function applyTierSanction(params: {
   targetEmail: string;
   targetPhone?: string;
   targetDisplayName: string;
-  tier: 'level_1' | 'level_2' | 'level_3' | 'level_4' | 'level_perm';
+  tier: SanctionTierKey;
   customReason?: string;
   customRemindText?: string;
   ruleViolated?: string;
@@ -462,6 +478,13 @@ export async function applyTierSanction(params: {
     offensiveItemTimestamp,
     devEmail
   } = params;
+  if (!isDevUser(devEmail)) {
+    throw new Error('Chỉ tài khoản DEV mới có quyền thực hiện kỷ luật / khóa tài khoản.');
+  }
+  if (isDevUser(targetEmail)) {
+    throw new Error('Không thể áp dụng hình phạt kỷ luật cho tài khoản DEV.');
+  }
+
   const cleanEmail = isRealEmail(targetEmail) ? targetEmail.trim().toLowerCase() : '';
   const config = SANCTION_TIERS[tier];
   const now = new Date();
@@ -486,8 +509,12 @@ export async function applyTierSanction(params: {
     targetPhone,
   });
 
+  if (linkedTargets.emails.some((em) => isDevUser(em))) {
+    throw new Error('Không thể áp dụng hình phạt cho tài khoản liên kết DEV.');
+  }
+
   const newCount = currentCount + 1;
-  const isBanTier = tier === 'level_3' || tier === 'level_4' || tier === 'level_perm';
+  const isBanTier = !['lock_1m', 'lock_15m', 'lock_30m', 'lock_45m', 'lock_1h', 'level_1', 'level_2'].includes(tier);
   const expiresAt = config.durationMs ? new Date(now.getTime() + config.durationMs).toISOString() : null;
   const remindMessage = customRemindText?.trim() || config.remind;
   const primaryEmail = cleanEmail || linkedTargets.emails[0] || (targetEmail || '').trim().toLowerCase();
@@ -507,7 +534,7 @@ export async function applyTierSanction(params: {
   const sanctionData: UserSanction = {
     uid: targetUid,
     email: primaryEmail,
-    phone: primaryPhone || undefined,
+    ...(primaryPhone ? { phone: primaryPhone } : {}),
     linkedEmails: linkedTargets.emails,
     linkedPhones: linkedTargets.phones,
     linkedUids: linkedTargets.uids,
@@ -523,7 +550,7 @@ export async function applyTierSanction(params: {
     ruleViolated: ruleViolated || '',
     offensiveItem: offensiveItem || '',
     offensiveItemTimestamp: offensiveItemTimestamp || now.toISOString(),
-    bannedAt: isBanTier ? now.toISOString() : undefined,
+    ...(isBanTier ? { bannedAt: now.toISOString() } : {}),
     banExpiresAt: isBanTier ? expiresAt : null,
     isBanned: isBanTier,
     isChatLocked: true,
@@ -540,8 +567,14 @@ export async function applyTierSanction(params: {
       const pId = getPhoneSanctionDocId(ph);
       if (pId) docIdsToWrite.add(pId);
     });
-  } else if (isRealEmail(primaryEmail)) {
-    docIdsToWrite.add(getEmailSanctionDocId(primaryEmail));
+  } else {
+    if (isRealEmail(primaryEmail)) {
+      docIdsToWrite.add(getEmailSanctionDocId(primaryEmail));
+    }
+    if (primaryPhone) {
+      const pId = getPhoneSanctionDocId(primaryPhone);
+      if (pId) docIdsToWrite.add(pId);
+    }
   }
 
   await Promise.all(
@@ -1135,15 +1168,35 @@ export function formatGroupDateHeader(dateInput: string | number | Date | any): 
   yesterday.setDate(now.getDate() - 1);
   const isYesterday = d.toDateString() === yesterday.toDateString();
 
-  const daysOfWeek = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
-  const dayOfWeek = daysOfWeek[d.getDay()];
-  const dateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  const activeLang = getActiveLanguage();
+  const locale = getLocaleTag(activeLang);
+  let dayOfWeek = '';
+  try {
+    dayOfWeek = new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(d);
+    if (dayOfWeek) {
+      dayOfWeek = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+    }
+  } catch {
+    const daysOfWeek = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+    dayOfWeek = daysOfWeek[d.getDay()];
+  }
+
+  let dateFormatted = '';
+  try {
+    dateFormatted = new Intl.DateTimeFormat(locale, {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }).format(d);
+  } catch {
+    dateFormatted = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  }
 
   if (isToday) {
-    return `Hôm nay, ${dayOfWeek} • ${dateFormatted}`;
+    return `${pickActiveLang('Hôm nay', 'Today', '今天')}, ${dayOfWeek} • ${dateFormatted}`;
   }
   if (isYesterday) {
-    return `Hôm qua, ${dayOfWeek} • ${dateFormatted}`;
+    return `${pickActiveLang('Hôm qua', 'Yesterday', '昨天')}, ${dayOfWeek} • ${dateFormatted}`;
   }
   return `${dayOfWeek} • ${dateFormatted}`;
 }
@@ -1203,7 +1256,11 @@ export async function resetRoomMessagesServer(
     const messagesRef = collection(db, 'rooms', roomId, 'messages');
     const snap = await getDocs(messagesRef);
     if (snap.empty) {
-      return { deletedCount: 0, success: true, message: 'Phòng hiện không có tin nhắn nào để reset.' };
+      return {
+        deletedCount: 0,
+        success: true,
+        message: pickActiveLang('Phòng hiện không có tin nhắn nào để reset.', 'This room currently has no messages to reset.', '当前房间没有可重置的消息。')
+      };
     }
 
     const now = Date.now();
@@ -1221,8 +1278,8 @@ export async function resetRoomMessagesServer(
         deletedCount: 0, 
         success: true, 
         message: mode === 'older_than_7_days' 
-          ? 'Không có tin nhắn nào cũ hơn 1 tuần (7 ngày) trong phòng này.' 
-          : 'Không có tin nhắn để xóa.' 
+          ? pickActiveLang('Không có tin nhắn nào cũ hơn 1 tuần (7 ngày) trong phòng này.', 'There are no messages older than 1 week (7 days) in this room.', '此房间中没有超过 1 周（7 天）的消息。')
+          : pickActiveLang('Không có tin nhắn để xóa.', 'No messages to delete.', '没有可删除的消息。')
       };
     }
 
@@ -1238,13 +1295,20 @@ export async function resetRoomMessagesServer(
     // Send server reset announcement
     try {
       const cleanModeText = mode === 'all' 
-        ? 'toàn bộ tin nhắn phòng trò chuyện' 
-        : 'các tin nhắn cũ hơn 1 tuần (7 ngày)';
+        ? pickActiveLang('toàn bộ tin nhắn phòng trò chuyện', 'all chat room messages', '所有聊天室消息')
+        : pickActiveLang('các tin nhắn cũ hơn 1 tuần (7 ngày)', 'messages older than 1 week (7 days)', '超过 1 周（7 天）的消息');
       await addDoc(collection(db, 'rooms', roomId, 'messages'), {
         senderId: 'system-server-reset',
-        senderName: '👑 MÁY CHỦ CLOUDSEND (DEV)',
-        senderDevice: 'Máy chủ Hệ thống',
-        text: `⚡ ${operatorName} đã hoàn tất RESET MÁY CHỦ: Đã xóa sạch ${docsToDelete.length} tin nhắn (${cleanModeText}) để tối ưu hóa hiệu năng, giải phóng bộ nhớ và chống giật lag.`,
+        senderName: '👑 CLSEND SERVER (DEV)',
+        senderDevice: 'System Server',
+        text: pickActiveLang(
+          '⚡ {operator} đã hoàn tất RESET MÁY CHỦ: Đã xóa sạch {count} tin nhắn ({mode}) để tối ưu hóa hiệu năng, giải phóng bộ nhớ và chống giật lag.',
+          '⚡ {operator} completed SERVER RESET: Cleared {count} messages ({mode}) to optimize performance and free memory.',
+          '⚡ {operator} 已完成服务器重置：已清理 {count} 条消息（{mode}），以优化性能并释放内存。'
+        )
+          .replace('{operator}', operatorName)
+          .replace('{count}', String(docsToDelete.length))
+          .replace('{mode}', cleanModeText),
         createdAt: new Date().toISOString(),
         isDevMessage: true,
         isSystemMessage: true
@@ -1256,14 +1320,18 @@ export async function resetRoomMessagesServer(
     return {
       deletedCount: docsToDelete.length,
       success: true,
-      message: `Đã reset máy chủ thành công! Đã xóa ${docsToDelete.length} tin nhắn để giải phóng lag.`
+      message: pickActiveLang(
+        'Đã reset máy chủ thành công! Đã xóa {count} tin nhắn để giải phóng lag.',
+        'Server reset successful! Deleted {count} messages to optimize performance.',
+        '服务器重置成功！已删除 {count} 条消息以优化性能。'
+      ).replace('{count}', String(docsToDelete.length))
     };
   } catch (err: any) {
     console.error('Reset server error:', err);
     return {
       deletedCount: 0,
       success: false,
-      message: err.message || 'Lỗi khi reset máy chủ.'
+      message: err.message || pickActiveLang('Lỗi khi reset máy chủ.', 'Error resetting server.', '重置服务器时出错。')
     };
   }
 }

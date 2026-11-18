@@ -19,7 +19,7 @@ export interface MainArticle {
   id: string;
   articleNumber: string; // "Điều 1"
   title: string;
-  category: 'speech' | 'file' | 'cloud' | 'privacy' | 'account' | 'sanctions' | 'legal';
+  category: 'speech' | 'file' | 'cloud' | 'privacy' | 'account' | 'sanctions' | 'legal' | 'data_protection' | 'dev';
   categoryLabel: string;
   summary: string;
   subClauses: SubClause[];
@@ -470,6 +470,139 @@ export const OFFICIAL_TERMS_OF_SERVICE: MainArticle[] = [
         severity: 'low',
         severityLabel: 'Mức độ: Cam kết danh dự & pháp lý',
         penalty: 'Mọi vi phạm đều sẽ được xử lý nghiêm minh theo đúng các điều khoản đã cam kết.'
+      }
+    ]
+  },
+
+  // ==================== ĐIỀU 8 ====================
+  {
+    id: 'dieu-8',
+    articleNumber: 'Điều 8',
+    title: 'Tuân Thủ Pháp Luật Bảo Vệ Dữ Liệu Cá Nhân Việt Nam & Quốc Tế (NĐ 13/2023, GDPR, CCPA)',
+    category: 'data_protection',
+    categoryLabel: 'Luật Dữ Liệu VN & Quốc Tế',
+    summary: 'Chọn lọc và chuẩn hóa các quy định cốt lõi từ Nghị định 13/2023/NĐ-CP, Luật An ninh mạng Việt Nam cùng GDPR (Châu Âu), CCPA/CPRA (Hoa Kỳ) và PDPA (Châu Á - Thái Bình Dương) nhằm bảo vệ tối đa quyền chủ thể dữ liệu.',
+    subClauses: [
+      {
+        id: '8.1',
+        clauseNumber: '8.1',
+        title: 'Tuân thủ Nghị định 13/2023/NĐ-CP & Luật An ninh mạng Việt Nam',
+        description: 'ClSend phân loại rõ Dữ liệu cá nhân cơ bản (tên hiển thị, username, email, SĐT, ngày sinh, giới tính, thiết bị) và Dữ liệu nhạy cảm (tệp riêng tư, tin nhắn, thông tin định vị phiên). Mọi hoạt động xử lý dữ liệu chỉ thực hiện trên cơ sở sự đồng ý tự nguyện, rõ ràng của người dùng và thông báo sự cố vi phạm dữ liệu (nếu có) trong vòng 72 giờ.',
+        examples: [
+          'Quyền được biết & Quyền đồng ý: Thông báo minh bạch mục đích trước khi thu thập Email, SĐT OTP hoặc hồ sơ Google/Facebook/GitHub.',
+          'Quyền rút lại sự đồng ý: Người dùng có thể hủy liên kết tài khoản bên thứ ba hoặc ngừng cung cấp dữ liệu tùy chọn (Ngày sinh, Giới tính) bất kỳ lúc nào.',
+          'Cấm tuyệt đối hành vi thu thập ngầm, ép buộc đồng ý hoặc lợi dụng không gian mạng xâm phạm an ninh quốc gia, trật tự an toàn xã hội.'
+        ],
+        severity: 'high',
+        severityLabel: 'Mức độ: Pháp luật Việt Nam',
+        penalty: 'Mọi tài khoản hoặc công cụ thu thập trái phép dữ liệu người dùng Việt Nam sẽ bị khóa vĩnh viễn và lưu giữ nhật ký phối hợp xử lý theo pháp luật.'
+      },
+      {
+        id: '8.2',
+        clauseNumber: '8.2',
+        title: 'Quyền Chủ thể Dữ liệu theo chuẩn Quốc tế (EU GDPR & APAC PDPA)',
+        description: 'Áp dụng nguyên tắc Thu thập tối thiểu (Data Minimization) và Giới hạn mục đích (Purpose Limitation) theo Điều 5, 15, 16, 17 & 20 của GDPR cùng PDPA khu vực: Người dùng toàn quyền kiểm soát vòng đời dữ liệu của mình.',
+        examples: [
+          'Quyền Truy cập & Chỉnh sửa (GDPR Art. 15-16): Tự do xem, cập nhật tên hiển thị, Email, SĐT, Bio, ảnh đại diện trong phần Cài đặt.',
+          'Quyền Được Quên / Xóa Dữ Liệu (GDPR Art. 17 - Right to Erasure): Quyền xóa tệp trên Cloud Drive, thu hồi phiên đăng nhập từ xa hoặc yêu cầu xóa hồ sơ tài khoản.',
+          'Quyền Di chuyển Dữ liệu (GDPR Art. 20): Tải xuống bản gốc toàn bộ tệp tin cá nhân đã tải lên Cloud Drive không bị khóa định dạng.'
+        ],
+        severity: 'low',
+        severityLabel: 'Mức độ: Quyền lợi Quốc tế (GDPR)',
+        penalty: 'Hệ thống cam kết thực thi tự động hoặc phản hồi yêu cầu truy cập/xóa dữ liệu hợp lệ trong vòng tối đa 72 giờ.'
+      },
+      {
+        id: '8.3',
+        clauseNumber: '8.3',
+        title: 'Cam kết Không Mua Bán Dữ Liệu & Minh bạch Đăng nhập Bên thứ ba (CCPA/CPRA)',
+        description: 'Theo chuẩn Đạo luật Quyền riêng tư Người tiêu dùng California (CCPA/CPRA): ClSend cam kết KHÔNG BÁN, KHÔNG CHO THUÊ và KHÔNG CHIA SẺ dữ liệu cá nhân của người dùng cho bất kỳ nhà môi giới dữ liệu hoặc mạng quảng cáo hành vi nào.',
+        examples: [
+          'Khi đăng nhập bằng Google, Facebook, GitHub hoặc SĐT OTP, hệ thống chỉ tiếp nhận trường định danh cơ bản tối thiểu (UID, Tên, Ảnh đại diện, Email/SĐT).',
+          'Không phân biệt đối xử về tốc độ truyền P2P hay tính năng khi người dùng từ chối cung cấp các thông tin tùy chọn.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Mức độ: Chuẩn CCPA/CPRA',
+        penalty: 'Nghiêm cấm mọi cá nhân, phòng ban hoặc thành viên lợi dụng nền tảng để rao bán, trao đổi danh sách Email/SĐT người dùng.'
+      },
+      {
+        id: '8.4',
+        clauseNumber: '8.4',
+        title: 'Truyền Dữ liệu P2P Trực tiếp, Lưu trữ Tối thiểu & An toàn Xuyên biên giới',
+        description: 'Dữ liệu truyền trực tiếp qua WebRTC P2P đi thẳng giữa hai thiết bị và không lưu trữ bản sao nội dung trên máy chủ trung gian. Dữ liệu đồng bộ đám mây được truyền tải qua kết nối mã hóa TLS/HTTPS và kiểm soát truy cập chặt chẽ.',
+        examples: [
+          'Phiên Khách (Guest) và dữ liệu tạm thời tự động hết hạn khi người dùng đăng xuất hoặc không hoạt động dài ngày.',
+          'Nhật ký kiểm toán an ninh (Audit Log) chỉ lưu giữ tối thiểu phục vụ phòng chống mã độc, CSAM, lừa đảo và thực thi pháp luật hợp lệ.'
+        ],
+        severity: 'low',
+        severityLabel: 'Mức độ: Tiêu chuẩn Hạ tầng',
+        penalty: 'Dữ liệu vi phạm an ninh hoặc quá thời hạn lưu trữ tạm sẽ bị cô lập và tiêu hủy an toàn theo quy trình kỹ thuật.'
+      }
+    ]
+  },
+
+  // ==================== ĐIỀU 9 ====================
+  {
+    id: 'dieu-9',
+    articleNumber: 'Điều 9',
+    title: 'Quy Chuẩn Quyền Hạn, Đạo Đức & Trách Nhiệm Dành Cho Nhà Phát Triển & Quản Trị Viên (DEV)',
+    category: 'dev',
+    categoryLabel: 'Luật Dành Cho DEV',
+    summary: 'Thiết lập ranh giới quyền lực công bằng hai chiều: Người dùng có quy tắc sử dụng thì Nhà phát triển (DEV) và Quản trị viên (Admin) cũng phải chịu sự ràng buộc nghiêm ngặt về đạo đức nghề nghiệp, quyền kiểm duyệt, bảo mật dữ liệu và trách nhiệm giải trình.',
+    subClauses: [
+      {
+        id: '9.1',
+        clauseNumber: '9.1',
+        title: 'Cấm Lạm Quyền Kiểm Duyệt, Ban Tùy Tiện & Thiên Vị Cá Nhân',
+        description: 'DEV và Quản trị viên chỉ được phép thực hiện thao tác Khóa/Hạn chế tài khoản (Ban thủ công) trong Datastore hoặc kiểm duyệt nội dung khi có bằng chứng vi phạm rõ ràng đối chiếu với Điều khoản sử dụng hoặc mối đe dọa bảo mật khẩn cấp.',
+        examples: [
+          'Cấm tuyệt đối Ban người dùng theo cảm tính, mâu thuẫn cá nhân, trả thù riêng hoặc bất đồng quan điểm không vi phạm luật.',
+          'Mọi lệnh Ban hoặc Mở khóa (Unban) thủ công do DEV thực hiện bắt buộc phải ghi nhận lý do minh bạch và lưu dấu vết trong Audit Log.',
+          'Không thiên vị hoặc miễn trừ xử phạt cho tài khoản quen biết nếu có hành vi phát tán mã độc, CSAM, lừa đảo hoặc quấy rối.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Mức độ: Ràng buộc DEV tuyệt đối',
+        penalty: 'Mọi lệnh Ban sai quy định phải được thu hồi, mở khóa ngay lập tức; cá nhân lạm quyền bị tước bỏ quyền hạn DEV/Admin khỏi hệ thống.'
+      },
+      {
+        id: '9.2',
+        clauseNumber: '9.2',
+        title: 'Nguyên Tắc Không Xâm Phạm Riêng Tư Dữ Liệu (Zero Snooping)',
+        description: 'DEV có quyền truy cập hạ tầng kỹ thuật để duy trì hệ thống, nhưng bị NGHIÊM CẤM truy cập trái phép, xem trộm, sao chép, lưu trữ riêng hoặc phát tán tệp tin Cloud Drive, tin nhắn riêng tư và thông tin cá nhân của người dùng.',
+        examples: [
+          'Không tự ý đọc tin nhắn riêng, xem trộm tệp cá nhân hay trích xuất Email, SĐT, Ngày sinh từ Datastore ngoài mục đích kỹ thuật hợp lệ.',
+          'Không bán, trao đổi hay chia sẻ danh sách người dùng cho bên thứ ba dưới bất kỳ hình thức nào.',
+          'Chỉ truy xuất siêu dữ liệu (metadata) tối thiểu khi xử lý sự cố kỹ thuật, xác minh đơn kháng cáo hoặc theo yêu cầu hợp pháp.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Mức độ: Bảo mật tuyệt đối',
+        penalty: 'Tước quyền truy cập Datastore vĩnh viễn và chịu trách nhiệm pháp lý theo Luật An ninh mạng & Nghị định 13/2023/NĐ-CP.'
+      },
+      {
+        id: '9.3',
+        clauseNumber: '9.3',
+        title: 'Chuẩn Mực Giao Tiếp Văn Minh & Cấm Lạm Dụng Danh Nghĩa DEV',
+        description: 'Quyền hạn kỹ thuật không đi kèm đặc quyền đứng trên nội quy cộng đồng. Khi giao tiếp trong phòng chat, tài khoản DEV vẫn phải tuân thủ chuẩn mực ngôn từ lịch sự, tôn trọng người dùng như mọi thành viên khác.',
+        examples: [
+          'Cấm dùng danh nghĩa hoặc huy hiệu DEV để hù dọa, hạ nhục, ép buộc người dùng cung cấp thông tin cá nhân hay mật khẩu.',
+          'Không sử dụng chức năng gửi thông báo hệ thống để spam, quảng cáo cá nhân hoặc gây hoang mang cộng đồng.'
+        ],
+        severity: 'high',
+        severityLabel: 'Mức độ: Đạo đức Quản trị',
+        penalty: 'Cảnh cáo công khai, tạm đình chỉ quyền quản trị cộng đồng hoặc thu hồi vai trò DEV nếu tái phạm.'
+      },
+      {
+        id: '9.4',
+        clauseNumber: '9.4',
+        title: 'Trách Nhiệm Minh Bạch, Sửa Sai Nhanh & Tiếp Nhận Khiếu Nại Công Tâm',
+        description: 'DEV có nghĩa vụ bảo vệ công bằng cho người dùng trước sai sót kỹ thuật của AI hoặc con người, đồng thời chủ động vá lỗ hổng bảo mật và thông báo kịp thời khi thay đổi chính sách.',
+        examples: [
+          'Tiếp nhận và rà soát công tâm mọi đơn kháng cáo về án phạt AI/thủ công trong vòng 24 - 48 giờ làm việc.',
+          'Nếu phát hiện khóa nhầm hoặc lỗi bộ lọc từ khóa, DEV phải Unban ngay lập tức và xóa bỏ điểm vi phạm oan cho người dùng.',
+          'Công khai thông báo khi có cập nhật điều khoản lớn hoặc sự cố ảnh hưởng đến an toàn dữ liệu trong vòng 72 giờ.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Mức độ: Trách nhiệm giải trình',
+        penalty: 'Buộc phải hoàn tác trạng thái tài khoản, xin lỗi và khắc phục lỗi kỹ thuật ngay khi có phản ánh xác thực.'
       }
     ]
   }
@@ -923,6 +1056,139 @@ export const OFFICIAL_TERMS_OF_SERVICE_EN: MainArticle[] = [
         penalty: 'All infractions will be strictly handled in accordance with these committed terms.'
       }
     ]
+  },
+
+  // ==================== ARTICLE 8 ====================
+  {
+    id: 'dieu-8',
+    articleNumber: 'Article 8',
+    title: 'Vietnam & International Personal Data Protection Compliance (Decree 13/2023, GDPR, CCPA)',
+    category: 'data_protection',
+    categoryLabel: 'VN & Global Data Laws',
+    summary: 'Selectively adopts core standards from Vietnam Decree 13/2023/ND-CP on Personal Data Protection, Vietnam Cybersecurity Law 2018, EU GDPR, CCPA/CPRA, and APAC PDPA to safeguard user data rights.',
+    subClauses: [
+      {
+        id: '8.1',
+        clauseNumber: '8.1',
+        title: 'Vietnam Personal Data Protection (Decree 13/2023/ND-CP & Cybersecurity Law)',
+        description: 'ClSend clearly distinguishes Basic Personal Data (display name, username, email, phone, date of birth, gender, device info) from Sensitive Data (private files, E2EE messages, session location). Data processing relies on explicit, informed user consent with 72-hour data breach notification obligations.',
+        examples: [
+          'Right to be Informed & Consent: Clear notice before collecting Email, SMS OTP Phone, or Google/Facebook/GitHub identity fields.',
+          'Right to Withdraw Consent: Users may unlink third-party providers or omit optional profile fields (DOB, Gender) at any time.',
+          'Strictly prohibits covert scraping, coerced consent, or unlawful collection violating national cybersecurity standards.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: Vietnam Law Compliance',
+        penalty: 'Accounts or bots performing unauthorized data harvesting will be permanently banned with audit logs preserved for legal cooperation.'
+      },
+      {
+        id: '8.2',
+        clauseNumber: '8.2',
+        title: 'International Data Subject Rights (EU GDPR & APAC PDPA)',
+        description: 'Follows Data Minimization and Purpose Limitation principles under GDPR Articles 5, 15, 16, 17 & 20 and regional PDPA frameworks, giving users transparent control over their data lifecycle.',
+        examples: [
+          'Right of Access & Rectification (GDPR Art. 15-16): View and update display name, Email, Phone, Bio, and avatar in Settings.',
+          'Right to Erasure / Right to be Forgotten (GDPR Art. 17): Delete Cloud Drive files, revoke active login sessions, or request account deletion.',
+          'Right to Data Portability (GDPR Art. 20): Download original uploaded files from Cloud Drive anytime without vendor lock-in.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Global Rights (GDPR)',
+        penalty: 'Valid access, correction, or erasure requests are fulfilled automatically or reviewed within 72 hours.'
+      },
+      {
+        id: '8.3',
+        clauseNumber: '8.3',
+        title: 'Zero Sale of Personal Data & Third-Party OAuth Transparency (CCPA/CPRA)',
+        description: 'Aligned with CCPA/CPRA standards: ClSend NEVER sells, rents, or trades user personal information to data brokers or cross-context behavioral advertising networks.',
+        examples: [
+          'Signing in via Google, Facebook, GitHub, or Phone OTP requests only minimal identity fields (UID, Name, Avatar, Email/Phone).',
+          'No degraded P2P transfer speed or discrimination against users who withhold optional profile details.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: CCPA/CPRA Standard',
+        penalty: 'Strictly prohibits any user or party from trading, selling, or soliciting user Email/Phone lists on the platform.'
+      },
+      {
+        id: '8.4',
+        clauseNumber: '8.4',
+        title: 'Direct P2P Transit, Retention Limits & Cross-Border Safeguards',
+        description: 'Direct WebRTC P2P streams travel device-to-device without storing file payloads on relay servers. Cloud synchronization uses TLS/HTTPS encryption, strict access controls, and bounded retention periods.',
+        examples: [
+          'Ephemeral Guest sessions and temporary artifacts are automatically purged upon logout or inactivity expiration.',
+          'Security audit logs are strictly retained only to prevent malware, CSAM, fraud, and satisfy lawful judicial orders.'
+        ],
+        severity: 'low',
+        severityLabel: 'Severity: Infrastructure Standard',
+        penalty: 'Expired ephemeral records and security-flagged payloads are securely isolated and purged.'
+      }
+    ]
+  },
+
+  // ==================== ARTICLE 9 ====================
+  {
+    id: 'dieu-9',
+    articleNumber: 'Article 9',
+    title: 'Developer & Administrator Code of Conduct, Authority Limits & Accountability',
+    category: 'dev',
+    categoryLabel: 'DEV Code of Conduct',
+    summary: 'Establishes two-way fairness: Just as users follow platform rules, Developers (DEV) and Administrators are strictly bound by moderation ethics, privacy boundaries, non-abuse of power, and transparent accountability.',
+    subClauses: [
+      {
+        id: '9.1',
+        clauseNumber: '9.1',
+        title: 'Prohibition of Moderation Abuse, Arbitrary Bans & Personal Bias',
+        description: 'DEVs and Administrators may only issue manual account bans or restrictions in Datastore based on verifiable violations of Terms of Service or urgent security threats.',
+        examples: [
+          'Strictly prohibits banning users out of personal grudges, emotion, retaliation, or lawful disagreements.',
+          'Every manual Ban or Unban performed by a DEV must include a clear, factual reason recorded in the Audit Log.',
+          'No favoritism or immunity may be granted to acquaintances who distribute malware, CSAM, scams, or harass others.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Absolute DEV Constraint',
+        penalty: 'Wrongful bans must be lifted immediately; offending personnel have DEV/Admin privileges permanently revoked.'
+      },
+      {
+        id: '9.2',
+        clauseNumber: '9.2',
+        title: 'Zero Snooping & Strict Data Confidentiality Obligations',
+        description: 'DEVs maintain infrastructure strictly for reliability and safety, and are ABSOLUTELY FORBIDDEN from peeking at, copying, downloading, or leaking user Cloud Drive files, private chats, or personal info.',
+        examples: [
+          'Never inspect private messages, personal files, or extract Email, Phone, or Birth Date from Datastore for personal curiosity.',
+          'Never sell, trade, or disclose user directories or metadata to unauthorized third parties.',
+          'Access only minimal technical metadata when resolving bugs, verifying user appeals, or complying with lawful orders.'
+        ],
+        severity: 'critical',
+        severityLabel: 'Severity: Strict Confidentiality',
+        penalty: 'Immediate revocation of Datastore access and legal liability under applicable data protection statutes.'
+      },
+      {
+        id: '9.3',
+        clauseNumber: '9.3',
+        title: 'Respectful Conduct & Ban on Exploiting DEV Status',
+        description: 'Technical authority does not place DEVs above community standards. In public chat rooms, DEV accounts must uphold respectful, civil communication alongside regular users.',
+        examples: [
+          'Never use DEV badges or authority to intimidate, demean, or coerce users into handing over passwords or personal data.',
+          'Never abuse system broadcast tools for spam, personal promotion, or causing public panic.'
+        ],
+        severity: 'high',
+        severityLabel: 'Severity: Governance Ethics',
+        penalty: 'Formal warning, suspension of moderation privileges, or removal of DEV role upon repeat violation.'
+      },
+      {
+        id: '9.4',
+        clauseNumber: '9.4',
+        title: 'Transparency, Prompt Bug Remediation & Impartial Appeal Review',
+        description: 'DEVs are obligated to protect users from automated AI false positives or human errors, patch vulnerabilities swiftly, and disclose major policy or security updates transparently.',
+        examples: [
+          'Review user appeals regarding AI or manual sanctions impartially within 24 - 48 business hours.',
+          'If a false positive or mistaken ban is confirmed, unban immediately and erase wrongful violation marks.',
+          'Notify users transparently regarding major Terms updates or verified data security incidents within 72 hours.'
+        ],
+        severity: 'medium',
+        severityLabel: 'Severity: Accountability',
+        penalty: 'Mandatory rollback of wrongful penalties and prompt remediation of confirmed moderation or security defects.'
+      }
+    ]
   }
 ];
 
@@ -1372,6 +1638,139 @@ export const OFFICIAL_TERMS_OF_SERVICE_ZH: MainArticle[] = [
         severity: 'low',
         severityLabel: '严重程度：法律承诺',
         penalty: '所有违规行为均将严格按照本承诺条款处理。'
+      }
+    ]
+  },
+
+  // ==================== 第 8 条 ====================
+  {
+    id: 'dieu-8',
+    articleNumber: '第 8 条',
+    title: '越南及国际个人数据保护法合规标准（第 13/2023 号法令、GDPR、CCPA）',
+    category: 'data_protection',
+    categoryLabel: '越南与国际数据法',
+    summary: '精选并融合越南第 13/2023/NĐ-CP 号个人数据保护法令、越南《网络安全法》以及欧盟 GDPR、美国 CCPA/CPRA 与亚太 PDPA 核心规范，全面保障用户数据主权。',
+    subClauses: [
+      {
+        id: '8.1',
+        clauseNumber: '8.1',
+        title: '遵守越南个人数据保护法令 (NĐ 13/2023/NĐ-CP) 与《网络安全法》',
+        description: 'ClSend 明确区分基本个人数据（昵称、用户名、邮箱、手机号、出生日期、性别、设备信息）与敏感个人数据（私人文件、端到端加密消息、登录会话区域）。所有数据处理均须基于用户明确、自愿的同意，并在发生数据安全事件时履行 72 小时内通报义务。',
+        examples: [
+          '知情权与明示同意：在绑定邮箱、手机短信 OTP 或 Google/Facebook/GitHub 授权前清晰告知用途。',
+          '撤回同意权：用户可随时解除第三方账号关联，或拒绝填写出生日期、性别等可选项。',
+          '严禁暗中抓取数据、强迫授权或从事危害网络安全与公共秩序的数据收集行为。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：越南法律合规',
+        penalty: '任何非法采集用户数据的账号或脚本将被永久封禁，并保留日志依法配合监管部门处置。'
+      },
+      {
+        id: '8.2',
+        clauseNumber: '8.2',
+        title: '国际数据主体权利标准（欧盟 GDPR 与亚太 PDPA）',
+        description: '严格遵循 GDPR 第 5、15、16、17、20 条及亚太 PDPA 的“最小化收集”与“目的限制”原则，赋予用户完整的数据生命周期控制权。',
+        examples: [
+          '访问与更正权 (GDPR Art. 15-16)：随时在“设置”中查看、修改昵称、邮箱、手机号、简介与头像。',
+          '删除权 / 被遗忘权 (GDPR Art. 17)：随时删除 Cloud Drive 文件、注销远程登录会话或申请彻底删除账号档案。',
+          '数据可携权 (GDPR Art. 20)：随时下载您上传至云盘的原始文件，无任何格式锁定限制。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：国际标准 (GDPR)',
+        penalty: '合法的数据查询、更正与删除请求将在系统内即时执行或于 72 小时内审核完成。'
+      },
+      {
+        id: '8.3',
+        clauseNumber: '8.3',
+        title: '承诺绝不出售个人数据与第三方登录透明原则 (CCPA/CPRA)',
+        description: '依据加州消费者隐私法 (CCPA/CPRA) 标准：ClSend 承诺绝不向任何数据经纪商或跨平台广告追踪网络出售、出租或共享用户个人数据。',
+        examples: [
+          '使用 Google、Facebook、GitHub 或手机号验证码登录时，仅读取必要的最小身份字段（UID、昵称、头像、邮箱/手机）。',
+          '不会因用户拒绝填写可选个人资料而降低 P2P 传输速率或限制核心服务体验。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：CCPA/CPRA 标准',
+        penalty: '严禁任何用户或机构利用平台倒卖、传播他人邮箱或手机号码列表。'
+      },
+      {
+        id: '8.4',
+        clauseNumber: '8.4',
+        title: 'P2P 直连不留存、最短存储期限与跨境传输加密保护',
+        description: 'WebRTC P2P 通道在设备间点对点直接传输，文件内容不经由中转服务器留存；云端同步数据全程采用 TLS/HTTPS 加密与严格的权限隔离机制。',
+        examples: [
+          '访客会话 (Guest) 及临时凭证在退出登录或长期未活动后自动过期清理。',
+          '安全审计日志仅在防范恶意软件、CSAM、欺诈及依法配合执法机关所需的最小期限内保存。'
+        ],
+        severity: 'low',
+        severityLabel: '严重程度：基础设施标准',
+        penalty: '超期临时数据及安全隔离文件将按技术规范安全销毁。'
+      }
+    ]
+  },
+
+  // ==================== 第 9 条 ====================
+  {
+    id: 'dieu-9',
+    articleNumber: '第 9 条',
+    title: '开发者与管理员权限规范、职业道德及问责条款 (DEV)',
+    category: 'dev',
+    categoryLabel: '开发者规范',
+    summary: '建立双向公平机制：正如用户须遵守社区规则，开发者 (DEV) 与管理员同样必须严格遵守权限边界、禁止滥用职权、严守用户数据隐私并履行公正纠错义务。',
+    subClauses: [
+      {
+        id: '9.1',
+        clauseNumber: '9.1',
+        title: '严禁滥用审核权力、随意封号及个人偏袒',
+        description: 'DEV 与管理员仅在核实存在违反服务条款的真实证据或紧急安全威胁时，方可在后台执行手动封禁 (Ban) 或功能限制。',
+        examples: [
+          '严禁因个人恩怨、情绪化、报复心理或正常意见分歧而随意封禁用户账号。',
+          'DEV 执行的每一项手动封禁 (Ban) 或解封 (Unban) 操作均须填写明确理由并记入审计日志 (Audit Log)。',
+          '不得包庇或豁免传播恶意软件、CSAM、诈骗或骚扰他人的熟人账号。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：DEV 绝对红线',
+        penalty: '违规误封须立即撤销解封；滥用职权者将被永久撤销 DEV/管理员权限。'
+      },
+      {
+        id: '9.2',
+        clauseNumber: '9.2',
+        title: '严禁窥探用户隐私与数据保密义务 (Zero Snooping)',
+        description: 'DEV 仅可在系统维护与安全防护范围内操作基础设施，绝对禁止偷窥、下载、复制、私存或泄露用户的云盘文件、私密聊天记录及个人身份信息。',
+        examples: [
+          '不得擅自查阅私人消息、偷看个人文件，或因非正当技术理由从后台导出用户邮箱、手机号及出生日期。',
+          '严禁向任何第三方出售、交换或泄露用户资料名单。',
+          '仅在排查故障、人工复核申诉或依法配合监管核查时调取最小限度的技术元数据。'
+        ],
+        severity: 'critical',
+        severityLabel: '严重程度：绝对保密',
+        penalty: '立即吊销后台数据访问权限，并依法承担相应的数据安全法律责任。'
+      },
+      {
+        id: '9.3',
+        clauseNumber: '9.3',
+        title: '文明表率准则与严禁借 DEV 身份施压',
+        description: '技术管理权限并不赋予高于社区规则的特权。在公共聊天室互动时，DEV 账号同样须遵守文明礼貌用语规范。',
+        examples: [
+          '严禁利用 DEV 徽章或管理身份恐吓、贬低或胁迫用户提供密码及个人敏感信息。',
+          '不得滥用系统公告功能发送垃圾广告、个人推广或制造社区恐慌。'
+        ],
+        severity: 'high',
+        severityLabel: '严重程度：管理伦理',
+        penalty: '给予公开警告、暂停社区管理权限，屡犯者取消 DEV 身份标识。'
+      },
+      {
+        id: '9.4',
+        clauseNumber: '9.4',
+        title: '透明披露、及时纠错与公正复核申诉责任',
+        description: 'DEV 有义务保障用户免受 AI 自动误判或人工失误的侵害，及时修复安全漏洞，并透明公开重大条款或安全事件变更。',
+        examples: [
+          '在 24 至 48 个工作小时内公正受理并人工复核用户针对 AI 或手动封禁的申诉。',
+          '一旦确认误判或误封，DEV 必须立即解除封禁 (Unban) 并清除误记违规记录。',
+          '发生重大条款更新或确认的数据安全事件时，须在 72 小时内向受影响用户透明通报。'
+        ],
+        severity: 'medium',
+        severityLabel: '严重程度：问责与纠错',
+        penalty: '经查实确属误判或失职的，须立即恢复用户账号状态并修复相关技术缺陷。'
       }
     ]
   }

@@ -57,7 +57,7 @@ import { playReceiveSound } from '../utils/sound';
 import { isImageFile, isVideoFile } from '../utils/fileUpload';
 import { FileDocIcon, getDocumentTypeInfo } from './FileDocIcon';
 import { extractUrls, hasUrls, renderClickableText } from '../utils/textFormat';
-import { downloadFileSafely } from '../utils/fileDownload';
+import { downloadFileSafely, openSafeExternalTab } from '../utils/fileDownload';
 import { showGlobalToast } from '../utils/toast';
 import { VideoPreviewPlayer } from './VideoPreviewPlayer';
 
@@ -217,7 +217,7 @@ const ReceiveViewComponent: React.FC = () => {
       setShowClearConfirm(false);
       showToast(pick('Đã xóa sạch toàn bộ lịch sử nhận tệp!', 'Cleared all received history!', '已清空全部接收记录！'), 'success');
     } catch (err: any) {
-      showToast(pick(`Không thể xóa: ${err?.message || 'Thử lại sau'}`, `Unable to delete: ${err?.message || 'Try again later'}`, `无法删除：${err?.message || '请稍后重试'}`), 'error');
+      showToast(pick('Không thể xóa: {err}', 'Unable to delete: {err}', '无法删除：{err}').replace('{err}', err?.message || pick('Thử lại sau', 'Try again later', '请稍后重试')), 'error');
     } finally {
       setIsClearingAll(false);
     }
@@ -240,7 +240,7 @@ const ReceiveViewComponent: React.FC = () => {
     if (!fileSource && item.textContent) {
       const textBlob = new Blob([item.textContent], { type: 'text/plain;charset=utf-8' });
       fileSource = URL.createObjectURL(textBlob);
-      name = pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`);
+      name = `${pick('Van_ban_', 'Text_', '文本_')}${Date.now()}.txt`;
     }
 
     if (!fileSource) {
@@ -250,16 +250,16 @@ const ReceiveViewComponent: React.FC = () => {
 
     const isTeraBox = item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(fileSource || '');
     if (isTeraBox) {
-      window.open(fileSource, '_blank', 'noopener,noreferrer');
+      openSafeExternalTab(fileSource);
       showToast(pick('Đang mở tệp trong TeraBox...', 'Opening file in TeraBox...', '正在 TeraBox 中打开文件...'), 'success');
       return;
     }
 
     setDownloadingIds(prev => ({ ...prev, [item.id]: 'downloading' }));
-    const success = await downloadFileSafely(fileSource, name);
+    const success = await downloadFileSafely(fileSource, name, undefined, [item.id]);
     if (success) {
       setDownloadingIds(prev => ({ ...prev, [item.id]: 'done' }));
-      showToast(pick(`Đã tải xuống "${name}" thành công!`, `Downloaded "${name}" successfully!`, `已成功下载 “${name}”！`), 'success');
+      showToast(pick('Đã tải xuống "{name}" thành công!', 'Downloaded "{name}" successfully!', '已成功下载 “{name}”！').replace('{name}', name), 'success');
       setTimeout(() => {
         setDownloadingIds(prev => {
           const next = { ...prev };
@@ -287,7 +287,7 @@ const ReceiveViewComponent: React.FC = () => {
 
     try {
       const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-      const fileName = item.fileName || (item.textContent ? pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`) : 'received_file.bin');
+      const fileName = item.fileName || (item.textContent ? `${pick('Van_ban_', 'Text_', '文本_')}${Date.now()}.txt` : 'received_file.bin');
       const fileType = item.fileType || (item.textContent ? 'text/plain' : 'application/octet-stream');
       const category = getFileCategory(fileType, fileName);
 
@@ -322,7 +322,7 @@ const ReceiveViewComponent: React.FC = () => {
       });
 
       setSavedCloudIds(prev => ({ ...prev, [item.id]: 'saved' }));
-      showToast(pick(`✨ Đã lưu "${fileName}" vào Kho Cloud thành công!`, `✨ Saved "${fileName}" to Cloud Drive successfully!`, `✨ 已成功将 “${fileName}” 保存到云盘！`), 'success');
+      showToast(pick('✨ Đã lưu "{name}" vào Kho Cloud thành công!', '✨ Saved "{name}" to Cloud Drive successfully!', '✨ 已成功将 “{name}” 保存到云盘！').replace('{name}', fileName), 'success');
     } catch (err: any) {
       console.error('Save to cloud error:', err);
       setSavedCloudIds(prev => {
@@ -330,7 +330,7 @@ const ReceiveViewComponent: React.FC = () => {
         delete next[item.id];
         return next;
       });
-      showToast(pick(`Lỗi khi lưu vào Cloud: ${err.message || 'Thử lại sau'}`, `Error saving to Cloud: ${err.message || 'Try again later'}`, `保存到云盘出错：${err.message || '请稍后重试'}`), 'error');
+      showToast(pick('Lỗi khi lưu vào Cloud: {err}', 'Error saving to Cloud: {err}', '保存到云盘出错：{err}').replace('{err}', err.message || pick('Thử lại sau', 'Try again later', '请稍后重试')), 'error');
     }
   };
 
@@ -349,7 +349,7 @@ const ReceiveViewComponent: React.FC = () => {
       for (const item of transfers) {
         if (savedCloudIds[item.id] === 'saved') continue;
         const docId = `cf_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        const fileName = item.fileName || (item.textContent ? pick(`Van_ban_${Date.now()}.txt`, `Text_${Date.now()}.txt`, `文本_${Date.now()}.txt`) : 'received_file.bin');
+        const fileName = item.fileName || (item.textContent ? `${pick('Van_ban_', 'Text_', '文本_')}${Date.now()}.txt` : 'received_file.bin');
         const fileType = item.fileType || (item.textContent ? 'text/plain' : 'application/octet-stream');
         const category = getFileCategory(fileType, fileName);
 
@@ -385,9 +385,9 @@ const ReceiveViewComponent: React.FC = () => {
         successCount++;
       }
 
-      showToast(pick(`✨ Đã lưu tất cả ${successCount} tệp/văn bản vào Kho Cloud thành công!`, `✨ Saved all ${successCount} files/notes to Cloud Drive successfully!`, `✨ 已成功将全部 ${successCount} 个文件/文本保存到云盘！`), 'success');
+      showToast(pick('✨ Đã lưu tất cả {count} tệp/văn bản vào Kho Cloud thành công!', '✨ Saved all {count} files/notes to Cloud Drive successfully!', '✨ 已成功将全部 {count} 个文件/文本保存到云盘！').replace('{count}', String(successCount)), 'success');
     } catch (err: any) {
-      showToast(pick(`Lỗi khi lưu vào Kho Cloud: ${err.message || 'Thử lại sau'}`, `Error saving to Cloud: ${err.message || 'Try again later'}`, `保存到云盘出错：${err.message || '请稍后重试'}`), 'error');
+      showToast(pick('Lỗi khi lưu vào Kho Cloud: {err}', 'Error saving to Cloud: {err}', '保存到云盘出错：{err}').replace('{err}', err.message || pick('Thử lại sau', 'Try again later', '请稍后重试')), 'error');
     } finally {
       setIsSavingAllToCloud(false);
     }
@@ -493,10 +493,10 @@ const ReceiveViewComponent: React.FC = () => {
                 </div>
                 <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
                   {pick(
-                    `Đã tự động tăng kích thước hiển thị chống mỏi mắt. Mở CloudSend trên Điện thoại/Máy tính và chọn "${settings.deviceName}" để gửi ảnh, video hoặc tệp lên TV này.`,
-                    `Optimized display sizing for TV screens. Open CloudSend on Phone/PC and select "${settings.deviceName}" to stream photos, videos or files to this TV.`,
-                    `已为电视屏幕优化显示尺寸。在手机/电脑上打开 CloudSend 并选择 “${settings.deviceName}” 即可发送照片、视频或文件到此电视。`
-                  )}
+                    'Đã tự động tăng kích thước hiển thị chống mỏi mắt. Mở CloudSend trên Điện thoại/Máy tính và chọn "{device}" để gửi ảnh, video hoặc tệp lên TV này.',
+                    'Optimized display sizing for TV screens. Open CloudSend on Phone/PC and select "{device}" to stream photos, videos or files to this TV.',
+                    '已为电视屏幕优化显示尺寸。在手机/电脑上打开 CloudSend 并选择 “{device}” 即可发送照片、视频或文件到此电视。'
+                  ).replace('{device}', settings.deviceName)}
                 </p>
               </div>
             </div>
@@ -535,13 +535,8 @@ const ReceiveViewComponent: React.FC = () => {
 
           <div className="text-[11px] text-slate-400 border-t border-slate-800/80 pt-3 flex flex-wrap items-center gap-4">
             <span className="flex items-center gap-1">
-              {currentLang === 'vi' ? (
-                <>🎮 <strong>Điều khiển từ xa (Remote):</strong> Dùng phím Mũi tên [⬅️ ➡️] chuyển Tab, [OK] chọn nút, [Back] quay lại.</>
-              ) : (currentLang === 'zh-CN' || currentLang === 'zh-TW') ? (
-                <>🎮 <strong>遥控器操作：</strong>使用方向键 [⬅️ ➡️] 切换标签页，[OK] 确认选择，[返回] 返回。</>
-              ) : (
-                <>🎮 <strong>Remote Control:</strong> Use Arrow keys [⬅️ ➡️] to switch tabs, [OK] to select, [Back] to return.</>
-              )}
+              🎮 <strong>{pick('Điều khiển từ xa (Remote):', 'Remote Control:', '遥控器操作：')}</strong>{' '}
+              {pick('Dùng phím Mũi tên [⬅️ ➡️] chuyển Tab, [OK] chọn nút, [Back] quay lại.', 'Use Arrow keys [⬅️ ➡️] to switch tabs, [OK] to select, [Back] to return.', '使用方向键 [⬅️ ➡️] 切换标签页，[OK] 确认选择，[返回] 返回。')}
             </span>
             <span className="flex items-center gap-1 text-emerald-400 font-semibold">
               {pick('⚡ Tự động nhận tệp (Auto Accept) đang bật cho TV.', '⚡ Auto-accept incoming files is enabled for TV.', '⚡ 已为电视开启自动接收传入文件。')}
@@ -840,7 +835,7 @@ const ReceiveViewComponent: React.FC = () => {
                   type="button"
                   onClick={handleExportHistory}
                   className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors cursor-pointer"
-                  title="Sao lưu dữ liệu lịch sử (.json)"
+                  title={pick('Sao lưu dữ liệu lịch sử (.json)', 'Backup history (.json)', '备份接收记录 (.json)')}
                 >
                   <Database className="w-4 h-4 text-teal-400" />
                 </button>
@@ -850,7 +845,7 @@ const ReceiveViewComponent: React.FC = () => {
                   type="button"
                   onClick={() => setShowClearConfirm(true)}
                   className="p-2 rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-500/40 transition-colors cursor-pointer"
-                  title="Xóa tất cả lịch sử nhận"
+                  title={pick('Xóa tất cả lịch sử nhận', 'Clear all received history', '清空全部接收记录')}
                 >
                   <Trash2 className="w-4 h-4 text-rose-400" />
                 </button>
@@ -865,8 +860,12 @@ const ReceiveViewComponent: React.FC = () => {
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
               <div className="text-xs text-rose-200">
-                <strong className="text-white block mb-0.5">Xác nhận xóa toàn bộ lịch sử nhận:</strong>
-                Hành động này sẽ xóa vĩnh viễn {transfers.length} mục nhận khỏi danh sách. Các tệp đã lưu vào Kho Cloud sẽ không bị ảnh hưởng.
+                <strong className="text-white block mb-0.5">{pick('Xác nhận xóa toàn bộ lịch sử nhận:', 'Confirm clearing all received history:', '确认清空全部接收记录：')}</strong>
+                {pick(
+                  'Hành động này sẽ xóa vĩnh viễn {count} mục nhận khỏi danh sách. Các tệp đã lưu vào Kho Cloud sẽ không bị ảnh hưởng.',
+                  'This action will permanently remove {count} received item(s) from the list. Files already saved to Cloud Drive will not be affected.',
+                  '此操作将从列表中永久删除 {count} 条接收记录，已保存到云盘的文件不受影响。'
+                ).replace('{count}', String(transfers.length))}
               </div>
             </div>
             <div className="flex items-center justify-end gap-2.5 pt-1">
@@ -875,7 +874,7 @@ const ReceiveViewComponent: React.FC = () => {
                 onClick={() => setShowClearConfirm(false)}
                 className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-700 cursor-pointer"
               >
-                Hủy
+                {pick('Hủy', 'Cancel', '取消')}
               </button>
               <button
                 type="button"
@@ -884,7 +883,7 @@ const ReceiveViewComponent: React.FC = () => {
                 className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
               >
                 {isClearingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                <span>Xác Nhận Xóa Hết</span>
+                <span>{pick('Xác Nhận Xóa Hết', 'Confirm Clear All', '确认清空')}</span>
               </button>
             </div>
           </div>
@@ -943,11 +942,11 @@ const ReceiveViewComponent: React.FC = () => {
                       <div 
                         onClick={() => mediaSrc && setPreviewMedia({ type: 'image', url: mediaSrc, name: item.fileName })}
                         className="relative group/thumb cursor-pointer w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 shrink-0 shadow-md hover:ring-2 hover:ring-emerald-500 transition-all"
-                        title="Nhấn để xem ảnh phóng to"
+                        title={pick('Nhấn để xem ảnh phóng to', 'Click to view enlarged image', '点击查看大图')}
                       >
                         <img 
                           src={mediaSrc} 
-                          alt={item.fileName || 'Ảnh'} 
+                          alt={item.fileName || pick('Ảnh', 'Image', '图片')} 
                           className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center transition-opacity">
@@ -958,7 +957,7 @@ const ReceiveViewComponent: React.FC = () => {
                       <div 
                         onClick={() => mediaSrc && setPreviewMedia({ type: 'video', url: mediaSrc, name: item.fileName })}
                         className="relative group/thumb cursor-pointer w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden border border-emerald-500/40 bg-black shrink-0 shadow-md hover:ring-2 hover:ring-emerald-400 transition-all flex items-center justify-center"
-                        title="Nhấn để phát video"
+                        title={pick('Nhấn để phát video', 'Click to play video', '点击播放视频')}
                       >
                         <Film className="w-6 h-6 text-emerald-400" />
                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity">
@@ -976,7 +975,7 @@ const ReceiveViewComponent: React.FC = () => {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-bold text-white truncate max-w-xs sm:max-w-md">
-                          {item.fileName || 'Đoạn văn bản / Liên kết'}
+                          {item.fileName || pick('Đoạn văn bản / Liên kết', 'Text / Link', '文本 / 链接')}
                         </span>
                         {item.fileSize && (
                           <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
@@ -985,22 +984,22 @@ const ReceiveViewComponent: React.FC = () => {
                         )}
                         {isPending && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 font-semibold animate-pulse">
-                            Yêu cầu gửi tệp
+                            {pick('Yêu cầu gửi tệp', 'Incoming transfer', '文件传输请求')}
                           </span>
                         )}
                         {isCompleted && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-semibold flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" /> Đã nhận
+                            <CheckCircle2 className="w-3 h-3" /> {pick('Đã nhận', 'Received', '已接收')}
                           </span>
                         )}
                         {isDeclined && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-300 border border-rose-500/20 font-semibold">
-                            Đã từ chối
+                            {pick('Đã từ chối', 'Declined', '已拒绝')}
                           </span>
                         )}
                         {isSavedInCloud && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 font-semibold flex items-center gap-1">
-                            <Cloud className="w-3 h-3 text-sky-400" /> Đã lưu Kho Cloud
+                            <Cloud className="w-3 h-3 text-sky-400" /> {pick('Đã lưu Kho Cloud', 'Saved to Cloud', '已存至云盘')}
                           </span>
                         )}
                         {(item.isTeraBox || /terabox|1024tera|mirrobox|nephobox|teraboxapp/i.test(item.fileUrl || '')) && (
@@ -1156,10 +1155,10 @@ const ReceiveViewComponent: React.FC = () => {
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 cursor-pointer"
-                                title="Mở và tải tệp từ TeraBox"
+                                title={pick('Mở và tải tệp từ TeraBox', 'Open & download file from TeraBox', '在 TeraBox 中打开并下载')}
                               >
                                 <ExternalLink className="w-3.5 h-3.5" />
-                                <span>Mở TeraBox (1TB)</span>
+                                <span>{pick('Mở TeraBox (1TB)', 'Open TeraBox (1TB)', '打开 TeraBox (1TB)')}</span>
                               </a>
                             ) : (
                               <>
@@ -1168,10 +1167,10 @@ const ReceiveViewComponent: React.FC = () => {
                                     type="button"
                                     onClick={() => setPreviewMedia({ type: 'video', url: mediaSrc, name: item.fileName })}
                                     className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-emerald-400 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shadow-sm"
-                                    title="Xem và phát video trực tiếp"
+                                    title={pick('Xem và phát video trực tiếp', 'Watch & play video directly', '直接播放观看视频')}
                                   >
                                     <Play className="w-3.5 h-3.5 fill-current" />
-                                    <span>Xem video</span>
+                                    <span>{pick('Xem video', 'Watch video', '观看视频')}</span>
                                   </button>
                                 )}
                                 <button
@@ -1205,7 +1204,7 @@ const ReceiveViewComponent: React.FC = () => {
 
                         <button
                           type="button"
-                          title="Xóa khỏi lịch sử"
+                          title={pick('Xóa khỏi lịch sử', 'Remove from history', '从记录中移除')}
                           onClick={() => handleDelete(item.id)}
                           className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-800 transition-colors cursor-pointer"
                         >
@@ -1233,12 +1232,12 @@ const ReceiveViewComponent: React.FC = () => {
           >
             <div className="w-full flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
               <span className="text-xs sm:text-sm font-semibold text-white truncate max-w-[80%]">
-                {previewMedia.name || (previewMedia.type === 'video' ? 'Phát video' : 'Xem trước hình ảnh')}
+                {previewMedia.name || (previewMedia.type === 'video' ? pick('Phát video', 'Play video', '播放视频') : pick('Xem trước hình ảnh', 'Image preview', '图片预览'))}
               </span>
               <button
                 onClick={() => setPreviewMedia(null)}
                 className="p-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-750 transition-colors cursor-pointer"
-                title="Đóng xem trước"
+                title={pick('Đóng xem trước', 'Close preview', '关闭预览')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1252,7 +1251,7 @@ const ReceiveViewComponent: React.FC = () => {
             ) : (
               <img 
                 src={previewMedia.url} 
-                alt="Xem trước" 
+                alt={pick('Xem trước', 'Preview', '预览')} 
                 className="max-w-full max-h-[75vh] rounded-xl object-contain mx-auto shadow-lg" 
               />
             )}

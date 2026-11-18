@@ -178,14 +178,14 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       editorRef.current.focus();
       document.execCommand('bold', false);
       syncValue();
-      onFormatNotice?.('✨ Đã in đậm văn bản trực tiếp (Ctrl+B)');
+      onFormatNotice?.(pickLang(currentLang, '✨ Đã in đậm văn bản trực tiếp (Ctrl+B)', '✨ Applied bold formatting (Ctrl+B)', '✨ 已应用粗体格式 (Ctrl+B)'));
     },
     applyItalic: () => {
       if (!editorRef.current) return;
       editorRef.current.focus();
       document.execCommand('italic', false);
       syncValue();
-      onFormatNotice?.('✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)');
+      onFormatNotice?.(pickLang(currentLang, '✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)', '✨ Applied italic formatting (Ctrl+I)', '✨ 已应用斜体格式 (Ctrl+I)'));
     },
     applyCode: () => {
       if (!editorRef.current) return;
@@ -203,7 +203,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
           range.insertNode(codeEl);
         }
         syncValue();
-        onFormatNotice?.('✨ Đã định dạng mã (Ctrl+E)');
+        onFormatNotice?.(pickLang(currentLang, '✨ Đã định dạng mã (Ctrl+E)', '✨ Applied code formatting (Ctrl+E)', '✨ 已应用代码格式 (Ctrl+E)'));
       }
     },
     cleanText: () => {
@@ -283,7 +283,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       e.preventDefault();
       document.execCommand('bold', false);
       syncValue();
-      onFormatNotice?.('✨ Đã in đậm văn bản trực tiếp (Ctrl+B)');
+      onFormatNotice?.(pickLang(currentLang, '✨ Đã in đậm văn bản trực tiếp (Ctrl+B)', '✨ Applied bold formatting (Ctrl+B)', '✨ 已应用粗体格式 (Ctrl+B)'));
       return;
     }
 
@@ -292,7 +292,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
       e.preventDefault();
       document.execCommand('italic', false);
       syncValue();
-      onFormatNotice?.('✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)');
+      onFormatNotice?.(pickLang(currentLang, '✨ Đã in nghiêng văn bản trực tiếp (Ctrl+I)', '✨ Applied italic formatting (Ctrl+I)', '✨ 已应用斜体格式 (Ctrl+I)'));
       return;
     }
 
@@ -312,7 +312,7 @@ export const RichChatInput = forwardRef<RichChatInputHandle, RichChatInputProps>
           range.insertNode(codeEl);
         }
         syncValue();
-        onFormatNotice?.('✨ Đã định dạng mã (Ctrl+E)');
+        onFormatNotice?.(pickLang(currentLang, '✨ Đã định dạng mã (Ctrl+E)', '✨ Applied code formatting (Ctrl+E)', '✨ 已应用代码格式 (Ctrl+E)'));
       }
       return;
     }

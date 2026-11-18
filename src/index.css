@@ -777,3 +777,27 @@ button:active,
 .content-contained {
   contain: layout style;
 }
+
+/* ==========================================================
+   LOCAL DEVELOPER MODE CLIENT SETTINGS
+   ========================================================== */
+html.clsend-reduce-motion *,
+html.clsend-reduce-motion *::before,
+html.clsend-reduce-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html.clsend-debug-outlines main *,
+html.clsend-debug-outlines header * {
+  outline: 1px dashed rgba(16, 185, 129, 0.28) !important;
+  outline-offset: -1px !important;
+}
+
+html.clsend-debug-outlines button,
+html.clsend-debug-outlines input,
+html.clsend-debug-outlines textarea {
+  outline: 1px solid rgba(56, 189, 248, 0.4) !important;
+}

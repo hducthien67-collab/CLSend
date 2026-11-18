@@ -3,6 +3,8 @@
  * Provides robust alternative web hosting support to eliminate file upload/download errors.
  */
 
+import { pickActiveLang } from '../context/LanguageContext';
+
 export interface ExternalUploadResult {
   url: string;
   name: string;
@@ -140,5 +142,5 @@ export async function uploadToExternalWebServices(file: File, onProgress?: (pct:
     console.warn('Pomf upload notice:', err);
   }
 
-  throw lastErr || new Error('Tất cả các dịch vụ lưu trữ web bên thứ ba đều đang bận.');
+  throw lastErr || new Error(pickActiveLang('Tất cả các dịch vụ lưu trữ web bên thứ ba đều đang bận.', 'All third-party web storage services are currently busy.', '所有第三方云存储服务当前正忙。'));
 }

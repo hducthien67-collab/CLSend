@@ -34,86 +34,35 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   if (!isOpen || !message) return null;
 
-  const categories = isEn ? [
+  const categories = [
     {
       id: 'profanity_bypass',
-      title: 'Profanity Filter Bypass / Personal Insults',
-      desc: 'Using symbols, dots, or disguised slang to curse or insult users'
+      title: pick('Lách luật chửi bậy / Xúc phạm', 'Profanity Filter Bypass / Personal Insults', '绕过脏话过滤 / 侮辱他人'),
+      desc: pick('Dùng ký tự đặc biệt, dấu chấm hoặc từ ngữ né tránh để thô tục, lăng mạ', 'Using symbols, dots, or disguised slang to curse or insult users', '使用特殊符号、句号或谐音伪装粗俗辱骂他人')
     },
     {
       id: 'nsfw_18',
-      title: 'Explicit 18+ or Pornographic Media',
-      desc: 'Images, videos, or text containing explicit adult material'
+      title: pick('Nội dung hoặc ảnh 18+ khiêu dâm', 'Explicit 18+ or Pornographic Media', '18+ 成人色情或低俗内容'),
+      desc: pick('Hình ảnh, video hoặc văn bản gợi dục, đồi trụy không phù hợp', 'Images, videos, or text containing explicit adult material', '包含不雅露骨内容、成人图片、视频或低俗诱导文字')
     },
     {
       id: 'harassment',
-      title: 'Harassment / Threats / Cyberbullying',
-      desc: 'Bullying, intimidating, or bothering other members'
+      title: pick('Quấy rối / Đe dọa / Công kích', 'Harassment / Threats / Cyberbullying', '骚扰 / 威胁 / 人身攻击'),
+      desc: pick('Có hành vi bắt nạt, đe dọa hoặc làm phiền thành viên khác', 'Bullying, intimidating, or bothering other members', '存在霸凌、恐吓或持续干扰其他成员的行为')
     },
     {
       id: 'spam',
-      title: 'Spam / Scam / Phishing Ads',
-      desc: 'Flooding messages, malicious links, or unwanted promotions'
+      title: pick('Spam / Lừa đảo / Quảng cáo', 'Spam / Scam / Phishing Ads', '刷屏 / 诈骗 / 垃圾广告'),
+      desc: pick('Gửi dồn dập, chia sẻ liên kết độc hại, quảng cáo rác', 'Flooding messages, malicious links, or unwanted promotions', '高频发送垃圾消息、分享恶意钓鱼链接或推销广告')
     },
     {
       id: 'other',
-      title: 'Other Community Violations',
-      desc: 'Any inappropriate behavior disrupting the chat experience'
-    }
-  ] : isZh ? [
-    {
-      id: 'profanity_bypass',
-      title: '绕过脏话过滤 / 侮辱他人',
-      desc: '使用特殊符号、句号或谐音伪装粗俗辱骂他人'
-    },
-    {
-      id: 'nsfw_18',
-      title: '18+ 成人色情或低俗内容',
-      desc: '包含不雅露骨内容、成人图片、视频或低俗诱导文字'
-    },
-    {
-      id: 'harassment',
-      title: '骚扰 / 威胁 / 人身攻击',
-      desc: '存在霸凌、恐吓或持续干扰其他成员的行为'
-    },
-    {
-      id: 'spam',
-      title: '刷屏 / 诈骗 / 垃圾广告',
-      desc: '高频发送垃圾消息、分享恶意钓鱼链接或推销广告'
-    },
-    {
-      id: 'other',
-      title: '其他违规行为',
-      desc: '任何影响聊天室安全与正常体验的不良行为'
-    }
-  ] : [
-    {
-      id: 'profanity_bypass',
-      title: 'Lách luật chửi bậy / Xúc phạm',
-      desc: 'Dùng ký tự đặc biệt, dấu chấm hoặc từ ngữ né tránh để thô tục, lăng mạ'
-    },
-    {
-      id: 'nsfw_18',
-      title: 'Nội dung hoặc ảnh 18+ khiêu dâm',
-      desc: 'Hình ảnh, video hoặc văn bản gợi dục, đồi trụy không phù hợp'
-    },
-    {
-      id: 'harassment',
-      title: 'Quấy rối / Đe dọa / Công kích',
-      desc: 'Có hành vi bắt nạt, đe dọa hoặc làm phiền thành viên khác'
-    },
-    {
-      id: 'spam',
-      title: 'Spam / Lừa đảo / Quảng cáo',
-      desc: 'Gửi dồn dập, chia sẻ liên kết độc hại, quảng cáo rác'
-    },
-    {
-      id: 'other',
-      title: 'Hành vi vi phạm khác',
-      desc: 'Bất kỳ hành vi không lành mạnh nào ảnh hưởng đến phòng chat'
+      title: pick('Hành vi vi phạm khác', 'Other Community Violations', '其他违规行为'),
+      desc: pick('Bất kỳ hành vi không lành mạnh nào ảnh hưởng đến phòng chat', 'Any inappropriate behavior disrupting the chat experience', '任何影响聊天室安全与正常体验的不良行为')
     }
   ];
 
@@ -157,7 +106,7 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
       }, 2000);
     } catch (err) {
       console.error('Submit report error:', err);
-      alert(pick('Không thể gửi báo cáo, vui lòng thử lại sau.', 'Failed to submit report. Please try again.', '无法提交举报，请稍后重试。'));
+      setErrorMsg(pick('Không thể gửi báo cáo, vui lòng thử lại sau.', 'Failed to submit report. Please try again.', '无法提交举报，请稍后重试。'));
       setSubmitting(false);
     }
   };
@@ -216,7 +165,7 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-semibold text-slate-200">
-                  {pick(`Người gửi: ${message.senderName}`, `Sender: ${message.senderName}`, `发送者：${message.senderName}`)}
+                  {`${pick('Người gửi:', 'Sender:', '发送者：')} ${message.senderName}`}
                 </span>
                 <span className="text-[11px] text-slate-500">{message.senderDevice}</span>
               </div>
@@ -274,6 +223,12 @@ export const ReportMessageModal: React.FC<ReportMessageModalProps> = ({
                 className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-rose-500 transition-colors resize-none"
               />
             </div>
+
+            {errorMsg && (
+              <div className="px-3 py-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-medium">
+                {errorMsg}
+              </div>
+            )}
 
             <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-800">
               <button

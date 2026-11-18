@@ -2,7 +2,7 @@ import { UserProfileModal } from '../UserProfileModal';
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { yieldToMain } from '../../utils/scheduler';
 import { useAuth } from '../../context/AuthContext';
-import { useLanguage } from '../../context/LanguageContext';
+import { useLanguage, pickLang, getLocaleTag } from '../../context/LanguageContext';
 import { ChatInlineVideoPlayer } from '../ChatInlineVideoPlayer';
 import { ChatMediaImage } from '../ChatMediaImage';
 import { db } from '../../firebase/config';
@@ -96,9 +96,7 @@ const ROOM_PRESET_COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b
 export const MobileChatView: React.FC = () => {
   const { currentUser, userProfile, settings } = useAuth();
   const { t, currentLang } = useLanguage();
-  const isVi = currentLang === 'vi';
-  const isZh = currentLang === 'zh-CN' || currentLang === 'zh-TW';
-  const pick = <T,>(vi: T, en: T, zh: T): T => (isVi ? vi : isZh ? zh : en);
+  const pick = <T = string,>(vi: T, en: T, zh?: T): T => pickLang(currentLang, vi, en, zh);
   
   // Room navigation state: 'rooms_list' | 'chat_feed'
   const [viewMode, setViewMode] = useState<'rooms_list' | 'chat_feed'>('chat_feed');
@@ -163,7 +161,7 @@ export const MobileChatView: React.FC = () => {
     return extractRoomMediaFromMessages(messages, {
       roomId: activeRoomId,
       currentUserUid: currentUser?.uid,
-      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || 'Bạn',
+      currentUserName: memberNamesMap[currentUser?.uid || ''] || userProfile?.displayName || pick('Bạn', 'You', '你'),
       currentUserAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || null,
       memberNamesMap,
       memberMetaMap,
@@ -191,7 +189,7 @@ export const MobileChatView: React.FC = () => {
 
   const activeRoom = rooms.find(r => r.id === activeRoomId) || rooms[0] || {
     id: 'public-relay-lounge',
-    name: 'Đại Sảnh Toàn Cầu',
+    name: t('chat.public_lounge'),
     code: 'PUBLIC',
     isPrivate: false,
     avatarColor: '#10b981',
@@ -250,6 +248,8 @@ export const MobileChatView: React.FC = () => {
       });
       setMemberNamesMap((prev) => ({ ...prev, ...names }));
       setMemberMetaMap((prev) => ({ ...prev, ...meta }));
+    }, (err) => {
+      console.warn('Mobile presence listener notice:', err);
     });
 
     const usersRef = collection(db, 'users');
@@ -275,6 +275,8 @@ export const MobileChatView: React.FC = () => {
       });
       setMemberNamesMap((prev) => ({ ...prev, ...names }));
       setMemberMetaMap((prev) => ({ ...prev, ...meta }));
+    }, (err) => {
+      console.warn('Mobile users listener notice:', err);
     });
 
     return () => {
@@ -302,6 +304,8 @@ export const MobileChatView: React.FC = () => {
       });
 
       setRooms(roomList);
+    }, (err) => {
+      console.warn('Mobile rooms listener notice:', err);
     });
 
     return () => unsubscribe();
@@ -548,8 +552,8 @@ export const MobileChatView: React.FC = () => {
       const isRoomOwner = activeRoom.ownerId === currentUser.uid || activeRoom.createdBy === currentUser.uid;
       const newMember: RoomMember = {
         uid: currentUser.uid,
-        displayName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Người dùng',
-        deviceName: settings?.deviceName || 'Điện thoại',
+        displayName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户'),
+        deviceName: settings?.deviceName || pick('Điện thoại', 'Mobile', '手机'),
         avatarColor: settings?.avatarColor || '#10b981',
         role: isRoomOwner ? 'owner' : 'member',
         joinedAt: new Date().toISOString(),
@@ -586,7 +590,8 @@ export const MobileChatView: React.FC = () => {
     if (hasProfanity) {
       playShieldAlertSound();
       setModerationWarning(
-        `⚠️ Cảnh báo: Tin nhắn chứa từ ngữ vi phạm tiêu chuẩn cộng đồng ("${detectedList.join(', ')}"). Hệ thống đã tự động lọc dấu sao ***.`
+        pick('⚠️ Cảnh báo: Tin nhắn chứa từ ngữ vi phạm tiêu chuẩn cộng đồng ("{words}"). Hệ thống đã tự động lọc dấu sao ***.', '⚠️ Warning: Message contains inappropriate words ("{words}"). Filtered automatically with ***.', '⚠️ 警告：消息包含不当词汇（“{words}”），系统已自动替换为 ***。')
+          .replace('{words}', detectedList.join(', '))
       );
       setTimeout(() => setModerationWarning(null), 5000);
     }
@@ -598,7 +603,9 @@ export const MobileChatView: React.FC = () => {
           if (aiCheck?.isFlagged && (aiCheck.severity === 'high' || aiCheck.severity === 'critical')) {
             playShieldAlertSound();
             setModerationWarning(
-              `🚫 [AI Kiểm Duyệt] Cảnh báo vi phạm: ${aiCheck.message || aiCheck.matchedRule}. Nhắc nhở: "${aiCheck.remindText || 'Vui lòng tuân thủ nội quy'}"`
+              pick('🚫 [AI Kiểm Duyệt] Cảnh báo vi phạm: {msg}. Nhắc nhở: "{remind}"', '🚫 [AI Moderation] Policy violation: {msg}. Reminder: "{remind}"', '🚫 [AI 审核] 违规警告：{msg}。提示：“{remind}”')
+                .replace('{msg}', aiCheck.message || aiCheck.matchedRule || '')
+                .replace('{remind}', aiCheck.remindText || pick('Vui lòng tuân thủ nội quy', 'Please follow community rules', '请遵守社区规则'))
             );
             setTimeout(() => setModerationWarning(null), 7000);
           }
@@ -614,9 +621,9 @@ export const MobileChatView: React.FC = () => {
       id: tempId,
       roomId: activeRoomId,
       senderId: currentUser.uid,
-      senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Người dùng di động',
+      senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || pick('Người dùng di động', 'Mobile User', '移动用户'),
       senderEmail: currentUser.email || '',
-      senderDevice: settings?.deviceName || 'Điện thoại',
+      senderDevice: settings?.deviceName || pick('Điện thoại', 'Mobile', '手机'),
       senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
       senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
       text: wrapSecureBase64Message(sanitizedText),
@@ -662,7 +669,10 @@ export const MobileChatView: React.FC = () => {
       const secCheck = inspectFileSecurity(file);
       if (!secCheck.isSafe) {
         playShieldAlertSound();
-        setModerationWarning(secCheck.error || `Tệp "${file.name}" không đáp ứng tiêu chuẩn an toàn.`);
+        setModerationWarning(
+          secCheck.error ||
+          pick('Tệp "{name}" không đáp ứng tiêu chuẩn an toàn.', 'File "{name}" failed security checks.', '文件“{name}”未通过安全检查。').replace('{name}', file.name)
+        );
         setTimeout(() => setModerationWarning(null), 6000);
         setIsUploading(false);
         return;
@@ -735,8 +745,8 @@ export const MobileChatView: React.FC = () => {
         setModerationWarning(
           precheck.reason ||
           (fileIsVideo
-            ? `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`
-            : `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`)
+            ? pick('🚫 Cảnh báo: Video "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Video "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：视频“{name}”包含 18+/色情内容，已被立即删除！').replace('{name}', file.name)
+            : pick('🚫 Cảnh báo: Ảnh "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Image "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：图片“{name}”包含 18+/色情内容，已被立即删除！').replace('{name}', file.name))
         );
         setTimeout(() => setModerationWarning(null), 9000);
         setIsUploading(false);
@@ -751,7 +761,10 @@ export const MobileChatView: React.FC = () => {
         if (!imgMod.safe) {
           deleteServerUploadedFile(fileUrl);
           playShieldAlertSound();
-          setModerationWarning(imgMod.reason || `🚫 Cảnh báo: Ảnh "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setModerationWarning(
+            imgMod.reason ||
+            pick('🚫 Cảnh báo: Ảnh "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Image "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：图片“{name}”包含 18+/色情内容，已被立即删除！').replace('{name}', file.name)
+          );
           setTimeout(() => setModerationWarning(null), 9000);
           setIsUploading(false);
           return;
@@ -761,7 +774,10 @@ export const MobileChatView: React.FC = () => {
         if (!vidMod.safe) {
           deleteServerUploadedFile(fileUrl);
           playShieldAlertSound();
-          setModerationWarning(vidMod.reason || `🚫 Cảnh báo: Video "${file.name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!`);
+          setModerationWarning(
+            vidMod.reason ||
+            pick('🚫 Cảnh báo: Video "{name}" chứa nội dung 18+/khiêu dâm nên đã bị xóa ngay lập tức!', '🚫 Warning: Video "{name}" contains 18+/explicit content and was removed immediately!', '🚫 警告：视频“{name}”包含 18+/色情内容，已被立即删除！').replace('{name}', file.name)
+          );
           setTimeout(() => setModerationWarning(null), 9000);
           setIsUploading(false);
           return;
@@ -784,12 +800,14 @@ export const MobileChatView: React.FC = () => {
       const payload = cleanFirestoreObject({
         roomId: activeRoomId,
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Người dùng di động',
+        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || pick('Người dùng di động', 'Mobile User', '移动用户'),
         senderEmail: currentUser.email || '',
-        senderDevice: settings?.deviceName || 'Điện thoại',
+        senderDevice: settings?.deviceName || pick('Điện thoại', 'Mobile', '手机'),
         senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
         senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
-        text: fileIsImage ? (isGif ? 'Đã gửi một ảnh GIF' : 'Đã gửi một hình ảnh') : `Đã gửi tệp: ${file.name}`,
+        text: fileIsImage
+          ? (isGif ? pick('Đã gửi một ảnh GIF', 'Sent a GIF', '发送了一张 GIF 动图') : pick('Đã gửi một hình ảnh', 'Sent an image', '发送了一张图片'))
+          : pick('Đã gửi tệp: {name}', 'Sent file: {name}', '发送了文件：{name}').replace('{name}', file.name),
         fileName: file.name,
         fileSize: file.size,
         fileType: file.type || (isGif ? 'image/gif' : 'application/octet-stream'),
@@ -845,12 +863,12 @@ export const MobileChatView: React.FC = () => {
       const payload = cleanFirestoreObject({
         roomId: activeRoomId,
         senderId: currentUser.uid,
-        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || 'Người dùng',
+        senderName: userProfile?.displayName || currentUser.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户'),
         senderEmail: currentUser.email || '',
-        senderDevice: settings?.deviceName || 'Điện thoại',
+        senderDevice: settings?.deviceName || pick('Điện thoại', 'Mobile', '手机'),
         senderAvatar: userProfile?.customAvatarUrl || settings?.customAvatarUrl || currentUser?.photoURL || '',
         senderAvatarColor: userProfile?.avatarColor || settings?.avatarColor || '#10b981',
-        text: isImg ? pick('Đã chia sẻ một hình ảnh từ Kho Cloud', 'Shared an image from Cloud Drive', '从云盘分享了一张图片') : pick(`Đã chia sẻ tệp từ Kho Cloud: ${cf.name}`, `Shared file from Cloud: ${cf.name}`, `从云盘分享了文件：${cf.name}`),
+        text: isImg ? pick('Đã chia sẻ một hình ảnh từ Kho Cloud', 'Shared an image from Cloud Drive', '从云盘分享了一张图片') : pick('Đã chia sẻ tệp từ Kho Cloud: {name}', 'Shared file from Cloud: {name}', '从云盘分享了文件：{name}').replace('{name}', cf.name),
         fileName: cf.name,
         fileSize: cf.size,
         fileType: cf.type || 'application/octet-stream',
@@ -867,7 +885,11 @@ export const MobileChatView: React.FC = () => {
 
     if (blockedNames.length > 0) {
       playShieldAlertSound();
-      setModerationWarning(`🚫 Cảnh báo: AI đã phát hiện và xóa ngay ${blockedNames.length} ảnh/video 18+/khiêu dâm ("${blockedNames.join(', ')}") khỏi Đại Sảnh Toàn Cầu!`);
+      setModerationWarning(
+        pick('🚫 Cảnh báo: AI đã phát hiện và xóa ngay {count} ảnh/video 18+/khiêu dâm ("{names}") khỏi Đại Sảnh Toàn Cầu!', '🚫 Warning: AI detected and immediately removed {count} 18+/explicit media item(s) ("{names}") from Global Lounge!', '🚫 警告：AI 检测到并立即从全球大厅移除了 {count} 个 18+/色情媒体（“{names}”）！')
+          .replace('{count}', String(blockedNames.length))
+          .replace('{names}', blockedNames.join(', '))
+      );
       setTimeout(() => setModerationWarning(null), 9000);
     }
 
@@ -948,7 +970,7 @@ export const MobileChatView: React.FC = () => {
     const isCreatorDev = isDevUser(currentUser.email);
     const creatorMember: RoomMember = {
       uid: currentUser.uid,
-      displayName: userProfile?.displayName || currentUser.displayName || 'Trưởng phòng',
+      displayName: userProfile?.displayName || currentUser.displayName || pick('Trưởng phòng', 'Room Owner', '房主'),
       deviceName: settings.deviceName,
       avatarColor: settings.avatarColor || '#10b981',
       role: 'owner',
@@ -964,15 +986,15 @@ export const MobileChatView: React.FC = () => {
         code: randomCode,
         isPrivate: isPrivate,
         createdBy: currentUser.uid,
-        createdByName: userProfile?.displayName || 'Người dùng',
+        createdByName: userProfile?.displayName || pick('Người dùng', 'User', '用户'),
         ownerId: currentUser.uid,
-        ownerName: userProfile?.displayName || currentUser.displayName || 'Trưởng phòng',
+        ownerName: userProfile?.displayName || currentUser.displayName || pick('Trưởng phòng', 'Room Owner', '房主'),
         avatar: newRoomAvatar || '',
         avatarColor: newRoomColor || '#10b981',
         createdAt: new Date().toISOString(),
         description: isPrivate 
-          ? 'Phòng riêng tư (Nhập mã ID để vào)' 
-          : 'Phòng cộng đồng (Tự do tham gia)',
+          ? pick('Phòng riêng tư (Nhập mã ID để vào)', 'Private room (Enter ID code to join)', '私密房间（输入 ID 代码加入）')
+          : pick('Phòng cộng đồng (Tự do tham gia)', 'Community room (Open to join)', '社区房间（自由加入）'),
         members: [creatorMember],
         membersCount: 1
       };
@@ -1018,7 +1040,7 @@ export const MobileChatView: React.FC = () => {
         const isDev = isDevUser(currentUser.email);
         const newMember: RoomMember = {
           uid: currentUser.uid,
-          displayName: userProfile?.displayName || currentUser.displayName || 'Thành viên',
+          displayName: userProfile?.displayName || currentUser.displayName || pick('Thành viên', 'Member', '成员'),
           deviceName: settings.deviceName,
           avatarColor: settings.avatarColor || '#3b82f6',
           role: 'member',
@@ -1042,7 +1064,7 @@ export const MobileChatView: React.FC = () => {
       setShowJoinModal(false);
       setJoinCodeInput('');
     } else {
-      setJoinError('Không tìm thấy phòng với mã ID này. Vui lòng kiểm tra lại!');
+      setJoinError(pick('Không tìm thấy phòng với mã ID này. Vui lòng kiểm tra lại!', 'No room found with this ID code. Please check again!', '未找到对应 ID 代码的房间，请重新检查！'));
     }
   };
 
@@ -1101,7 +1123,7 @@ export const MobileChatView: React.FC = () => {
           <div className="flex items-center gap-1.5 min-w-0 pr-1">
             <MessagesSquare className="w-4 h-4 text-emerald-400 shrink-0" />
             <h2 className="text-xs sm:text-sm font-bold text-white tracking-tight truncate whitespace-nowrap">
-              Phòng Chat Trực Tuyến
+              {pick('Phòng Chat Trực Tuyến', 'Online Chat Rooms', '在线聊天室')}
             </h2>
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -1177,8 +1199,8 @@ export const MobileChatView: React.FC = () => {
                 <div className="flex-1 min-w-0 space-y-0.5">
                   {/* Line 1: Room Name + Privacy Badge */}
                   <div className="flex items-center justify-between gap-1.5">
-                    <h3 className="text-xs font-bold text-white truncate" title={room.name}>
-                      {room.name}
+                    <h3 className="text-xs font-bold text-white truncate" title={room.id === 'public-relay-lounge' ? t('chat.public_lounge') : room.name}>
+                      {room.id === 'public-relay-lounge' ? t('chat.public_lounge') : room.name}
                     </h3>
                     <span className={`text-[9px] font-semibold px-1.5 py-0.2 rounded-full flex items-center gap-0.5 shrink-0 ${
                       room.isPrivate !== false 
@@ -1186,20 +1208,22 @@ export const MobileChatView: React.FC = () => {
                         : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                     }`}>
                       {room.isPrivate !== false ? <Lock className="w-2 h-2" /> : <Globe className="w-2 h-2" />}
-                      {room.isPrivate !== false ? 'Riêng tư' : 'Công cộng'}
+                      {room.isPrivate !== false ? pick('Riêng tư', 'Private', '私密') : pick('Công cộng', 'Public', '公开')}
                     </span>
                   </div>
 
                   {/* Line 2: Full continuous description */}
                   <p className="text-[10.5px] text-slate-400 truncate leading-tight">
-                    {room.description || (room.id === 'public-relay-lounge' ? 'Sảnh trò chuyện công khai toàn cầu' : 'Phòng chat kết nối trực tuyến')}
+                    {room.id === 'public-relay-lounge'
+                      ? t('chat.global_lounge_desc')
+                      : (room.description || pick('Phòng chat kết nối trực tuyến', 'Online chat room', '在线互动聊天室'))}
                   </p>
 
                   {/* Line 3: Meta details */}
                   <div className="flex items-center gap-2 text-[9.5px] text-slate-500">
                     <span className="flex items-center gap-0.5 whitespace-nowrap">
                       <Users className="w-2.5 h-2.5" />
-                      {room.members?.length || room.membersCount || 1} thành viên
+                      {pick('{count} thành viên', '{count} members', '{count} 位成员').replace('{count}', String(room.members?.length || room.membersCount || 1))}
                     </span>
                     {room.code && (
                       <>
@@ -1213,7 +1237,7 @@ export const MobileChatView: React.FC = () => {
                       <>
                         <span>•</span>
                         <span className="text-amber-400 flex items-center gap-0.5 font-semibold whitespace-nowrap">
-                          <Crown className="w-2.5 h-2.5" /> Trưởng phòng
+                          <Crown className="w-2.5 h-2.5" /> {t('chat.owner')}
                         </span>
                       </>
                     )}
@@ -1410,10 +1434,10 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={() => setViewMode('rooms_list')}
           className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 text-[11px] font-semibold shrink-0 border border-slate-700/60 active:scale-95 transition-all mr-1.5"
-          title="Chọn phòng khác"
+          title={pick("Chọn phòng khác", "Switch room", "切换房间")}
         >
           <ChevronLeft className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="hidden xs:inline">Phòng</span>
+          <span className="hidden xs:inline">{pick('Phòng', 'Rooms', '房间')}</span>
         </button>
 
         {/* Center: Room Avatar + Title + Status */}
@@ -1436,14 +1460,14 @@ export const MobileChatView: React.FC = () => {
 
           <div className="min-w-0">
             <h2 className="text-xs font-bold text-white truncate flex items-center gap-1 leading-tight">
-              <span>{activeRoom.name}</span>
+              <span>{activeRoom.id === 'public-relay-lounge' ? t('chat.public_lounge') : activeRoom.name}</span>
               {activeRoom.isPrivate !== false && <Lock className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
             </h2>
             <p className="text-[9px] text-slate-400 truncate flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
-              <span>{activeRoom.members?.length || activeRoom.membersCount || 1} thành viên</span>
+              <span>{pick('{count} thành viên', '{count} members', '{count} 位成员').replace('{count}', String(activeRoom.members?.length || activeRoom.membersCount || 1))}</span>
               <span>•</span>
-              <span className="font-mono text-emerald-400/90">{messages.length} tin</span>
+              <span className="font-mono text-emerald-400/90">{pick('{count} tin', '{count} msgs', '{count} 条').replace('{count}', String(messages.length))}</span>
             </p>
           </div>
         </div>
@@ -1455,7 +1479,7 @@ export const MobileChatView: React.FC = () => {
               type="button"
               onClick={() => setShowResetServerModal(true)}
               className="w-7 h-7 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 flex items-center justify-center shrink-0 active:scale-95 transition-all"
-              title="Quyền DEV: Reset máy chủ trò chuyện để chống lag"
+              title={pick("Quyền DEV: Reset máy chủ trò chuyện để chống lag", "DEV Action: Reset chat server to clear lag", "DEV 权限：重置聊天服务器以消除卡顿")}
             >
               <Zap className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
             </button>
@@ -1464,7 +1488,7 @@ export const MobileChatView: React.FC = () => {
             type="button"
             onClick={() => setShowRoomDetails(true)}
             className="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-emerald-400 flex items-center justify-center shrink-0 border border-slate-700/60 active:scale-95 transition-all"
-            title="Xem thông tin và cấu trúc phòng"
+            title={pick("Xem thông tin và cấu trúc phòng", "View room details and structure", "查看房间信息和结构")}
           >
             <Info className="w-3.5 h-3.5 text-emerald-400" />
           </button>
@@ -1535,7 +1559,7 @@ export const MobileChatView: React.FC = () => {
                 const isMe = msg.senderId === currentUser?.uid;
                 const isDevMsg = !!(msg.isDevMessage || isDevUser(msg.senderEmail) || (msg.senderName && msg.senderName.includes('DEV')));
                 const senderLiveName = isMe 
-                  ? (userProfile?.displayName || currentUser?.displayName || settings?.deviceName || 'Bạn')
+                  ? (userProfile?.displayName || currentUser?.displayName || settings?.deviceName || pick('Bạn', 'You', '你'))
                   : (memberNamesMap[msg.senderId] || memberNamesMap[msg.senderDevice] || msg.senderName);
 
                 const rawAttachments: Array<{ name?: string; size?: number; type?: string; data?: string; url?: string }> =
@@ -1631,14 +1655,19 @@ export const MobileChatView: React.FC = () => {
                           <div className={`flex items-center gap-1.5 mb-1 px-1 text-[10px] text-slate-400 flex-wrap ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                             {/* Avatar on top of chat frame */}
                             <div 
-                              className="relative shrink-0 select-none cursor-pointer active:scale-95 transition-transform"
+                              className={`relative shrink-0 select-none transition-transform ${isMe ? '' : 'cursor-pointer active:scale-95'}`}
                               onClick={() => {
+                                if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
                                 setSelectedProfileUser({
-                                  uid: msg.senderId,
+                                  uid: msg.senderId || msg.senderDevice,
                                   displayName: senderLiveName,
-                                  photoURL: effectiveAvatarUrl,
+                                  email: msg.senderEmail || '',
+                                  avatarUrl: effectiveAvatarUrl,
                                   avatarColor: effectiveAvatarColor,
                                   deviceName: msg.senderDevice,
+                                  isDev: isDevMsg,
+                                  isOnline: Boolean(senderMeta?.isOnline),
+                                  isMe: false,
                                 });
                               }}
                             >
@@ -1661,12 +1690,28 @@ export const MobileChatView: React.FC = () => {
                                   <Crown className="w-1.5 h-1.5 text-slate-950 fill-slate-950" />
                                 </span>
                               ) : (isMe || senderMeta?.isOnline) ? (
-                                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-slate-900 shadow-xs" title="Đang online (Thời gian sống 3p)" />
+                                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 ring-1 ring-slate-900 shadow-xs" title={pick("Đang online (Thời gian sống 3p)", "Online (3m active TTL)", "在线（3 分钟活跃）")} />
                               ) : null}
                             </div>
 
                             {isDevMsg ? (
-                              <div className="flex items-center gap-1 flex-wrap">
+                              <div
+                                className={`flex items-center gap-1 flex-wrap ${isMe ? '' : 'cursor-pointer'}`}
+                                onClick={() => {
+                                  if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
+                                  setSelectedProfileUser({
+                                    uid: msg.senderId || msg.senderDevice,
+                                    displayName: senderLiveName,
+                                    email: msg.senderEmail || '',
+                                    avatarUrl: effectiveAvatarUrl,
+                                    avatarColor: effectiveAvatarColor,
+                                    deviceName: msg.senderDevice,
+                                    isDev: isDevMsg,
+                                    isOnline: Boolean(senderMeta?.isOnline),
+                                    isMe: false,
+                                  });
+                                }}
+                              >
                                 <span className="font-extrabold text-[11px] bg-gradient-to-r from-amber-300 via-emerald-300 to-teal-300 bg-clip-text text-transparent truncate max-w-[120px]">
                                   {senderLiveName}
                                 </span>
@@ -1675,14 +1720,30 @@ export const MobileChatView: React.FC = () => {
                                 </span>
                               </div>
                             ) : (
-                              <span className={`font-semibold truncate max-w-[120px] ${isMe ? 'text-slate-300' : 'text-emerald-400'}`}>
-                                {isMe ? 'Bạn' : senderLiveName}
+                              <span
+                                onClick={() => {
+                                  if (isMe || (currentUser?.uid && msg.senderId === currentUser.uid)) return;
+                                  setSelectedProfileUser({
+                                    uid: msg.senderId || msg.senderDevice,
+                                    displayName: senderLiveName,
+                                    email: msg.senderEmail || '',
+                                    avatarUrl: effectiveAvatarUrl,
+                                    avatarColor: effectiveAvatarColor,
+                                    deviceName: msg.senderDevice,
+                                    isDev: isDevMsg,
+                                    isOnline: Boolean(senderMeta?.isOnline),
+                                    isMe: false,
+                                  });
+                                }}
+                                className={`font-semibold truncate max-w-[120px] ${isMe ? 'text-slate-300' : 'text-emerald-400 cursor-pointer'}`}
+                              >
+                                {isMe ? pick('Bạn', 'You', '你') : senderLiveName}
                               </span>
                             )}
 
-                            <span className="text-slate-500 text-[9px]">• {msg.senderDevice || 'Điện thoại'}</span>
+                            <span className="text-slate-500 text-[9px]">• {msg.senderDevice || pick('Điện thoại', 'Mobile', '手机')}</span>
                             <span className="text-slate-500 font-mono text-[9px]">
-                              • {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              • {new Date(msg.createdAt).toLocaleTimeString(getLocaleTag(currentLang), { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           </div>
                         );
@@ -1702,7 +1763,7 @@ export const MobileChatView: React.FC = () => {
                         {isDevMsg && (
                           <div className="flex items-center gap-1 pb-0.5 border-b border-amber-500/30 text-[8.5px] text-amber-300 font-bold">
                             <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400 shrink-0" />
-                            <span>DEV Chính Chủ</span>
+                            <span>{pick('DEV Chính Chủ', 'Official DEV', '官方 DEV')}</span>
                           </div>
                         )}
 
@@ -1723,8 +1784,8 @@ export const MobileChatView: React.FC = () => {
                                     roomMedia: roomMediaGallery.unifiedMedia,
                                     activeItem: {
                                       id: `${msg.id}_i_${mediaIdx}`,
-                                      name: media.name || 'Hình ảnh',
-                                      title: media.name || 'Hình ảnh',
+                                      name: media.name || pick('Hình ảnh', 'Image', '图片'),
+                                      title: media.name || pick('Hình ảnh', 'Image', '图片'),
                                       src: viewerImgUrl,
                                       downloadUrl: media.mediaDownloadUrl || media.rawUrl,
                                       thumbnail: media.imgSrc || null,
@@ -1732,7 +1793,7 @@ export const MobileChatView: React.FC = () => {
                                       type: 'image',
                                       mimeType: media.isGif ? 'image/gif' : 'image/jpeg',
                                       isGif: media.isGif,
-                                      senderName: isMe ? 'Bạn' : senderLiveName,
+                                      senderName: isMe ? pick('Bạn', 'You', '你') : senderLiveName,
                                       senderAvatar: effectiveSenderAvatar || null,
                                       createdAt: msg.createdAt,
                                       roomId: activeRoomId,
@@ -1760,7 +1821,7 @@ export const MobileChatView: React.FC = () => {
                                 )}
                                 <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity pointer-events-none z-10">
                                   <span className="px-2 py-1 rounded-lg bg-black/60 text-white text-[10px] font-semibold flex items-center gap-1">
-                                    <Eye className="w-3 h-3" /> Xem lớn
+                                    <Eye className="w-3 h-3" /> {pick('Xem lớn', 'Expand', '查看大图')}
                                   </span>
                                 </div>
                               </div>
@@ -1792,7 +1853,7 @@ export const MobileChatView: React.FC = () => {
                                         size: media.size,
                                         type: 'video',
                                         mimeType: 'video/mp4',
-                                        senderName: isMe ? 'Bạn' : senderLiveName,
+                                        senderName: isMe ? pick('Bạn', 'You', '你') : senderLiveName,
                                         senderAvatar: effectiveSenderAvatar || null,
                                         createdAt: msg.createdAt,
                                         roomId: activeRoomId,
@@ -1840,7 +1901,7 @@ export const MobileChatView: React.FC = () => {
                         {/* Message Meta: Time & Actions */}
                         <div className="flex items-center justify-end gap-2 text-[9px] opacity-75 pt-0.5">
                           <span className="font-mono">
-                            {new Date(msg.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                            {new Date(msg.createdAt).toLocaleTimeString(getLocaleTag(currentLang), { hour: '2-digit', minute: '2-digit' })}
                           </span>
 
                           {/* 1-Tap Copy Message Button */}
@@ -1856,7 +1917,7 @@ export const MobileChatView: React.FC = () => {
                                 }
                               }}
                               className="opacity-70 hover:opacity-100 text-slate-300 hover:text-emerald-300 transition-opacity p-0.5 flex items-center gap-0.5 cursor-pointer"
-                              title="Sao chép nội dung tin nhắn"
+                              title={pick("Sao chép nội dung tin nhắn", "Copy message text", "复制消息内容")}
                             >
                               {copiedMsgId === msg.id ? (
                                 <Check className="w-3 h-3 text-emerald-400" />
@@ -1871,7 +1932,7 @@ export const MobileChatView: React.FC = () => {
                               type="button"
                               onClick={() => handleDeleteMessage(msg.id)}
                               className="opacity-70 hover:opacity-100 text-rose-300 hover:text-white transition-opacity p-0.5 flex items-center gap-0.5"
-                              title={isDevUser(currentUser?.email) && !isMe ? "Quyền DEV: Tiêu hủy tin nhắn vi phạm" : "Xóa tin nhắn"}
+                              title={isDevUser(currentUser?.email) && !isMe ? pick("Quyền DEV: Tiêu hủy tin nhắn vi phạm", "DEV Action: Destruct violating message", "DEV 权限：销毁违规消息") : pick("Xóa tin nhắn", "Delete message", "删除消息")}
                             >
                               <Trash2 className="w-3 h-3" />
                               {isDevUser(currentUser?.email) && !isMe && (
@@ -1883,7 +1944,7 @@ export const MobileChatView: React.FC = () => {
                               type="button"
                               onClick={() => setReportTarget(msg)}
                               className="opacity-60 hover:opacity-100 text-slate-400 hover:text-amber-300 transition-opacity p-0.5"
-                              title="Báo cáo"
+                              title={pick("Báo cáo", "Report", "举报")}
                             >
                               <Flag className="w-3 h-3" />
                             </button>
@@ -1917,7 +1978,7 @@ export const MobileChatView: React.FC = () => {
         <div className="px-4 py-1.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between text-xs text-emerald-400">
           <span className="flex items-center gap-1.5">
             <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Đang tải ảnh/tệp đính kèm...
+            {pick('Đang tải ảnh/tệp đính kèm...', 'Uploading attachment...', '正在上传附件...')}
           </span>
           <span className="font-mono">{uploadPercent || 10}%</span>
         </div>
@@ -1928,7 +1989,7 @@ export const MobileChatView: React.FC = () => {
         <div className="flex items-center justify-between gap-1 px-2.5 py-0.5 text-[8.5px] text-amber-300/90 bg-amber-500/10 border-t border-amber-500/20 shrink-0">
           <div className="flex items-center gap-1 min-w-0 truncate">
             <Crown className="w-2.5 h-2.5 text-amber-400 fill-amber-400 shrink-0" />
-            <span className="text-slate-400 font-sans">Gửi tin tư cách:</span>
+            <span className="text-slate-400 font-sans">{pick('Gửi tin tư cách:', 'Sending as:', '发送身份：')}</span>
             <span className="font-bold text-amber-200 truncate">
               {(userProfile?.displayName || currentUser?.displayName || settings?.deviceName || 'Admin').trim()} (DEV)
             </span>
@@ -1938,10 +1999,10 @@ export const MobileChatView: React.FC = () => {
               type="button"
               onClick={() => setShowResetServerModal(true)}
               className="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[7.5px] font-bold flex items-center gap-0.5 transition-all active:scale-95"
-              title="Quyền DEV: Reset máy chủ trò chuyện để dọn dẹp tin nhắn và chống lag"
+              title={pick("Quyền DEV: Reset máy chủ trò chuyện để dọn dẹp tin nhắn và chống lag", "DEV Action: Reset chat server to clear messages and lag", "DEV 权限：重置聊天服务器以清理消息并防止卡顿")}
             >
               <Zap className="w-2 h-2 text-rose-400 fill-rose-400" />
-              <span>Reset Server</span>
+              <span>{pick('Reset Server', 'Reset Server', '重置服务器')}</span>
             </button>
             <span className="text-[7.5px] font-mono font-bold px-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">
               👑 DEV
@@ -1952,7 +2013,13 @@ export const MobileChatView: React.FC = () => {
 
       {/* Moderation Warning Toast/Banner */}
       {moderationWarning && (() => {
-        const isSevereBlock = moderationWarning.includes('🚫') || moderationWarning.includes('18+') || moderationWarning.includes('khiêu dâm');
+        const isSevereBlock =
+          moderationWarning.includes('🚫') ||
+          moderationWarning.includes('18+') ||
+          moderationWarning.includes('khiêu dâm') ||
+          moderationWarning.toLowerCase().includes('explicit') ||
+          moderationWarning.toLowerCase().includes('nsfw') ||
+          moderationWarning.includes('色情');
         return (
           <div className={`mx-2 mb-1 p-2 rounded-xl text-[11px] flex items-center justify-between gap-2 shadow-xl animate-in fade-in duration-150 z-20 ${
             isSevereBlock
@@ -1990,7 +2057,7 @@ export const MobileChatView: React.FC = () => {
           type="button"
           onClick={() => cameraInputRef.current?.click()}
           className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white active:scale-95 transition-all shrink-0"
-          title="Chụp ảnh gửi ngay"
+          title={pick("Chụp ảnh gửi ngay", "Take photo & send now", "拍照并立即发送")}
         >
           <Camera className="w-3.5 h-3.5 text-emerald-400" />
         </button>
@@ -2062,7 +2129,7 @@ export const MobileChatView: React.FC = () => {
           room={activeRoom}
           currentUserUid={currentUser?.uid || ''}
           currentUserEmail={currentUser?.email || ''}
-          currentUserName={userProfile?.displayName || currentUser?.displayName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || currentUser?.displayName || pick('Người dùng', 'User', '用户')}
           currentDeviceName={settings.deviceName}
           messages={messages}
           onRoomDeleted={() => {
@@ -2085,7 +2152,7 @@ export const MobileChatView: React.FC = () => {
           roomId={activeRoomId}
           roomName={activeRoom.name}
           currentUserId={currentUser?.uid || ''}
-          currentUserName={userProfile?.displayName || settings?.deviceName || 'Người dùng'}
+          currentUserName={userProfile?.displayName || settings?.deviceName || pick('Người dùng', 'User', '用户')}
         />
       )}
 
@@ -2095,7 +2162,7 @@ export const MobileChatView: React.FC = () => {
           isOpen={Boolean(viewingZoomImage)}
           onClose={() => setViewingZoomImage(null)}
           imageUrl={viewingZoomImage.url}
-          imageName={viewingZoomImage.name || 'Hình ảnh'}
+          imageName={viewingZoomImage.name || pick('Hình ảnh', 'Image', '图片')}
           fileSize={viewingZoomImage.size}
         />
       )}
@@ -2116,6 +2183,14 @@ export const MobileChatView: React.FC = () => {
         onClose={() => setIsCloudPickerOpen(false)}
         onSelectFiles={handleCloudFilesSelected}
       />
+
+      {/* User Profile Modal */}
+      {selectedProfileUser && (
+        <UserProfileModal
+          user={selectedProfileUser}
+          onClose={() => setSelectedProfileUser(null)}
+        />
+      )}
     </div>
   );
 };

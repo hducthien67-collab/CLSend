@@ -4,7 +4,17 @@ import {
   signInWithPopup,
   signInWithRedirect, 
   signOut,
-  sendSignInLinkToEmail
+  sendSignInLinkToEmail,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  ConfirmationResult,
+  AuthProvider as FirebaseAuthProvider,
+  AuthCredential,
+  FacebookAuthProvider,
+  GithubAuthProvider,
+  OAuthProvider,
+  linkWithCredential,
+  fetchSignInMethodsForEmail
 } from 'firebase/auth';
 import { 
   doc, 
@@ -18,8 +28,8 @@ import {
   onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
-import { auth, db, googleProvider, handleFirestoreError, OperationType } from '../firebase/config';
-import { UserDevice, DeviceType, AppSettings, AppUser, LoginSession, EmailVerificationRecord } from '../types';
+import { auth, db, googleProvider, facebookProvider, githubProvider, handleFirestoreError, OperationType } from '../firebase/config';
+import { UserDevice, DeviceType, AppSettings, AppUser, LoginSession, EmailVerificationRecord, AuthProviderType } from '../types';
 import { detectDeviceType, generateDefaultDeviceName, getRandomColor, isSmartTv, getRecommendedTvDpi, detectBrowserInfo, detectLocationInfo, fetchSpecificLocation } from '../utils/device';
 import { 
   CustomAuthAccount, 
@@ -31,6 +41,17 @@ import {
   normalizePhoneNumber
 } from '../utils/authHelper';
 import { checkUserBanStatus, isRealEmail } from '../utils/devModeration';
+import { pickLang, getLocaleTag } from './LanguageContext';
+
+const getActiveAppLang = (): string => {
+  try {
+    return typeof window !== 'undefined' ? (localStorage.getItem('app_language') || 'vi') : 'vi';
+  } catch {
+    return 'vi';
+  }
+};
+const pickAuth = (vi: string, en: string, zh?: string): string =>
+  pickLang(getActiveAppLang(), vi, en, zh);
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -38,6 +59,18 @@ interface AuthContextType {
   settings: AppSettings;
   loading: boolean;
   loginWithGoogle: () => Promise<void>;
+  loginWithFacebook: () => Promise<void>;
+  loginWithGithub: () => Promise<void>;
+  pendingCredentialLink: {
+    email: string;
+    providerLabel: string;
+    suggestedProvider: 'google' | 'github' | 'facebook' | null;
+  } | null;
+  confirmPendingCredentialLink: (existingProvider: 'google' | 'facebook' | 'github') => Promise<void>;
+  clearPendingCredentialLink: () => void;
+  sendPhoneLoginOtp: (phoneNumber: string, recaptchaContainerId: string) => Promise<void>;
+  confirmPhoneLoginOtp: (otpCode: string) => Promise<void>;
+  resetPhoneLoginState: () => void;
   loginWithEmail: (emailOrUsername: string, pass: string) => Promise<void>;
   loginWithAccount: (usernameOrEmail: string, pass: string) => Promise<void>;
   registerWithEmail: (email: string, pass: string, name: string, deviceName?: string) => Promise<void>;
@@ -138,6 +171,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isLinkingAccountRef = useRef<boolean>(false);
   const isExplicitGoogleLoginRef = useRef<boolean>(false);
   const isSuppressingAuthListenerRef = useRef<boolean>(false);
+  const phoneConfirmationRef = useRef<ConfirmationResult | null>(null);
+  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  const pendingCredentialRef = useRef<{
+    credential: AuthCredential;
+    email: string;
+    providerLabel: string;
+  } | null>(null);
+  const [pendingCredentialLink, setPendingCredentialLink] = useState<{
+    email: string;
+    providerLabel: string;
+    suggestedProvider: 'google' | 'github' | 'facebook' | null;
+  } | null>(null);
   useEffect(() => {
     currentUserRef.current = currentUser;
   }, [currentUser]);
@@ -234,8 +279,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         uid: targetUid,
         deviceId,
         connectCode,
-        displayName: profile?.displayName || currentUsr?.displayName || currentUsr?.email?.split('@')[0] || 'Người dùng',
-        deviceName: currentSettings.deviceName || profile?.deviceName || 'Thiết bị',
+        displayName: profile?.displayName || currentUsr?.displayName || currentUsr?.email?.split('@')[0] || pickAuth('Người dùng', 'User', '用户'),
+        deviceName: currentSettings.deviceName || profile?.deviceName || pickAuth('Thiết bị', 'Device', '设备'),
         deviceType: currentHwType,
         avatarColor: currentSettings.avatarColor || profile?.avatarColor || '#10B981',
         customAvatarUrl: avatarImg || null,
@@ -251,6 +296,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deviceType: currentHwType,
         lastSeen: new Date().toISOString(),
         lastActive: new Date().toISOString(),
+        lastBrowser: detectBrowserInfo(),
         status: 'online',
       }, { merge: true }).catch(() => {});
     } catch (err) {
@@ -291,7 +337,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const appUser: AppUser = {
             uid: data.uid,
             email: data.email || `${data.uid}@cloudsend.local`,
-            displayName: data.displayName || data.email?.split('@')[0] || 'Người dùng Google',
+            displayName: data.displayName || data.email?.split('@')[0] || pickAuth('Người dùng Google', 'Google User', 'Google 用户'),
             photoURL: data.photoURL || null,
           };
           setCurrentUser(appUser);
@@ -301,7 +347,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const profileData: UserDevice = {
             uid: data.uid,
             email: data.email || '',
-            displayName: data.displayName || 'Người dùng Google',
+            displayName: data.displayName || pickAuth('Người dùng Google', 'Google User', 'Google 用户'),
             deviceName: settingsRef.current.deviceName,
             deviceType: detectDeviceType(),
             avatarColor: settingsRef.current.avatarColor,
@@ -443,8 +489,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        // Enforce Dev Ban Check on Gmail / Firebase Auth
-        const banCheck = await checkUserBanStatus(user.email, user.uid);
+        // Enforce Dev Ban Check on Firebase Auth (Email, UID, Phone)
+        const normFirebasePhone = normalizePhoneNumber(user.phoneNumber);
+        const banCheck = await checkUserBanStatus(user.email, user.uid, {
+          phone: normFirebasePhone || null,
+          linkedEmail: user.email || null,
+        });
         if (banCheck.isBanned) {
           console.warn('User is banned by Dev:', banCheck.message);
           await signOut(auth);
@@ -457,29 +507,76 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // Discover any sibling ClSend account UIDs linked to this Google email so cloud files stay synced
+        // Detect Firebase Auth provider ('google' | 'facebook' | 'github' | 'phone')
+        const rawProviderId = user.providerData?.[0]?.providerId || '';
+        const detectedAuthProvider: AuthProviderType =
+          rawProviderId === 'facebook.com'
+            ? 'facebook'
+            : rawProviderId === 'github.com'
+            ? 'github'
+            : rawProviderId === 'phone' || (!!normFirebasePhone && !user.email)
+            ? 'phone'
+            : 'google';
+
+        // Discover any sibling ClSend account UIDs linked to this email or phone so cloud files & bans stay synced
         const discoveredLinkedUids = new Set<string>();
-        const cleanGoogleEmail = (user.email || '').trim().toLowerCase();
-        if (cleanGoogleEmail) {
-          try {
-            const [accLinkedSnap, accEmailSnap, usrLinkedSnap] = await Promise.all([
-              getDocs(query(collection(db, 'accounts'), where('linkedEmail', '==', cleanGoogleEmail))),
-              getDocs(query(collection(db, 'accounts'), where('email', '==', cleanGoogleEmail))),
-              getDocs(query(collection(db, 'users'), where('linkedEmail', '==', cleanGoogleEmail))),
-            ]);
-            accLinkedSnap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); });
-            accEmailSnap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); });
-            usrLinkedSnap.forEach((d) => { if (d.id !== user.uid) discoveredLinkedUids.add(d.id); });
-          } catch {}
+        const cleanAuthEmail = (user.email || '').trim().toLowerCase();
+        const emailQueries: Promise<void>[] = [];
+        if (cleanAuthEmail) {
+          emailQueries.push(
+            getDocs(query(collection(db, 'accounts'), where('linkedEmail', '==', cleanAuthEmail)))
+              .then((snap) => snap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); }))
+              .catch(() => {}),
+            getDocs(query(collection(db, 'accounts'), where('email', '==', cleanAuthEmail)))
+              .then((snap) => snap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); }))
+              .catch(() => {}),
+            getDocs(query(collection(db, 'users'), where('linkedEmail', '==', cleanAuthEmail)))
+              .then((snap) => snap.forEach((d) => { if (d.id !== user.uid) discoveredLinkedUids.add(d.id); }))
+              .catch(() => {})
+          );
         }
+        if (normFirebasePhone) {
+          emailQueries.push(
+            getDocs(query(collection(db, 'accounts'), where('phone', '==', normFirebasePhone)))
+              .then((snap) => snap.forEach((d) => { const uid = d.data()?.uid; if (uid && uid !== user.uid) discoveredLinkedUids.add(uid); }))
+              .catch(() => {}),
+            getDocs(query(collection(db, 'users'), where('phone', '==', normFirebasePhone)))
+              .then((snap) => snap.forEach((d) => { if (d.id !== user.uid) discoveredLinkedUids.add(d.id); }))
+              .catch(() => {}),
+            getDocs(query(collection(db, 'users'), where('linkedPhone', '==', normFirebasePhone)))
+              .then((snap) => snap.forEach((d) => { if (d.id !== user.uid) discoveredLinkedUids.add(d.id); }))
+              .catch(() => {})
+          );
+        }
+        if (emailQueries.length > 0) {
+          await Promise.all(emailQueries);
+        }
+
+        const fallbackEmail =
+          cleanAuthEmail ||
+          (normFirebasePhone
+            ? `${normFirebasePhone.replace(/\+/g, '')}@phone.cloudsend.local`
+            : `${user.uid}@cloudsend.local`);
+        const fallbackDisplayName =
+          user.displayName ||
+          (cleanAuthEmail ? cleanAuthEmail.split('@')[0] : '') ||
+          (normFirebasePhone ? `${pickAuth('Người dùng', 'User', '用户')} ${normFirebasePhone.slice(-4)}` : '') ||
+          pickAuth('Người dùng', 'User', '用户');
+
+        const rawProviderAvatar =
+          user.photoURL ||
+          user.providerData?.find((p) => Boolean(p?.photoURL))?.photoURL ||
+          undefined;
 
         const appUser: AppUser = {
           uid: user.uid,
-          email: user.email,
-          displayName: user.displayName || user.email?.split('@')[0] || 'Người dùng',
-          photoURL: user.photoURL,
-          authProvider: 'google',
-          linkedEmail: cleanGoogleEmail || undefined,
+          email: user.email || fallbackEmail,
+          displayName: fallbackDisplayName,
+          photoURL: rawProviderAvatar || null,
+          authProvider: detectedAuthProvider,
+          linkedEmail: cleanAuthEmail || undefined,
+          phone: normFirebasePhone || user.phoneNumber || undefined,
+          linkedPhone: normFirebasePhone || user.phoneNumber || undefined,
           linkedUids: Array.from(discoveredLinkedUids),
         };
         setCurrentUser(appUser);
@@ -496,7 +593,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           let profileData: UserDevice;
-          const googleAvatar = user.photoURL || undefined;
+          const providerAvatar = rawProviderAvatar;
+          const nowIso = new Date().toISOString();
           if (userDocSnap && userDocSnap.exists()) {
             profileData = userDocSnap.data() as UserDevice;
             const mergedUids = Array.from(new Set([
@@ -504,18 +602,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               ...Array.from(discoveredLinkedUids),
             ]));
             profileData.linkedUids = mergedUids;
-            const effectiveAvatar = googleAvatar || profileData.customAvatarUrl || profileData.avatarUrl;
+            profileData.authProvider = detectedAuthProvider;
+            if (cleanAuthEmail) {
+              profileData.linkedEmail = profileData.linkedEmail || cleanAuthEmail;
+              profileData.isEmailVerified = profileData.isEmailVerified ?? Boolean(user.emailVerified);
+            }
+            if (normFirebasePhone) {
+              profileData.phone = profileData.phone || normFirebasePhone;
+              profileData.linkedPhone = profileData.linkedPhone || normFirebasePhone;
+              profileData.phoneNumber = profileData.phoneNumber || user.phoneNumber || normFirebasePhone;
+              profileData.isPhoneVerified = true;
+            }
+            const effectiveAvatar = providerAvatar || profileData.customAvatarUrl || profileData.avatarUrl;
             profileData.customAvatarUrl = effectiveAvatar || undefined;
             profileData.avatarUrl = effectiveAvatar || undefined;
-            profileData.photoURL = googleAvatar || profileData.photoURL || undefined;
-            if ((googleAvatar && profileData.customAvatarUrl !== googleAvatar) || mergedUids.length > 0) {
-              setDoc(userDocRef, {
-                customAvatarUrl: effectiveAvatar || null,
-                avatarUrl: effectiveAvatar || null,
-                photoURL: googleAvatar || null,
-                linkedUids: mergedUids,
-              }, { merge: true }).catch(() => {});
+            profileData.photoURL = providerAvatar || profileData.photoURL || undefined;
+            const updatePatch: Record<string, any> = {
+              authProvider: detectedAuthProvider,
+              lastBrowser: detectBrowserInfo(),
+              lastSeen: nowIso,
+              customAvatarUrl: effectiveAvatar || null,
+              avatarUrl: effectiveAvatar || null,
+              photoURL: providerAvatar || null,
+              linkedUids: mergedUids,
+            };
+            if (detectedAuthProvider === 'facebook') updatePatch.facebookUid = user.uid;
+            if (detectedAuthProvider === 'github') updatePatch.githubUid = user.uid;
+            if (detectedAuthProvider === 'google') updatePatch.googleUid = user.uid;
+            if (normFirebasePhone) {
+              updatePatch.phone = profileData.phone;
+              updatePatch.linkedPhone = profileData.linkedPhone;
+              updatePatch.phoneNumber = profileData.phoneNumber;
+              updatePatch.isPhoneVerified = true;
             }
+            setDoc(userDocRef, updatePatch, { merge: true }).catch(() => {});
             if (mergedUids.length > 0) {
               appUser.linkedUids = mergedUids;
               localStorage.setItem('cloudsend_custom_session', JSON.stringify(appUser));
@@ -530,25 +650,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             profileData = {
               uid: user.uid,
-              email: user.email || '',
-              linkedEmail: cleanGoogleEmail || undefined,
+              email: user.email || fallbackEmail,
+              ...(cleanAuthEmail ? { linkedEmail: cleanAuthEmail, isEmailVerified: Boolean(user.emailVerified) } : {}),
+              ...(normFirebasePhone
+                ? {
+                    phone: normFirebasePhone,
+                    linkedPhone: normFirebasePhone,
+                    phoneNumber: user.phoneNumber || normFirebasePhone,
+                    isPhoneVerified: true,
+                  }
+                : {}),
+              ...(detectedAuthProvider === 'google' ? { googleUid: user.uid } : {}),
+              ...(detectedAuthProvider === 'facebook' ? { facebookUid: user.uid } : {}),
+              ...(detectedAuthProvider === 'github' ? { githubUid: user.uid } : {}),
+              authProvider: detectedAuthProvider,
+              lastBrowser: detectBrowserInfo(),
               linkedUids: Array.from(discoveredLinkedUids),
-              displayName: user.displayName || user.email?.split('@')[0] || 'Người dùng',
+              displayName: fallbackDisplayName,
               deviceName: settings.deviceName,
               deviceType: detectDeviceType(),
               avatarColor: settings.avatarColor,
-              customAvatarUrl: googleAvatar,
-              avatarUrl: googleAvatar,
-              photoURL: googleAvatar,
-              createdAt: new Date().toISOString(),
+              customAvatarUrl: providerAvatar,
+              avatarUrl: providerAvatar,
+              photoURL: providerAvatar,
+              createdAt: nowIso,
+              lastSeen: nowIso,
             };
             try {
               await setDoc(userDocRef, profileData);
             } catch (err) {
               handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}`);
             }
-            if (googleAvatar) {
-              setSettings((prev) => ({ ...prev, customAvatarUrl: googleAvatar }));
+            if (providerAvatar) {
+              setSettings((prev) => ({ ...prev, customAvatarUrl: providerAvatar }));
             }
           }
 
@@ -602,37 +736,258 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const loginWithGoogle = async () => {
+  const loginWithFirebaseProvider = async (
+    provider: FirebaseAuthProvider,
+    providerLabel: string
+  ) => {
     isExplicitGoogleLoginRef.current = true;
     try {
-      const res = await signInWithPopup(auth, googleProvider);
+      const res = await signInWithPopup(auth, provider);
       if (res.user) {
-        const banCheck = await checkUserBanStatus(res.user.email, res.user.uid);
+        const normPhone = normalizePhoneNumber(res.user.phoneNumber);
+        const banCheck = await checkUserBanStatus(res.user.email, res.user.uid, {
+          phone: normPhone || null,
+          linkedEmail: res.user.email || null,
+        });
         if (banCheck.isBanned) {
           await signOut(auth);
-          throw new Error(banCheck.message || 'Tài khoản của bạn đã bị DEV cấm tham gia hệ thống.');
+          throw new Error(banCheck.message || pickAuth('Tài khoản của bạn đã bị DEV cấm tham gia hệ thống.', 'Your account has been banned by DEV from using the system.', '您的账号已被 DEV 禁止使用本系统。'));
         }
 
-        const photoUrl = res.user.photoURL;
+        let photoUrl =
+          res.user.photoURL ||
+          res.user.providerData?.find((p) => Boolean(p?.photoURL))?.photoURL ||
+          '';
+
+        // For Facebook login, resolve a crisp public CDN avatar URL via Graph API using the OAuth token
+        if (providerLabel === 'Facebook') {
+          try {
+            const fbCred = FacebookAuthProvider.credentialFromResult(res);
+            if (fbCred?.accessToken) {
+              const picResp = await fetch(
+                `https://graph.facebook.com/me/picture?type=large&width=512&height=512&redirect=false&access_token=${encodeURIComponent(
+                  fbCred.accessToken
+                )}`
+              );
+              if (picResp.ok) {
+                const picJson = await picResp.json();
+                if (picJson?.data?.url) {
+                  photoUrl = String(picJson.data.url);
+                }
+              }
+            }
+          } catch {}
+        }
+
         if (photoUrl) {
           setSettings((prev) => ({ ...prev, customAvatarUrl: photoUrl }));
           if (currentUserRef.current) {
             currentUserRef.current.photoURL = photoUrl;
           }
+          try {
+            await setDoc(
+              doc(db, 'users', res.user.uid),
+              {
+                customAvatarUrl: photoUrl,
+                avatarUrl: photoUrl,
+                photoURL: photoUrl,
+              },
+              { merge: true }
+            );
+          } catch {}
+          await updatePresence(res.user.uid, { customAvatarUrl: photoUrl }).catch(() => {});
         }
       }
     } catch (error: any) {
       if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
-        console.info('Google Sign-In popup was closed by user.');
+        console.info(`${providerLabel} Sign-In popup was closed by user.`);
         throw error;
       }
       if (error?.code === 'auth/popup-blocked') {
-        console.warn('Popup blocked, falling back to signInWithRedirect...');
-        await signInWithRedirect(auth, googleProvider);
+        console.warn(`${providerLabel} popup blocked, falling back to signInWithRedirect...`);
+        await signInWithRedirect(auth, provider);
         return;
       }
-      console.warn('Google Sign-In notice:', error?.message || error);
+      if (error?.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred =
+          FacebookAuthProvider.credentialFromError(error) ||
+          GithubAuthProvider.credentialFromError(error) ||
+          OAuthProvider.credentialFromError(error);
+        const conflictEmail = (error?.customData?.email as string) || '';
+        let suggestedProvider: 'google' | 'github' | 'facebook' | null =
+          providerLabel === 'Google' ? 'facebook' : 'google';
+        if (conflictEmail) {
+          try {
+            const methods = await fetchSignInMethodsForEmail(auth, conflictEmail);
+            if (methods.includes('google.com')) suggestedProvider = 'google';
+            else if (methods.includes('github.com')) suggestedProvider = 'github';
+            else if (methods.includes('facebook.com')) suggestedProvider = 'facebook';
+          } catch {}
+        }
+        if (pendingCred) {
+          pendingCredentialRef.current = {
+            credential: pendingCred,
+            email: conflictEmail,
+            providerLabel,
+          };
+          setPendingCredentialLink({
+            email: conflictEmail,
+            providerLabel,
+            suggestedProvider,
+          });
+        }
+      }
+      console.warn(`${providerLabel} Sign-In notice:`, error?.message || error);
       throw error;
+    } finally {
+      setTimeout(() => {
+        isExplicitGoogleLoginRef.current = false;
+      }, 1500);
+    }
+  };
+
+  const clearPendingCredentialLink = () => {
+    pendingCredentialRef.current = null;
+    setPendingCredentialLink(null);
+  };
+
+  const confirmPendingCredentialLink = async (existingProvider: 'google' | 'facebook' | 'github') => {
+    const pending = pendingCredentialRef.current;
+    const targetProvider =
+      existingProvider === 'google'
+        ? googleProvider
+        : existingProvider === 'facebook'
+        ? facebookProvider
+        : githubProvider;
+
+    isExplicitGoogleLoginRef.current = true;
+    try {
+      const res = await signInWithPopup(auth, targetProvider);
+      if (res.user && pending?.credential) {
+        try {
+          await linkWithCredential(res.user, pending.credential);
+        } catch (linkErr: any) {
+          if (linkErr?.code !== 'auth/provider-already-linked') {
+            throw linkErr;
+          }
+        }
+        try {
+          const providerPatch: Record<string, any> = {};
+          if (pending.providerLabel === 'Facebook') providerPatch.facebookUid = res.user.uid;
+          if (pending.providerLabel === 'GitHub') providerPatch.githubUid = res.user.uid;
+          if (pending.providerLabel === 'Google') providerPatch.googleUid = res.user.uid;
+          if (Object.keys(providerPatch).length > 0) {
+            await setDoc(doc(db, 'users', res.user.uid), providerPatch, { merge: true }).catch(() => {});
+          }
+        } catch {}
+      }
+      clearPendingCredentialLink();
+    } finally {
+      setTimeout(() => {
+        isExplicitGoogleLoginRef.current = false;
+      }, 1500);
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    return loginWithFirebaseProvider(googleProvider, 'Google');
+  };
+
+  const loginWithFacebook = async () => {
+    return loginWithFirebaseProvider(facebookProvider, 'Facebook');
+  };
+
+  const loginWithGithub = async () => {
+    return loginWithFirebaseProvider(githubProvider, 'GitHub');
+  };
+
+  const resetPhoneLoginState = () => {
+    phoneConfirmationRef.current = null;
+    if (recaptchaVerifierRef.current) {
+      try {
+        recaptchaVerifierRef.current.clear();
+      } catch {}
+      recaptchaVerifierRef.current = null;
+    }
+  };
+
+  const sendPhoneLoginOtp = async (phoneNumber: string, recaptchaContainerId: string) => {
+    const normPhone = normalizePhoneNumber(phoneNumber);
+    if (!normPhone || !normPhone.startsWith('+')) {
+      throw new Error(
+        pickAuth(
+          'Số điện thoại phải kèm mã quốc gia (ví dụ: 0912345678 hoặc +84912345678).',
+          'Phone number must include a valid country code (e.g. +84912345678 or +15551234567).',
+          '手机号码须包含国家区号（例如 +84912345678 或 +8613800138000）。'
+        )
+      );
+    }
+
+    const banCheck = await checkUserBanStatus(null, null, { phone: normPhone });
+    if (banCheck.isBanned) {
+      throw new Error(
+        banCheck.message ||
+          pickAuth(
+            'Số điện thoại này đang bị DEV cấm tham gia hệ thống.',
+            'This phone number has been banned by DEV from accessing the system.',
+            '此手机号已被 DEV 禁止登录本系统。'
+          )
+      );
+    }
+
+    // Clear any stale verifier before rendering a fresh one
+    if (recaptchaVerifierRef.current) {
+      try {
+        recaptchaVerifierRef.current.clear();
+      } catch {}
+      recaptchaVerifierRef.current = null;
+    }
+    const containerEl = typeof document !== 'undefined' ? document.getElementById(recaptchaContainerId) : null;
+    if (!containerEl) {
+      throw new Error(pickAuth('Không tìm thấy khung xác thực reCAPTCHA.', 'reCAPTCHA container element not found.', '未找到 reCAPTCHA 验证容器。'));
+    }
+    containerEl.innerHTML = '';
+
+    const verifier = new RecaptchaVerifier(auth, recaptchaContainerId, {
+      size: 'invisible',
+    });
+    recaptchaVerifierRef.current = verifier;
+
+    try {
+      const confirmationResult = await signInWithPhoneNumber(auth, normPhone, verifier);
+      phoneConfirmationRef.current = confirmationResult;
+    } catch (err) {
+      try {
+        verifier.clear();
+      } catch {}
+      recaptchaVerifierRef.current = null;
+      throw err;
+    }
+  };
+
+  const confirmPhoneLoginOtp = async (otpCode: string) => {
+    const cleanOtp = otpCode.trim();
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      throw new Error(pickAuth('Mã OTP phải gồm đúng 6 chữ số.', 'OTP code must be exactly 6 digits.', 'OTP 验证码必须为 6 位数字。'));
+    }
+    if (!phoneConfirmationRef.current) {
+      throw new Error(pickAuth('Phiên OTP đã hết hạn. Vui lòng gửi lại mã mới.', 'OTP session expired. Please request a new code.', 'OTP 会话已过期，请重新获取验证码。'));
+    }
+
+    isExplicitGoogleLoginRef.current = true;
+    try {
+      const cred = await phoneConfirmationRef.current.confirm(cleanOtp);
+      if (cred.user) {
+        const normPhone = normalizePhoneNumber(cred.user.phoneNumber);
+        const banCheck = await checkUserBanStatus(cred.user.email, cred.user.uid, {
+          phone: normPhone || null,
+        });
+        if (banCheck.isBanned) {
+          await signOut(auth);
+          throw new Error(banCheck.message || pickAuth('Số điện thoại / tài khoản này đã bị DEV cấm.', 'This phone number / account has been banned by DEV.', '此手机号 / 账号已被 DEV 封禁。'));
+        }
+      }
+      resetPhoneLoginState();
     } finally {
       setTimeout(() => {
         isExplicitGoogleLoginRef.current = false;
@@ -643,10 +998,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithAccount = async (usernameOrEmail: string, pass: string) => {
     const cleanIdentifier = usernameOrEmail.trim();
     if (!cleanIdentifier) {
-      throw new Error('Vui lòng nhập tên tài khoản.');
+      throw new Error(pickAuth('Vui lòng nhập tên tài khoản.', 'Please enter your username.', '请输入用户名。'));
     }
     if (!pass) {
-      throw new Error('Vui lòng nhập mật khẩu tài khoản.');
+      throw new Error(pickAuth('Vui lòng nhập mật khẩu tài khoản.', 'Please enter your account password.', '请输入账号密码。'));
     }
 
     const normalized = cleanIdentifier.toLowerCase();
@@ -657,7 +1012,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       phone: normPhone || null,
     });
     if (banCheck.isBanned) {
-      throw new Error(banCheck.message || 'Tài khoản này đã bị DEV cấm đăng nhập.');
+      throw new Error(banCheck.message || pickAuth('Tài khoản này đã bị DEV cấm đăng nhập.', 'This account has been banned by DEV.', '此账号已被 DEV 禁止登录。'));
     }
 
     const accountKey = await getAccountKey(normalized);
@@ -695,7 +1050,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!accountSnap.exists()) {
-      const err = new Error('Tên tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.');
+      const err = new Error(pickAuth('Tên tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.', 'Incorrect username or password. Please check and try again.', '用户名或密码不正确，请检查后重试。'));
       (err as any).code = 'auth/user-not-found';
       throw err;
     }
@@ -709,13 +1064,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       linkedUids: account.linkedUids,
     });
     if (uidBanCheck.isBanned) {
-      throw new Error(uidBanCheck.message || 'Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.');
+      throw new Error(uidBanCheck.message || pickAuth('Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.', 'This account (or its linked Email / Phone) has been banned by DEV.', '此账号（或关联的邮箱/手机号）已被 DEV 封禁。'));
     }
 
     const computedHash = await hashPassword(pass, account.salt);
 
     if (computedHash !== account.passwordHash) {
-      const err = new Error('Tên tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.');
+      const err = new Error(pickAuth('Tên tài khoản hoặc mật khẩu không chính xác. Vui lòng kiểm tra lại.', 'Incorrect username or password. Please check and try again.', '用户名或密码不正确，请检查后重试。'));
       (err as any).code = 'auth/wrong-password';
       throw err;
     }
@@ -812,6 +1167,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         avatarColor: profileData.avatarColor || prev.avatarColor,
       }));
     }
+    try {
+      await setDoc(doc(db, 'users', account.uid), {
+        authProvider: 'account',
+        lastBrowser: detectBrowserInfo(),
+        lastSeen: new Date().toISOString(),
+      }, { merge: true });
+    } catch {}
     await updatePresence(account.uid, profileData);
   };
 
@@ -827,7 +1189,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       linkedUids: payload.profileData?.linkedUids || payload.userSession.linkedUids,
     });
     if (syncBanCheck.isBanned) {
-      throw new Error(syncBanCheck.message || 'Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.');
+      throw new Error(syncBanCheck.message || pickAuth('Tài khoản này (hoặc Email / SĐT liên kết) đã bị DEV cấm.', 'This account (or its linked Email / Phone) has been banned by DEV.', '此账号（或关联的邮箱/手机号）已被 DEV 封禁。'));
     }
     if (auth.currentUser) {
       isSuppressingAuthListenerRef.current = true;
@@ -910,23 +1272,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const cleanUsername = (data.username || '').trim();
     if (!cleanUsername) {
-      throw new Error('Vui lòng nhập tên tài khoản.');
+      throw new Error(pickAuth('Vui lòng nhập tên tài khoản.', 'Please enter your username.', '请输入用户名。'));
     }
     if (!data.pass || data.pass.length < 6) {
-      throw new Error('Mật khẩu phải có ít nhất 6 ký tự.');
+      throw new Error(pickAuth('Mật khẩu phải có ít nhất 6 ký tự.', 'Password must be at least 6 characters.', '密码至少需要 6 个字符。'));
     }
 
     const normalizedUsername = cleanUsername.toLowerCase();
     const cleanInputEmail = (data.email || '').trim().toLowerCase();
     const hasProvidedRealEmail = Boolean(cleanInputEmail && isRealEmail(cleanInputEmail));
     if (cleanInputEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanInputEmail)) {
-      throw new Error('Địa chỉ Email không hợp lệ. Vui lòng kiểm tra lại.');
+      throw new Error(pickAuth('Địa chỉ Email không hợp lệ. Vui lòng kiểm tra lại.', 'Invalid Email address. Please check again.', '电子邮箱地址无效，请检查。'));
     }
 
     const rawPhone = (data.phone || '').trim();
     const normPhone = normalizePhoneNumber(rawPhone);
     if (rawPhone && !normPhone) {
-      throw new Error('Số điện thoại không hợp lệ (tối thiểu 7 chữ số).');
+      throw new Error(pickAuth('Số điện thoại không hợp lệ (tối thiểu 7 chữ số).', 'Invalid phone number (minimum 7 digits).', '电话号码无效（至少需要 7 位数字）。'));
     }
 
     // Ban gate: Block if provided email or phone number belongs to a banned account (never bans clean new accounts/devices!)
@@ -938,7 +1300,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (contactBanCheck.isBanned) {
         throw new Error(
           contactBanCheck.message ||
-            'Email hoặc Số điện thoại này đang gắn với một tài khoản bị CẤM. Hệ thống chặn đăng ký để chống lách luật.'
+            pickAuth(
+              'Email hoặc Số điện thoại này đang gắn với một tài khoản bị CẤM. Hệ thống chặn đăng ký để chống lách luật.',
+              'This Email or Phone number is linked to a BANNED account. Registration is blocked.',
+              '此邮箱或手机号已关联到一个被封禁的账号，系统已阻止注册。'
+            )
         );
       }
     }
@@ -949,7 +1315,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const accountSnap = await getDoc(accountRef);
 
     if (accountSnap.exists()) {
-      const err = new Error('Tên tài khoản này đã được sử dụng. Vui lòng chọn tên khác hoặc chuyển sang Đăng nhập.');
+      const err = new Error(pickAuth(
+        'Tên tài khoản này đã được sử dụng. Vui lòng chọn tên khác hoặc chuyển sang Đăng nhập.',
+        'This username is already taken. Please choose another or switch to Sign In.',
+        '此用户名已被使用，请选择其他用户名或切换至登录。'
+      ));
       (err as any).code = 'auth/email-already-in-use';
       throw err;
     }
@@ -988,11 +1358,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       username: cleanUsername,
       dob: data.dob?.trim() || undefined,
       gender: data.gender || 'Không Muốn Trả Lời',
+      authProvider: 'account',
+      lastBrowser: detectBrowserInfo(),
       displayName: cleanUsername,
       deviceName: devName,
       deviceType: settings.deviceType,
       avatarColor: settings.avatarColor,
       createdAt: newAccount.createdAt,
+      lastSeen: newAccount.createdAt,
     };
 
     await setDoc(doc(db, 'users', uid), newProfile);
@@ -1059,7 +1432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const devName = customDeviceName?.trim() || settings.deviceName;
-    const dispName = customDisplayName?.trim() || devName || 'Khách ' + Math.floor(1000 + Math.random() * 9000);
+    const dispName = customDisplayName?.trim() || devName || `${pickAuth('Khách', 'Guest', '访客')} ${Math.floor(1000 + Math.random() * 9000)}`;
     const guestUser: AppUser = {
       uid,
       email: `${uid}@cloudsend.local`,
@@ -1074,11 +1447,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const profileData: UserDevice = {
       uid,
       email: guestUser.email || '',
+      authProvider: 'guest',
+      lastBrowser: detectBrowserInfo(),
       displayName: dispName,
       deviceName: devName,
       deviceType: settings.deviceType,
       avatarColor: settings.avatarColor || getRandomColor(),
       createdAt: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
     };
 
     setUserProfile(profileData);
@@ -1122,18 +1498,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const sid = getOrCreateSessionId();
       const currentSet = customSettings || settingsRef.current;
+      const browserInfo = detectBrowserInfo();
+      const locInfo = detectLocationInfo();
       const sessionRef = doc(db, 'sessions', sid);
       const sessionData: LoginSession = {
         id: sid,
         uid,
-        deviceName: currentSet.deviceName || 'Thiết bị',
+        deviceName: currentSet.deviceName || pickAuth('Thiết bị', 'Device', '设备'),
         deviceType: currentSet.deviceType || (isSmartTv() ? 'tv' : detectDeviceType()),
-        browser: detectBrowserInfo(),
-        location: detectLocationInfo(),
+        browser: browserInfo,
+        location: locInfo,
         loginAt: localStorage.getItem('cloudsend_session_time') || new Date().toISOString(),
         lastActive: new Date().toISOString(),
       };
       await setDoc(sessionRef, sessionData, { merge: true });
+      await setDoc(doc(db, 'users', uid), {
+        lastBrowser: browserInfo,
+        lastLocation: locInfo,
+        lastActive: sessionData.lastActive,
+      }, { merge: true }).catch(() => {});
     } catch (err) {
       console.warn('Could not record login session:', err);
     }
@@ -1163,6 +1546,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
       }
+    }, (err) => {
+      console.warn('User session listener notice:', err);
     });
 
     return () => unsubUser();
@@ -1201,13 +1586,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const changePassword = async (currentPass: string, newPass: string) => {
     if (!currentUserRef.current) {
-      throw new Error('Vui lòng đăng nhập để đổi mật khẩu.');
+      throw new Error(pickAuth('Vui lòng đăng nhập để đổi mật khẩu.', 'Please sign in to change your password.', '请先登录再修改密码。'));
     }
     if (!currentPass) {
-      throw new Error('Vui lòng nhập mật khẩu hiện tại.');
+      throw new Error(pickAuth('Vui lòng nhập mật khẩu hiện tại.', 'Please enter your current password.', '请输入当前密码。'));
     }
     if (!newPass || newPass.length < 6) {
-      throw new Error('Mật khẩu mới phải có ít nhất 6 ký tự.');
+      throw new Error(pickAuth('Mật khẩu mới phải có ít nhất 6 ký tự.', 'New password must be at least 6 characters.', '新密码至少需要 6 个字符。'));
     }
 
     const usr = currentUserRef.current;
@@ -1229,13 +1614,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!accountSnap.exists()) {
-      throw new Error('Không tìm thấy bản ghi tài khoản để cập nhật mật khẩu. Nếu bạn dùng Google, vui lòng đăng nhập bằng Google.');
+      throw new Error(pickAuth(
+        'Không tìm thấy bản ghi tài khoản để cập nhật mật khẩu. Nếu bạn dùng Google, vui lòng đăng nhập bằng Google.',
+        'Account record not found to update password. If you use Google, please sign in with Google.',
+        '未找到可更新密码的账号记录。如果您使用 Google 账号，请通过 Google 登录。'
+      ));
     }
 
     const account = accountSnap.data() as CustomAuthAccount;
     const computedCurrentHash = await hashPassword(currentPass, account.salt);
     if (computedCurrentHash !== account.passwordHash) {
-      throw new Error('Mật khẩu hiện tại không chính xác. Vui lòng kiểm tra lại.');
+      throw new Error(pickAuth('Mật khẩu hiện tại không chính xác. Vui lòng kiểm tra lại.', 'Current password is incorrect. Please check again.', '当前密码不正确，请检查。'));
     }
 
     // Generate fresh salt and new hash
@@ -1252,15 +1641,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const updateDisplayName = async (newDisplayName: string) => {
     const cleanName = newDisplayName.trim();
     if (!cleanName) {
-      throw new Error('Tên hiển thị không được để trống.');
+      throw new Error(pickAuth('Tên hiển thị không được để trống.', 'Display name cannot be empty.', '显示名称不能为空。'));
     }
     if (cleanName.length < 2) {
-      throw new Error('Tên hiển thị phải có ít nhất 2 ký tự.');
+      throw new Error(pickAuth('Tên hiển thị phải có ít nhất 2 ký tự.', 'Display name must be at least 2 characters.', '显示名称至少需要 2 个字符。'));
     }
 
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
-      throw new Error('Chưa đăng nhập.');
+      throw new Error(pickAuth('Chưa đăng nhập.', 'Not signed in.', '尚未登录。'));
     }
 
     const updatedUser: AppUser = {
@@ -1314,17 +1703,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanEmail = newEmail.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanEmail)) {
-      throw new Error('Địa chỉ email không hợp lệ. Vui lòng nhập đúng định dạng (ví dụ: yourname@gmail.com).');
+      throw new Error(pickAuth('Địa chỉ email không hợp lệ. Vui lòng nhập đúng định dạng (ví dụ: yourname@gmail.com).', 'Invalid email address. Please enter a valid format (e.g. yourname@gmail.com).', '电子邮箱地址无效，请输入正确格式（例如 yourname@gmail.com）。'));
     }
 
     const banCheck = await checkUserBanStatus(cleanEmail, null, { linkedEmail: cleanEmail });
     if (banCheck.isBanned) {
-      throw new Error(banCheck.message || 'Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!');
+      throw new Error(banCheck.message || pickAuth('Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!', 'This Email is BANNED in the system. Cannot link a banned email!', '此邮箱已被系统封禁，无法绑定！'));
     }
 
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
-      throw new Error('Chưa đăng nhập.');
+      throw new Error(pickAuth('Chưa đăng nhập.', 'Not signed in.', '尚未登录。'));
     }
 
     const updatedUser: AppUser = {
@@ -1339,7 +1728,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedProfile: UserDevice = {
       ...(userProfile || {
         uid: currentUsr.uid,
-        displayName: currentUsr.displayName || 'Người dùng',
+        displayName: currentUsr.displayName || pickAuth('Người dùng', 'User', '用户'),
         deviceName: settings.deviceName,
         deviceType: settings.deviceType,
         avatarColor: settings.avatarColor || '#10B981',
@@ -1368,17 +1757,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const linkPhoneNumber = async (newPhone: string): Promise<string> => {
     const normPhone = normalizePhoneNumber(newPhone);
     if (!normPhone) {
-      throw new Error('Số điện thoại không hợp lệ. Vui lòng nhập ít nhất 7 chữ số.');
+      throw new Error(pickAuth('Số điện thoại không hợp lệ. Vui lòng nhập ít nhất 7 chữ số.', 'Invalid phone number. Please enter at least 7 digits.', '电话号码无效，请至少输入 7 位数字。'));
     }
 
     const banCheck = await checkUserBanStatus(null, null, { phone: normPhone });
     if (banCheck.isBanned) {
-      throw new Error(banCheck.message || 'Số điện thoại này đang gắn với tài khoản bị CẤM. Không thể liên kết!');
+      throw new Error(banCheck.message || pickAuth('Số điện thoại này đang gắn với tài khoản bị CẤM. Không thể liên kết!', 'This phone number is linked to a BANNED account. Cannot link!', '此手机号已关联到一个被封禁的账号，无法绑定！'));
     }
 
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
-      throw new Error('Chưa đăng nhập.');
+      throw new Error(pickAuth('Chưa đăng nhập.', 'Not signed in.', '尚未登录。'));
     }
 
     const nowIso = new Date().toISOString();
@@ -1395,7 +1784,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       ...(userProfile || {
         uid: currentUsr.uid,
         email: currentUsr.email || '',
-        displayName: currentUsr.displayName || 'Người dùng',
+        displayName: currentUsr.displayName || pickAuth('Người dùng', 'User', '用户'),
         deviceName: settings.deviceName,
         deviceType: settings.deviceType,
         avatarColor: settings.avatarColor || '#10B981',
@@ -1441,12 +1830,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanEmail = targetEmail.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanEmail)) {
-      throw new Error('Địa chỉ email không hợp lệ. Vui lòng nhập đúng định dạng (ví dụ: yourname@gmail.com).');
+      throw new Error(pickAuth('Địa chỉ email không hợp lệ. Vui lòng nhập đúng định dạng (ví dụ: yourname@gmail.com).', 'Invalid email address. Please enter a valid format (e.g. yourname@gmail.com).', '电子邮箱地址无效，请输入正确格式（例如 yourname@gmail.com）。'));
     }
 
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
-      throw new Error('Chưa đăng nhập.');
+      throw new Error(pickAuth('Chưa đăng nhập.', 'Not signed in.', '尚未登录。'));
     }
 
     // Generate secure 6-digit code (e.g. 849201)
@@ -1457,14 +1846,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const createdAt = new Date(now).toISOString();
     const verificationId = `otp_${currentUsr.uid}_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
-    const formattedTimeSent = new Date(now).toLocaleString('vi-VN', {
+    const localeTag = getLocaleTag(getActiveAppLang());
+    const formattedTimeSent = new Date(now).toLocaleString(localeTag, {
       hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
     });
-    const formattedTimeExpires = new Date(expiresTimestamp).toLocaleString('vi-VN', {
+    const formattedTimeExpires = new Date(expiresTimestamp).toLocaleString(localeTag, {
       hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric'
     });
 
-    const emailMessage = `Kính gửi người dùng CloudSend,\n\nHệ thống đã tiếp nhận yêu cầu liên kết địa chỉ Email [${cleanEmail}] với tài khoản của bạn (${currentUsr.displayName || 'Người dùng'}).\n\nMÃ XÁC THỰC BẢO MẬT 6 CHỮ SỐ CỦA BẠN LÀ:\n\n    >>>  ${code}  <<<\n\nTHỜI HẠN VÀ ĐIỀU KHOẢN HIỆU LỰC:\n• Mã số này CHỈ CÓ HIỆU LỰC TRONG VÒNG 15 PHÚT (Từ: ${formattedTimeSent} - Hết hạn lúc: ${formattedTimeExpires}).\n• Khi quá 15 phút, mã sẽ tự động hết hiệu lực và hệ thống sẽ yêu cầu bạn gửi lại mã mới.\n• Tuyệt đối không cung cấp mã 6 chữ số này cho bất kỳ ai để đảm bảo an toàn tuyệt đối cho tài khoản của bạn.\n\nTrân trọng,\nĐội ngũ Bảo mật & Quản trị Hệ thống CloudSend Relay Network`;
+    const userLabel = currentUsr.displayName || pickAuth('Người dùng', 'User', '用户');
+    const emailMessage = pickAuth(
+      'Kính gửi người dùng ClSend,\n\nHệ thống đã tiếp nhận yêu cầu liên kết địa chỉ Email [{email}] với tài khoản của bạn ({user}).\n\nMÃ XÁC THỰC BẢO MẬT 6 CHỮ SỐ CỦA BẠN LÀ:\n\n    >>>  {code}  <<<\n\nTHỜI HẠN VÀ ĐIỀU KHOẢN HIỆU LỰC:\n• Mã số này CHỈ CÓ HIỆU LỰC TRONG VÒNG 15 PHÚT (Từ: {sent} - Hết hạn lúc: {exp}).\n• Khi quá 15 phút, mã sẽ tự động hết hiệu lực.\n• Tuyệt đối không cung cấp mã 6 chữ số này cho bất kỳ ai.\n\nTrân trọng,\nĐội ngũ Bảo mật ClSend Relay Network',
+      'Dear ClSend user,\n\nWe received a request to link email [{email}] to your account ({user}).\n\nYOUR 6-DIGIT SECURITY VERIFICATION CODE IS:\n\n    >>>  {code}  <<<\n\nVALIDITY:\n• Valid for 15 minutes only (From: {sent} - Expires: {exp}).\n• Never share this 6-digit code with anyone.\n\nBest regards,\nClSend Relay Network Security Team',
+      '尊敬的 ClSend 用户：\n\n系统已收到将邮箱 [{email}] 绑定到您账号 ({user}) 的请求。\n\n您的 6 位安全验证码是：\n\n    >>>  {code}  <<<\n\n有效期说明：\n• 此验证码仅在 15 分钟内有效（发送时间：{sent} - 过期时间：{exp}）。\n• 请勿向任何人泄露此 6 位验证码。\n\n此致，\nClSend 中继网络安全团队'
+    )
+      .replace('{email}', cleanEmail)
+      .replace('{user}', userLabel)
+      .replace('{code}', code)
+      .replace('{sent}', formattedTimeSent)
+      .replace('{exp}', formattedTimeExpires);
 
     const record: EmailVerificationRecord = {
       id: verificationId,
@@ -1494,7 +1894,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         body: JSON.stringify({
           email: cleanEmail,
           code,
-          username: currentUsr.displayName || 'Người dùng CloudSend',
+          username: currentUsr.displayName || pickAuth('Người dùng ClSend', 'ClSend User', 'ClSend 用户'),
           durationMinutes: 15
         })
       });
@@ -1521,15 +1921,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanCode = inputCode.trim();
 
     if (!cleanCode) {
-      throw new Error('Vui lòng nhập mã xác nhận 6 chữ số.');
+      throw new Error(pickAuth('Vui lòng nhập mã xác nhận 6 chữ số.', 'Please enter the 6-digit verification code.', '请输入 6 位验证码。'));
     }
     if (cleanCode.length !== 6 || !/^\d{6}$/.test(cleanCode)) {
-      throw new Error('Mã xác nhận phải gồm đúng 6 chữ số.');
+      throw new Error(pickAuth('Mã xác nhận phải gồm đúng 6 chữ số.', 'Verification code must be exactly 6 digits.', '验证码必须为 6 位数字。'));
     }
 
     const currentUsr = currentUserRef.current;
     if (!currentUsr) {
-      throw new Error('Chưa đăng nhập.');
+      throw new Error(pickAuth('Chưa đăng nhập.', 'Not signed in.', '尚未登录。'));
     }
 
     const verificationId = `otp_${currentUsr.uid}_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
@@ -1554,32 +1954,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (!record || record.email !== cleanEmail) {
-      throw new Error('Không tìm thấy yêu cầu xác nhận cho email này. Vui lòng nhấn "Gửi mã xác nhận 6 số" trước.');
+      throw new Error(pickAuth('Không tìm thấy yêu cầu xác nhận cho email này. Vui lòng nhấn "Gửi mã xác nhận 6 số" trước.', 'No verification request found for this email. Please send the 6-digit code first.', '未找到此邮箱的验证请求，请先发送 6 位验证码。'));
     }
 
     // Check expiration: strictly 15 minutes
     const now = Date.now();
     if (now > record.expiresTimestamp) {
-      const err = new Error('Mã xác nhận đã hết hạn (chỉ có hiệu lực trong 15 phút). Vui lòng nhấn "Gửi lại mã mới".');
+      const err = new Error(pickAuth('Mã xác nhận đã hết hạn (chỉ có hiệu lực trong 15 phút). Vui lòng nhấn "Gửi lại mã mới".', 'Verification code has expired (valid for 15 minutes only). Please request a new code.', '验证码已过期（有效期仅 15 分钟），请重新发送新验证码。'));
       (err as any).code = 'OTP_EXPIRED';
       throw err;
     }
 
     if (record.isUsed) {
-      const err = new Error('Mã xác nhận này đã được sử dụng trước đó. Vui lòng gửi lại mã mới.');
+      const err = new Error(pickAuth('Mã xác nhận này đã được sử dụng trước đó. Vui lòng gửi lại mã mới.', 'This verification code has already been used. Please request a new code.', '此验证码已被使用，请重新获取新验证码。'));
       (err as any).code = 'OTP_ALREADY_USED';
       throw err;
     }
 
     if (record.code !== cleanCode) {
-      const err = new Error('Mã xác thực 6 số không chính xác. Vui lòng kiểm tra lại.');
+      const err = new Error(pickAuth('Mã xác thực 6 số không chính xác. Vui lòng kiểm tra lại.', 'Incorrect 6-digit verification code. Please check again.', '6 位验证码不正确，请检查。'));
       (err as any).code = 'OTP_MISMATCH';
       throw err;
     }
 
     const banCheck = await checkUserBanStatus(cleanEmail, null, { linkedEmail: cleanEmail });
     if (banCheck.isBanned) {
-      throw new Error(banCheck.message || 'Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!');
+      throw new Error(banCheck.message || pickAuth('Email này đang bị CẤM trong hệ thống. Không thể liên kết Email bị cấm!', 'This Email is BANNED in the system. Cannot link a banned email!', '此邮箱已被系统封禁，无法绑定！'));
     }
 
     // Code is valid! Mark as used & Link Email
@@ -1606,7 +2006,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updatedProfile: UserDevice = {
       ...(userProfile || {
         uid: currentUsr.uid,
-        displayName: currentUsr.displayName || 'Người dùng',
+        displayName: currentUsr.displayName || pickAuth('Người dùng', 'User', '用户'),
         deviceName: settings.deviceName,
         deviceType: settings.deviceType,
         avatarColor: settings.avatarColor || '#10B981',
@@ -1650,7 +2050,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const uid = currentUserRef.current.uid;
     const currentSid = typeof window !== 'undefined' ? localStorage.getItem('cloudsend_session_id') : null;
 
-    let accurateLocation = 'Việt Nam';
+    let accurateLocation = detectLocationInfo();
     try {
       accurateLocation = await fetchSpecificLocation();
     } catch {
@@ -1676,7 +2076,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const currentSession: LoginSession = {
           id: currentSid,
           uid,
-          deviceName: settingsRef.current.deviceName || 'Thiết bị này',
+          deviceName: settingsRef.current.deviceName || pickAuth('Thiết bị này', 'This device', '当前设备'),
           deviceType: settingsRef.current.deviceType || (isSmartTv() ? 'tv' : detectDeviceType()),
           browser: detectBrowserInfo(),
           location: accurateLocation,
@@ -1715,7 +2115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         {
           id: currentSid || 'sess_current',
           uid,
-          deviceName: settingsRef.current.deviceName || 'Thiết bị này',
+          deviceName: settingsRef.current.deviceName || pickAuth('Thiết bị này', 'This device', '当前设备'),
           deviceType: settingsRef.current.deviceType || (isSmartTv() ? 'tv' : detectDeviceType()),
           browser: detectBrowserInfo(),
           location: accurateLocation,
@@ -1808,7 +2208,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const rawProfile = {
         uid: currentUsr.uid,
         email: currentUsr.email || '',
-        displayName: newSettings.deviceName || currentUsr.displayName || currentUsr.email?.split('@')[0] || 'Người dùng',
+        displayName: newSettings.deviceName || currentUsr.displayName || currentUsr.email?.split('@')[0] || pickAuth('Người dùng', 'User', '用户'),
         createdAt: userProfile?.createdAt || new Date().toISOString(),
         ...(userProfile || {}),
         deviceName: newSettings.deviceName ?? settings.deviceName,
@@ -1852,7 +2252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const updatedProf: UserDevice = {
             ...(userProfile || {
               uid: currentUsr.uid,
-              displayName: currentUsr.displayName || 'Người dùng',
+              displayName: currentUsr.displayName || pickAuth('Người dùng', 'User', '用户'),
               deviceName: settings.deviceName,
               deviceType: settings.deviceType,
               avatarColor: settings.avatarColor || '#10B981',
@@ -1900,7 +2300,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const googleBanCheck = await checkUserBanStatus(email, googleUid, { linkedEmail: email });
         if (googleBanCheck.isBanned) {
           await signOut(auth).catch(() => {});
-          throw new Error(googleBanCheck.message || 'Tài khoản Google / Email này đã bị DEV CẤM. Không thể liên kết!');
+          throw new Error(googleBanCheck.message || pickAuth('Tài khoản Google / Email này đã bị DEV CẤM. Không thể liên kết!', 'This Google account / Email has been BANNED by DEV. Cannot link!', '此 Google 账号 / 邮箱已被 DEV 封禁，无法关联！'));
         }
 
         const nowIso = new Date().toISOString();
@@ -1927,7 +2327,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const updatedProf: UserDevice = {
             ...(userProfile || {
               uid: currentUsr.uid,
-              displayName: currentUsr.displayName || 'Người dùng',
+              displayName: currentUsr.displayName || pickAuth('Người dùng', 'User', '用户'),
               deviceName: settings.deviceName,
               deviceType: settings.deviceType,
               avatarColor: settings.avatarColor || '#10B981',
@@ -2029,6 +2429,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         settings,
         loading,
         loginWithGoogle,
+        loginWithFacebook,
+        loginWithGithub,
+        pendingCredentialLink,
+        confirmPendingCredentialLink,
+        clearPendingCredentialLink,
+        sendPhoneLoginOtp,
+        confirmPhoneLoginOtp,
+        resetPhoneLoginState,
         loginWithEmail,
         loginWithAccount,
         registerWithEmail,

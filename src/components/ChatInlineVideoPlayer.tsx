@@ -88,7 +88,7 @@ const ChatInlineVideoPlayerComponent: React.FC<ChatInlineVideoPlayerProps> = ({
     (async () => {
       const foundBlob = await Promise.race([
         tryQuickIdb(),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 60)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 350)),
       ]);
       if (cancelled) return;
       if (foundBlob) {

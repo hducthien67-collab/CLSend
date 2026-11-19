@@ -424,7 +424,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-3 sm:p-4 bg-slate-950 text-slate-100 relative z-0 overflow-x-hidden overflow-y-auto font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
+    <div className="h-[100dvh] w-full flex flex-col items-center px-3 py-4 sm:p-6 bg-slate-950 text-slate-100 relative z-0 overflow-x-hidden overflow-y-auto font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
       {/* Living Silk Wave Ribbons & Floating Luminescent Starlight Background */}
       <SilkFabricBackground className="fixed inset-0 pointer-events-none -z-10" intensity="normal" showParticles={true} showGrid={true} />
 
@@ -432,7 +432,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-gradient-to-b from-emerald-500/10 via-teal-500/5 to-transparent blur-3xl pointer-events-none rounded-full" />
 
       {/* Main Container */}
-      <div className="w-full max-w-md my-auto relative z-10 py-4 sm:py-6 transition-all duration-300">
+      <div className="w-full max-w-md my-auto relative z-10 py-2 sm:py-4 shrink-0 transition-all duration-300">
         
         {/* Back to Landing Page Button */}
         {onBackToLanding && (
@@ -813,11 +813,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
 
                   {/* Quick multi-provider strip */}
                   <div className="pt-2 space-y-2.5">
-                    <div className="relative flex items-center justify-center">
-                      <div className="border-t border-slate-800 w-full" />
-                      <span className="bg-slate-900 px-2.5 text-[10px] text-slate-400 uppercase tracking-wider font-mono whitespace-nowrap">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex-1 border-t border-slate-800" />
+                      <span className="text-[10px] text-slate-400 uppercase tracking-wider font-mono whitespace-nowrap">
                         {pick('Hoặc đăng nhập bằng', 'Or continue with', '或通过以下方式登录')}
                       </span>
+                      <div className="flex-1 border-t border-slate-800" />
                     </div>
                     <div className="grid grid-cols-3 gap-2">
                       <button
@@ -1065,22 +1066,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBackToLanding }) => {
           )}
         </div>
 
-        {/* Back to landing link */}
-        {onBackToLanding && (
-          <div className="mt-3 text-center">
-            <button
-              type="button"
-              onClick={onBackToLanding}
-              className="text-xs text-slate-400 hover:text-emerald-400 transition-colors inline-flex items-center gap-1.5 cursor-pointer underline underline-offset-4"
-            >
-              <ArrowLeft className="w-3 h-3" />
-              <span>{pick('Trở về xem trang giới thiệu & tính năng', 'Back to overview & features page', '返回查看介绍与功能页面')}</span>
-            </button>
-          </div>
-        )}
-
         {/* Footer info note */}
-        <div className="mt-3 text-center text-[11px] text-slate-500">
+        <div className="mt-4 text-center text-[11px] text-slate-500">
           {pick('ClSend Relay • Mã hóa đầu cuối E2EE • Hoạt động đa nền tảng', 'ClSend Relay • End-to-End Encrypted E2EE • Cross-Platform', 'ClSend Relay • E2EE 端到端加密 • 多平台支持')}
         </div>
       </div>
